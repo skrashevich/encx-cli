@@ -3,8 +3,6 @@ package encx
 import (
 	"context"
 	"fmt"
-	"io"
-	"net/http"
 	"regexp"
 	"strconv"
 	"strings"
@@ -18,47 +16,15 @@ type TeamInfo struct {
 	Name   string `json:"name"`
 }
 
-// GetTeamDetails fetches the team details page and parses team information.
+// GetTeamDetails fetches the team details page and returns raw HTML.
 func (c *Client) GetTeamDetails(ctx context.Context, teamId int) (string, error) {
-	u := fmt.Sprintf("%s/Teams/TeamDetails.aspx?tid=%d", c.baseURL(), teamId)
-
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u, nil)
-	if err != nil {
-		return "", fmt.Errorf("encx: create team details request: %w", err)
-	}
-	c.setHeaders(req)
-
-	resp, err := c.httpClient.Do(req)
-	if err != nil {
-		return "", fmt.Errorf("encx: team details request: %w", err)
-	}
-	defer resp.Body.Close()
-
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return "", fmt.Errorf("encx: read team details body: %w", err)
-	}
-
-	return string(body), nil
+	return c.doGet(ctx, fmt.Sprintf("%s/Teams/TeamDetails.aspx?tid=%d", c.baseURL(), teamId))
 }
 
 // AcceptTeamInvitation accepts a team invitation by team ID.
 func (c *Client) AcceptTeamInvitation(ctx context.Context, teamId int) error {
-	u := fmt.Sprintf("%s/Teams/TeamDetails.aspx?action=accept_invitation&tid=%d", c.baseURL(), teamId)
-
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u, nil)
-	if err != nil {
-		return fmt.Errorf("encx: create accept invitation request: %w", err)
-	}
-	c.setHeaders(req)
-
-	resp, err := c.httpClient.Do(req)
-	if err != nil {
-		return fmt.Errorf("encx: accept invitation request: %w", err)
-	}
-	defer resp.Body.Close()
-
-	return nil
+	_, err := c.doGet(ctx, fmt.Sprintf("%s/Teams/TeamDetails.aspx?action=accept_invitation&tid=%d", c.baseURL(), teamId))
+	return err
 }
 
 // ParseTeamLinks extracts team IDs and names from an HTML page.
