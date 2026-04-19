@@ -5,6 +5,5 @@
 *.apk
 *.ipa
 /encli
-.DS_Store
 apks
 *.log
