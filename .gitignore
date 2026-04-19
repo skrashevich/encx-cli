@@ -4,7 +4,7 @@
 *-decompiled
 *.apk
 *.ipa
-encli
+/encli
 .DS_Store
 apks
 *.log
