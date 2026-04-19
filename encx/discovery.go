@@ -2,6 +2,7 @@ package encx
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
@@ -64,6 +65,38 @@ func (c *Client) fetchGames(ctx context.Context, u string, re *regexp.Regexp) ([
 	}
 
 	return games, nil
+}
+
+// GetGameList fetches the full game list via the JSON endpoint GET /home/?json=1.
+// Returns structured data with ComingGames and ActiveGames.
+func (c *Client) GetGameList(ctx context.Context) (*GameListResponse, error) {
+	u, err := url.Parse(c.baseURL() + "/home/")
+	if err != nil {
+		return nil, fmt.Errorf("encx: parse game list URL: %w", err)
+	}
+
+	q := u.Query()
+	q.Set("json", "1")
+	u.RawQuery = q.Encode()
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u.String(), nil)
+	if err != nil {
+		return nil, fmt.Errorf("encx: create game list request: %w", err)
+	}
+	c.setHeaders(req)
+
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("encx: game list request: %w", err)
+	}
+	defer resp.Body.Close()
+
+	var result GameListResponse
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return nil, fmt.Errorf("encx: decode game list: %w", err)
+	}
+
+	return &result, nil
 }
 
 // GetTimeoutToGame fetches the game page (HTML) and extracts the StartCounter value,

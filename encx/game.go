@@ -54,17 +54,19 @@ func (c *Client) GetGameModel(ctx context.Context, gameId int, formValues ...url
 }
 
 // SendCode submits a level code answer.
-func (c *Client) SendCode(ctx context.Context, gameId, levelId int, code string) (*GameModel, error) {
+func (c *Client) SendCode(ctx context.Context, gameId, levelId, levelNumber int, code string) (*GameModel, error) {
 	form := url.Values{}
 	form.Set("LevelId", strconv.Itoa(levelId))
+	form.Set("LevelNumber", strconv.Itoa(levelNumber))
 	form.Set("LevelAction.Answer", code)
 	return c.GetGameModel(ctx, gameId, form)
 }
 
 // SendBonusCode submits a bonus code answer.
-func (c *Client) SendBonusCode(ctx context.Context, gameId, levelId int, code string) (*GameModel, error) {
+func (c *Client) SendBonusCode(ctx context.Context, gameId, levelId, levelNumber int, code string) (*GameModel, error) {
 	form := url.Values{}
 	form.Set("LevelId", strconv.Itoa(levelId))
+	form.Set("LevelNumber", strconv.Itoa(levelNumber))
 	form.Set("BonusAction.Answer", code)
 	return c.GetGameModel(ctx, gameId, form)
 }
