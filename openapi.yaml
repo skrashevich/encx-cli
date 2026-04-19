@@ -21,12 +21,12 @@ servers:
         description: |
           Домен сервера Encounter. Допустимые паттерны:
           - quest.ua, *.quest.ua
-          - *.en.cx (напр. quest.en.cx, demo.en.cx, nef.en.cx)
+          - *.en.cx (напр. quest.en.cx, tech.en.cx, nef.en.cx)
           - *.encounter.cx
           - *.encounter.ru
         enum:
           - quest.en.cx
-          - demo.en.cx
+          - tech.en.cx
           - quest.ua
 
 tags:

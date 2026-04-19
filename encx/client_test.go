@@ -81,7 +81,7 @@ func TestGetDomainGames(t *testing.T) {
 		t.Fatalf("GetDomainGames failed: %v", err)
 	}
 	if len(games) == 0 {
-		t.Fatal("Expected at least one game on demo.en.cx, got 0")
+		t.Fatal("Expected at least one game on tech.en.cx, got 0")
 	}
 	for _, g := range games {
 		t.Logf("Game: %d - %s", g.GameId, g.Title)

@@ -52,7 +52,7 @@ func main() {
 			cmdIdx = i
 			break
 		}
-		// Skip flag value (e.g. -domain demo.en.cx)
+		// Skip flag value (e.g. -domain tech.en.cx)
 		if i+1 < len(os.Args) && !strings.HasPrefix(os.Args[i+1], "-") &&
 			strings.HasPrefix(os.Args[i], "-") && !strings.Contains(os.Args[i], "=") &&
 			os.Args[i] != "-insecure" && os.Args[i] != "-http" {
@@ -73,7 +73,7 @@ func main() {
 	fs := flag.NewFlagSet("encli", flag.ExitOnError)
 	cfg := &config{}
 
-	fs.StringVar(&cfg.domain, "domain", cmp.Or(os.Getenv("ENCX_DOMAIN"), "demo.en.cx"), "Encounter domain (env: ENCX_DOMAIN)")
+	fs.StringVar(&cfg.domain, "domain", cmp.Or(os.Getenv("ENCX_DOMAIN"), "tech.en.cx"), "Encounter domain (env: ENCX_DOMAIN)")
 	fs.StringVar(&cfg.login, "login", os.Getenv("ENCX_LOGIN"), "Login username (env: ENCX_LOGIN)")
 	fs.StringVar(&cfg.password, "password", os.Getenv("ENCX_PASSWORD"), "Login password (env: ENCX_PASSWORD)")
 	fs.IntVar(&cfg.gameId, "game-id", envInt("ENCX_GAME_ID", 0), "Game ID (env: ENCX_GAME_ID)")
@@ -155,7 +155,7 @@ Commands:
   hint        Request a penalty hint
 
 Global flags:
-  -domain      Encounter domain (default: demo.en.cx)
+  -domain      Encounter domain (default: tech.en.cx)
   -login       Login username
   -password    Login password
   -game-id     Game ID
@@ -163,7 +163,7 @@ Global flags:
   -http        Use plain HTTP instead of HTTPS
 
 Environment variables:
-  ENCX_DOMAIN     Domain (default: demo.en.cx)
+  ENCX_DOMAIN     Domain (default: tech.en.cx)
   ENCX_LOGIN      Login username
   ENCX_PASSWORD   Login password
   ENCX_GAME_ID    Game ID
