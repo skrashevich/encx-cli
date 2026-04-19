@@ -1,5 +1,12 @@
 # encx-cli
 
+<!-- badges:start -->
+[![GitHub stars](https://img.shields.io/github/stars/skrashevich/encx-cli?style=flat-square)](https://github.com/skrashevich/encx-cli/stargazers)
+[![Last commit](https://img.shields.io/github/last-commit/skrashevich/encx-cli?style=flat-square)](https://github.com/skrashevich/encx-cli/commits/main)
+[![License](https://img.shields.io/github/license/skrashevich/encx-cli?style=flat-square)](https://github.com/skrashevich/encx-cli/blob/main/LICENSE)
+<!-- badges:end -->
+
+
 `encx-cli` — это Go-клиент и CLI для API движка городских квестов Encounter (`en.cx`).
 
 Если короче: здесь есть и библиотека для встраивания в свой код, и консольная утилита, которой можно быстро залогиниться, посмотреть игру, прочитать задания и отправить код без браузера.
