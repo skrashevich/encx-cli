@@ -159,7 +159,7 @@ encli logout
 
 | Флаг | Env-переменная | Описание |
 |---|---|---|
-| `-domain` | `ENCX_DOMAIN` | Домен Encounter (по умолчанию: `demo.en.cx`) |
+| `-domain` | `ENCX_DOMAIN` | Домен Encounter (по умолчанию: `tech.en.cx`) |
 | `-login` | `ENCX_LOGIN` | Логин |
 | `-password` | `ENCX_PASSWORD` | Пароль |
 | `-game-id` | `ENCX_GAME_ID` | ID игры |
