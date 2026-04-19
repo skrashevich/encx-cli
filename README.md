@@ -1,22 +1,38 @@
-# encx — Go client for Encounter (en.cx) Game Engine API
+# encx-cli
 
-Go-клиент для взаимодействия с JSON API движка городских игр Encounter (en.cx).
+`encx-cli` — это Go-клиент и CLI для API движка городских квестов Encounter (`en.cx`).
+
+Если короче: здесь есть и библиотека для встраивания в свой код, и консольная утилита, которой можно быстро залогиниться, посмотреть игру, прочитать задания и отправить код без браузера.
+
+- Модуль: `github.com/skrashevich/encx-cli`
+- CLI: `cmd/encli`
+- Пакет-библиотека: `encx`
+- Тестовый домен для примеров и интеграционных тестов: `tech.en.cx`
+
+## Что внутри
+
+Проект пригодится в двух сценариях:
+
+- хотите написать свой тулинг поверх Encounter API — берите пакет `encx`;
+- хотите просто работать из терминала — ставьте `encli`.
 
 ## Установка
 
-### CLI-утилита
+### CLI
 
 ```sh
 go install github.com/skrashevich/encx-cli/cmd/encli@latest
 ```
 
-### Библиотека (как зависимость)
+### Библиотека
 
 ```sh
 go get github.com/skrashevich/encx-cli/encx
 ```
 
 ## Использование библиотеки
+
+Ниже минимальный пример: логинимся, смотрим список игр, читаем состояние и пробуем отправить код.
 
 ```go
 package main
@@ -30,7 +46,7 @@ import (
 )
 
 func main() {
-	client := encx.New("demo.en.cx", encx.WithInsecureTLS())
+	client := encx.New("tech.en.cx", encx.WithInsecureTLS())
 	ctx := context.Background()
 
 	resp, err := client.Login(ctx, "user", "password")
@@ -65,6 +81,8 @@ func main() {
 
 ### Опции клиента
 
+Можно подкрутить поведение клиента через опции:
+
 | Опция | Описание |
 |---|---|
 | `WithInsecureTLS()` | Пропустить проверку TLS-сертификата |
@@ -73,11 +91,20 @@ func main() {
 | `WithUserAgent(ua)` | Установить User-Agent |
 | `WithLang(lang)` | Язык запросов (по умолчанию: `ru`) |
 
-## CLI-утилита (encli)
+## CLI: `encli`
+
+`encli` полезен, когда нужно быстро дернуть API руками и не городить под это отдельный код.
+
+Типичный поток такой:
+
+1. залогиниться;
+2. выбрать игру;
+3. смотреть статус, задания и сообщения;
+4. отправлять коды, бонусы и запрашивать подсказки.
 
 ```sh
 # Авторизация (интерактивный ввод пароля)
-encli login -domain demo.en.cx -insecure
+encli login -domain tech.en.cx -insecure
 
 # Список игр
 encli games
@@ -109,7 +136,26 @@ encli -v
 encli logout
 ```
 
+### Команды CLI
+
+| Команда | Что делает |
+|---|---|
+| `login` | Логинится и сохраняет сессию |
+| `logout` | Чистит сохраненную сессию |
+| `games` | Показывает список игр через HTML-страницу домена |
+| `game-list` | Показывает список игр через JSON API |
+| `status` | Показывает текущее состояние игры |
+| `task` | Печатает текст текущего задания |
+| `messages` | Показывает сообщения от организаторов |
+| `enter` | Подает заявку на вход в игру |
+| `send-code` | Отправляет код уровня |
+| `send-bonus` | Отправляет бонусный код |
+| `hint` | Запрашивает штрафную подсказку |
+| `-v` | Показывает версию |
+
 ### Флаги и переменные окружения
+
+Почти все можно передавать либо через флаги, либо через env. Удобно, если гоняете команды часто.
 
 | Флаг | Env-переменная | Описание |
 |---|---|---|
@@ -120,13 +166,29 @@ encli logout
 | `-insecure` | `ENCX_INSECURE` | Пропустить проверку TLS-сертификата |
 | `-http` | — | Использовать HTTP вместо HTTPS |
 
+Пример:
+
+```sh
+export ENCX_DOMAIN=tech.en.cx
+export ENCX_LOGIN=my_login
+export ENCX_PASSWORD=my_password
+export ENCX_GAME_ID=12345
+
+encli login -insecure
+encli status
+```
+
 ### Сборка из исходников
+
+Если хотите собрать бинарник локально:
 
 ```sh
 go build -o encli ./cmd/encli/
 ```
 
 ## API
+
+Ниже краткая шпаргалка по основным методам, которые уже завернуты в клиент.
 
 | Метод | Endpoint | Описание |
 |---|---|---|
@@ -143,14 +205,14 @@ go build -o encli ./cmd/encli/
 | `GetTeamDetails` | `GET /Teams/TeamDetails.aspx?tid={id}` | Информация о команде |
 | `AcceptTeamInvitation` | `GET /Teams/TeamDetails.aspx?action=accept_invitation&tid={id}` | Принять приглашение |
 
-Подробная документация: [openapi.yaml](openapi.yaml)
+Подробности лежат в [openapi.yaml](openapi.yaml).
 
 ## Тесты
 
-Интеграционные тесты работают с реальным сервером `tech.en.cx`:
+Интеграционные тесты ходят в реальный сервер `tech.en.cx`:
 
 ```sh
 ENCX_INTEGRATION=1 go test ./encx/ -v -count=1
 ```
 
-Без `ENCX_INTEGRATION` запускаются только юнит-тесты.
+Если переменную `ENCX_INTEGRATION` не задавать, запустятся только юнит-тесты.
