@@ -1,4 +1,4 @@
-module github.com/svk/encx
+module github.com/skrashevich/encx-cli
 
 go 1.26
 

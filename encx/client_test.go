@@ -1,14 +1,13 @@
 package encx_test
 
 import (
-	"context"
 	"os"
 	"testing"
 
-	"github.com/svk/encx/encx"
+	"github.com/skrashevich/encx-cli/encx"
 )
 
-const testDomain = "demo.en.cx"
+const testDomain = "tech.en.cx"
 
 func testLogin() string {
 	if v := os.Getenv("ENCX_TEST_LOGIN"); v != "" {
@@ -37,7 +36,7 @@ func newTestClient() *encx.Client {
 
 func loginTestClient(t *testing.T, client *encx.Client) {
 	t.Helper()
-	resp, err := client.Login(context.Background(), testLogin(), testPassword())
+	resp, err := client.Login(t.Context(), testLogin(), testPassword())
 	if err != nil {
 		t.Fatalf("Login failed: %v", err)
 	}
@@ -50,7 +49,7 @@ func TestLogin(t *testing.T) {
 	skipIfNoIntegration(t)
 
 	client := newTestClient()
-	resp, err := client.Login(context.Background(), testLogin(), testPassword())
+	resp, err := client.Login(t.Context(), testLogin(), testPassword())
 	if err != nil {
 		t.Fatalf("Login failed: %v", err)
 	}
@@ -63,7 +62,7 @@ func TestLoginInvalidCredentials(t *testing.T) {
 	skipIfNoIntegration(t)
 
 	client := newTestClient()
-	resp, err := client.Login(context.Background(), "invalid_user_xxx", "wrong_pass")
+	resp, err := client.Login(t.Context(), "invalid_user_xxx", "wrong_pass")
 	if err != nil {
 		t.Fatalf("Login request failed: %v", err)
 	}
@@ -77,7 +76,7 @@ func TestGetDomainGames(t *testing.T) {
 	skipIfNoIntegration(t)
 
 	client := newTestClient()
-	games, err := client.GetDomainGames(context.Background())
+	games, err := client.GetDomainGames(t.Context())
 	if err != nil {
 		t.Fatalf("GetDomainGames failed: %v", err)
 	}
@@ -96,7 +95,7 @@ func TestGetGameModel(t *testing.T) {
 	loginTestClient(t, client)
 
 	// First get a game ID from the domain
-	games, err := client.GetDomainGames(context.Background())
+	games, err := client.GetDomainGames(t.Context())
 	if err != nil || len(games) == 0 {
 		t.Skip("No games available for testing")
 	}
@@ -104,7 +103,7 @@ func TestGetGameModel(t *testing.T) {
 	gid := games[0].GameId
 	t.Logf("Testing with game ID: %d (%s)", gid, games[0].Title)
 
-	model, err := client.GetGameModel(context.Background(), gid)
+	model, err := client.GetGameModel(t.Context(), gid)
 	if err != nil {
 		t.Fatalf("GetGameModel failed: %v", err)
 	}
@@ -157,7 +156,7 @@ func TestGetGameList(t *testing.T) {
 	client := newTestClient()
 	loginTestClient(t, client)
 
-	list, err := client.GetGameList(context.Background())
+	list, err := client.GetGameList(t.Context())
 	if err != nil {
 		t.Fatalf("GetGameList failed: %v", err)
 	}
