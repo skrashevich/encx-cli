@@ -1,6 +1,8 @@
 # Encounter (en.cx) Game Engine API
 
-Документация API движка Encounter, восстановленная из декомпиляции приложения EnApp v2.0.1 (net.necto68.enapp).
+Документация API движка Encounter, восстановленная из декомпиляции приложений:
+- **EnApp** v2.0.1 (net.necto68.enapp) — React Native
+- **EN+** v1.2.0 (com.encounter.enplus) — Expo/React Native + Kotlin, Hermes bytecode
 
 ## Общие сведения
 
@@ -470,6 +472,139 @@ var startCounter = match ? parseInt(match[1], 10) : null;
 ```
 
 Найденные координаты становятся кликабельными и открываются в навигационном приложении.
+
+---
+
+## 5. Вход в игру (оплата/подтверждение)
+
+### POST `/gameengines/encounter/makefee/Login.aspx`
+
+Вход в конкретную игру. На некоторых доменах вход может быть платным (списание внутренней валюты). Этот endpoint выполняет регистрацию участника в игре.
+
+**URL:** `http://{domain}/gameengines/encounter/makefee/Login.aspx`
+
+**Method:** `POST`
+
+**Обнаружен в:** EN+ v1.2.0
+
+**Примечание:** Точные параметры запроса и формат ответа требуют дополнительного исследования. Предположительно передаётся `gid` (Game ID) и session cookies.
+
+---
+
+## 6. Команды
+
+### GET `/Teams/TeamDetails.aspx?tid={teamId}`
+
+Получение страницы с деталями команды. Ответ — HTML, парсится клиентом.
+
+**URL:** `http://{domain}/Teams/TeamDetails.aspx?tid={teamId}`
+
+**Method:** `GET`
+
+**Query Parameters:**
+
+| Параметр | Тип | Описание |
+|---|---|---|
+| `tid` | integer | ID команды |
+
+**Парсинг:** EN+ извлекает данные команды из HTML с помощью regex:
+- `TeamDetails[^>]*>([^<]+)<\/a>` — имя команды
+- `TeamDetails\.aspx\?tid=(\d+)` — ID команды из ссылок
+
+### GET `/Teams/TeamDetails.aspx?action=accept_invitation&tid={teamId}`
+
+Принятие приглашения в команду.
+
+**URL:** `http://{domain}/Teams/TeamDetails.aspx?action=accept_invitation&tid={teamId}`
+
+**Method:** `GET`
+
+**Query Parameters:**
+
+| Параметр | Тип | Описание |
+|---|---|---|
+| `action` | string | `accept_invitation` |
+| `tid` | integer | ID команды |
+
+**Обнаружен в:** EN+ v1.2.0
+
+---
+
+## 7. Статистика игры
+
+### GET `/GameDetails.aspx?gid={gameId}`
+
+Получение страницы с деталями и статистикой игры. Ответ — HTML, парсится клиентом.
+
+**URL:** `http://{domain}/GameDetails.aspx?gid={gameId}`
+
+**Method:** `GET`
+
+**Query Parameters:**
+
+| Параметр | Тип | Описание |
+|---|---|---|
+| `gid` | integer | ID игры |
+
+**Данные, извлекаемые EN+ из HTML:**
+
+| Поле | Описание |
+|---|---|
+| `GameNum` | Номер игры на домене |
+| `GameTitle` | Название игры |
+| `Author` | Автор сценария |
+| `GameType` | Тип игры (Штурм, Схватка, и т.д.) |
+| `StartTime` | Время начала |
+| `PlayerCount` | Количество игроков |
+| `TotalLevels` | Общее количество уровней |
+| `TotalSectors` | Общее количество секторов |
+| `Sequence` | Тип последовательности уровней |
+
+### Статистика прохождения (gamestatistics)
+
+EN+ реализует детальную статистику прохождения игры с полями:
+
+| Поле | Описание |
+|---|---|
+| `stats.levels` | Данные по уровням |
+| `stats.teams` | Данные по командам |
+| `stats.players` | Данные по игрокам |
+| `stats.byLevel` | Статистика по уровням |
+| `stats.byOrder` | Статистика по порядку прохождения |
+| `stats.levelRank` | Ранг команды на каждом уровне |
+| `stats.bonusesPenalties` | Штрафы и бонусы |
+| `stats.closedEarlierBonuses` | Бонусы, закрытые раньше |
+| `stats.closedEarlierSectors` | Секторы, закрытые раньше |
+| `stats.diffWith` | Разница с другой командой |
+| `stats.adjustedMs` | Скорректированное время (мс) |
+| `stats.excludedLevels` | Исключённые уровни |
+| `stats.timeoutMarker` | Маркер таймаута |
+| `stats.totalCellBase` | Базовое значение ячейки |
+| `stats.fetchUserProfile` | Профиль пользователя |
+
+**Обнаружено в:** EN+ v1.2.0
+
+---
+
+## 8. Мониторинг и уведомления (EN+)
+
+EN+ реализует систему real-time мониторинга игрового состояния:
+
+### GameStateDiff
+
+Механизм дифф-обновлений состояния игры. Вместо полной перезагрузки модели, EN+ отслеживает изменения (`GameStateDiff`) для оптимизации обновлений UI.
+
+### GameStateNotification
+
+Локальные уведомления о событиях в игре:
+- Смена уровня
+- Доступность подсказок
+- Штрафные таймеры
+- Изменения в секторах/бонусах
+
+### Monitoring
+
+Режим наблюдения за игрой без активного участия. EN+ поддерживает `MonitoringAction` для отслеживания состояния игры в режиме зрителя.
 
 ---
 

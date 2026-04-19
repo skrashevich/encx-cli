@@ -36,6 +36,8 @@ tags:
     description: Игровые действия (получение состояния, отправка кодов)
   - name: discovery
     description: Обнаружение игр на домене
+  - name: teams
+    description: Управление командами
 
 paths:
   /login/signin:
@@ -166,6 +168,88 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/GameModel'
+
+  /gameengines/encounter/makefee/Login.aspx:
+    post:
+      operationId: enterGame
+      tags: [game]
+      summary: Войти в игру (оплата/подтверждение)
+      description: |
+        Регистрирует участника в игре. На некоторых доменах вход может быть платным.
+        Обнаружен в EN+ v1.2.0.
+      parameters:
+        - $ref: '#/components/parameters/JsonParam'
+        - $ref: '#/components/parameters/LangParam'
+      requestBody:
+        content:
+          application/x-www-form-urlencoded:
+            schema:
+              type: object
+              properties:
+                gid:
+                  type: integer
+                  description: ID игры
+      responses:
+        '200':
+          description: Результат входа в игру
+          content:
+            text/html:
+              schema:
+                type: string
+
+  /Teams/TeamDetails.aspx:
+    get:
+      operationId: getTeamDetails
+      tags: [teams]
+      summary: Получить детали команды или принять приглашение
+      description: |
+        Возвращает HTML-страницу с информацией о команде.
+        С параметром `action=accept_invitation` принимает приглашение в команду.
+        Обнаружен в EN+ v1.2.0.
+      parameters:
+        - name: tid
+          in: query
+          required: true
+          description: ID команды
+          schema:
+            type: integer
+        - name: action
+          in: query
+          description: Действие (accept_invitation для принятия приглашения)
+          schema:
+            type: string
+            enum: [accept_invitation]
+      responses:
+        '200':
+          description: HTML-страница с деталями команды
+          content:
+            text/html:
+              schema:
+                type: string
+
+  /GameDetails.aspx:
+    get:
+      operationId: getGameDetails
+      tags: [discovery]
+      summary: Получить детали и статистику игры
+      description: |
+        Возвращает HTML-страницу с информацией об игре,
+        включая статистику прохождения, список команд и уровней.
+        Обнаружен в EN+ v1.2.0.
+      parameters:
+        - name: gid
+          in: query
+          required: true
+          description: ID игры
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: HTML-страница с деталями игры
+          content:
+            text/html:
+              schema:
+                type: string
 
   /:
     get:

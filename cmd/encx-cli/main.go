@@ -6,6 +6,7 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"text/tabwriter"
@@ -26,7 +27,8 @@ func usage() {
 	fmt.Fprintf(os.Stderr, `Usage: encx-cli [flags] <command>
 
 Commands:
-  login       Authenticate with the Encounter server
+  login       Authenticate and save session
+  logout      Clear saved session
   games       List available games on the domain
   status      Show current game state
   send-code   Send a level code (first positional arg)
@@ -63,7 +65,10 @@ func main() {
 	switch cmd {
 	case "login":
 		cmdLogin(ctx, client)
+	case "logout":
+		cmdLogout()
 	case "games":
+		loadSession(client)
 		cmdGames(ctx, client)
 	case "status":
 		requireAuth(ctx, client)
@@ -84,9 +89,50 @@ func main() {
 	}
 }
 
+// --- Session persistence ---
+
+func sessionDir() string {
+	home, _ := os.UserHomeDir()
+	return filepath.Join(home, ".config", "encx-cli")
+}
+
+func sessionFile() string {
+	// Sanitize domain for filename
+	safe := strings.ReplaceAll(*domain, "/", "_")
+	safe = strings.ReplaceAll(safe, ":", "_")
+	return filepath.Join(sessionDir(), safe+".json")
+}
+
+func saveSession(client *encx.Client) {
+	data, err := client.ExportCookies()
+	if err != nil {
+		return
+	}
+	os.MkdirAll(sessionDir(), 0700)
+	os.WriteFile(sessionFile(), data, 0600)
+}
+
+func loadSession(client *encx.Client) bool {
+	data, err := os.ReadFile(sessionFile())
+	if err != nil {
+		return false
+	}
+	return client.ImportCookies(data) == nil
+}
+
+func clearSession() {
+	os.Remove(sessionFile())
+}
+
 func requireAuth(ctx context.Context, client *encx.Client) {
+	// Try saved session first
+	if loadSession(client) && *login == "" {
+		return
+	}
+
+	// Fall back to login with credentials
 	if *login == "" || *password == "" {
-		fatal("--login and --password are required")
+		fatal("No saved session. Run 'login' first, or pass --login and --password")
 	}
 	resp, err := client.Login(ctx, *login, *password)
 	if err != nil {
@@ -95,7 +141,10 @@ func requireAuth(ctx context.Context, client *encx.Client) {
 	if resp.Error != 0 {
 		fatal("Login error %d: %s", resp.Error, encx.LoginErrorText(resp.Error))
 	}
+	saveSession(client)
 }
+
+// --- Commands ---
 
 func cmdLogin(ctx context.Context, client *encx.Client) {
 	if *login == "" || *password == "" {
@@ -105,11 +154,17 @@ func cmdLogin(ctx context.Context, client *encx.Client) {
 	if err != nil {
 		fatal("Login failed: %v", err)
 	}
-	if resp.Error == 0 {
-		fmt.Println("Login successful")
-	} else {
+	if resp.Error != 0 {
 		fmt.Printf("Login error %d: %s\n", resp.Error, encx.LoginErrorText(resp.Error))
+		os.Exit(1)
 	}
+	saveSession(client)
+	fmt.Printf("Login successful (session saved to %s)\n", sessionFile())
+}
+
+func cmdLogout() {
+	clearSession()
+	fmt.Println("Session cleared")
 }
 
 func cmdGames(ctx context.Context, client *encx.Client) {
@@ -218,7 +273,6 @@ func cmdSendCode(ctx context.Context, client *encx.Client) {
 		fatal("Usage: encx-cli send-code <code>")
 	}
 
-	// First get the current level ID
 	model, err := client.GetGameModel(ctx, *gameId)
 	if err != nil {
 		fatal("Failed to get game model: %v", err)
