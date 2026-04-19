@@ -50,24 +50,5 @@ func (c *Client) EnterGame(ctx context.Context, gameId int) (string, error) {
 // GetGameDetails fetches the game details/statistics page.
 // Returns raw HTML that can be parsed for game information and stats.
 func (c *Client) GetGameDetails(ctx context.Context, gameId int) (string, error) {
-	u := fmt.Sprintf("%s/GameDetails.aspx?gid=%d", c.baseURL(), gameId)
-
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u, nil)
-	if err != nil {
-		return "", fmt.Errorf("encx: create game details request: %w", err)
-	}
-	c.setHeaders(req)
-
-	resp, err := c.httpClient.Do(req)
-	if err != nil {
-		return "", fmt.Errorf("encx: game details request: %w", err)
-	}
-	defer resp.Body.Close()
-
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return "", fmt.Errorf("encx: read game details body: %w", err)
-	}
-
-	return string(body), nil
+	return c.doGet(ctx, fmt.Sprintf("%s/GameDetails.aspx?gid=%d", c.baseURL(), gameId))
 }

@@ -1,7 +1,10 @@
 package encx
 
 import (
+	"context"
 	"crypto/tls"
+	"fmt"
+	"io"
 	"net/http"
 	"net/http/cookiejar"
 	"time"
@@ -97,4 +100,26 @@ func (c *Client) mobileBaseURL() string {
 
 func (c *Client) setHeaders(req *http.Request) {
 	req.Header.Set("User-Agent", c.userAgent)
+}
+
+// doGet performs a GET request and returns the response body as a string.
+func (c *Client) doGet(ctx context.Context, rawURL string) (string, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, rawURL, nil)
+	if err != nil {
+		return "", fmt.Errorf("encx: create request: %w", err)
+	}
+	c.setHeaders(req)
+
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return "", fmt.Errorf("encx: GET %s: %w", rawURL, err)
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return "", fmt.Errorf("encx: read response: %w", err)
+	}
+
+	return string(body), nil
 }
