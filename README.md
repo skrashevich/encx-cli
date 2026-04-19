@@ -178,9 +178,14 @@ encli login -insecure
 encli status
 ```
 
-### Сборка из исходников
+### Docker
 
-Если хотите собрать бинарник локально:
+```sh
+docker run --rm ghcr.io/skrashevich/encx-cli -v
+docker run --rm ghcr.io/skrashevich/encx-cli games -domain tech.en.cx
+```
+
+### Сборка из исходников
 
 ```sh
 go build -o encli ./cmd/encli/
