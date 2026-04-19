@@ -207,7 +207,7 @@ go build -o encli ./cmd/encli/
 
 Полная неофициальная (полученная методом реверс-инжиниринга) спецификация API в формате OpenAPI 3.1: [openapi.yaml](openapi.yaml).
 
-Поддерживаемые домены: `*.en.cx`, `*.encounter.cx`, `*.encounter.ru`, `questua.en.cx`.
+Поддерживаемые домены: `*.en.cx`, `*.encounter.cx`, `*.encounter.ru`. Домен `quest.ua` deprecated — мигрирован в `{city}questua.en.cx` (напр. `kharkov.quest.ua` -> `kharkovquestua.en.cx`).
 
 ## Тестовый домен
 

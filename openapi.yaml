@@ -20,10 +20,11 @@ servers:
         default: quest.en.cx
         description: |
           Домен сервера Encounter. Допустимые паттерны:
-          - questua.en.cx, *.questua.en.cx
           - *.en.cx (напр. quest.en.cx, tech.en.cx, nef.en.cx)
           - *.encounter.cx
           - *.encounter.ru
+          - quest.ua (deprecated, мигрирован в {city}questua.en.cx;
+            напр. kharkov.quest.ua -> kharkovquestua.en.cx)
         enum:
           - quest.en.cx
           - tech.en.cx
