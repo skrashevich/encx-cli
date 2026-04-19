@@ -24,6 +24,14 @@
 go install github.com/skrashevich/encx-cli/cmd/encli@latest
 ```
 
+### Docker
+
+```sh
+docker run --rm ghcr.io/skrashevich/encx-cli -v
+docker run --rm ghcr.io/skrashevich/encx-cli games -domain tech.en.cx
+```
+
+
 ### Библиотека
 
 ```sh
@@ -177,13 +185,6 @@ export ENCX_GAME_ID=12345
 
 encli login -insecure
 encli status
-```
-
-### Docker
-
-```sh
-docker run --rm ghcr.io/skrashevich/encx-cli -v
-docker run --rm ghcr.io/skrashevich/encx-cli games -domain tech.en.cx
 ```
 
 ### Сборка из исходников
