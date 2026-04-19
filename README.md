@@ -165,6 +165,7 @@ encli logout
 | `-game-id` | `ENCX_GAME_ID` | ID игры |
 | `-insecure` | `ENCX_INSECURE` | Пропустить проверку TLS-сертификата |
 | `-http` | — | Использовать HTTP вместо HTTPS |
+| `-json` | — | Выводить результат в формате JSON |
 
 Пример:
 
