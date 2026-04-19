@@ -45,7 +45,8 @@ jobs:
         run: |
           ext=""
           if [ "${{ matrix.goos }}" = "windows" ]; then ext=".exe"; fi
-          go build -ldflags="-s -w" -o encli-${{ matrix.goos }}-${{ matrix.goarch }}${ext} ./cmd/encli/
+          VERSION="${GITHUB_REF_NAME#v}"
+          go build -ldflags="-s -w -X main.version=${VERSION}" -o encli-${{ matrix.goos }}-${{ matrix.goarch }}${ext} ./cmd/encli/
 
       - uses: actions/upload-artifact@v4
         with:

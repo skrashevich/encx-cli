@@ -4,7 +4,8 @@ WORKDIR /src
 COPY go.mod go.sum ./
 RUN go mod download
 COPY . .
-RUN CGO_ENABLED=0 go build -ldflags="-s -w" -o /encli ./cmd/encli/
+ARG VERSION=dev
+RUN CGO_ENABLED=0 go build -ldflags="-s -w -X main.version=${VERSION}" -o /encli ./cmd/encli/
 
 FROM alpine:3.21
 RUN apk add --no-cache ca-certificates && adduser -D -u 10001 encli
