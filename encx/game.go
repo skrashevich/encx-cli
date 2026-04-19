@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"maps"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -25,11 +26,7 @@ func (c *Client) GetGameModel(ctx context.Context, gameId int, formValues ...url
 
 	merged := url.Values{}
 	for _, fv := range formValues {
-		for k, vs := range fv {
-			for _, v := range vs {
-				merged.Set(k, v)
-			}
-		}
+		maps.Copy(merged, fv)
 	}
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, u.String(), strings.NewReader(merged.Encode()))
