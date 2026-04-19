@@ -1,0 +1,484 @@
+openapi: 3.1.0
+info:
+  title: Encounter (en.cx) Game Engine API
+  description: |
+    API движка городских игр Encounter (en.cx), восстановленный из декомпиляции
+    приложения EnApp v2.0.1 (net.necto68.enapp).
+
+    Движок работает по HTTP (не HTTPS). Авторизация через session cookies.
+    Все запросы должны содержать заголовок `User-Agent`.
+  version: 1.0.0
+  contact:
+    name: Encounter Network
+    url: https://en.cx
+
+servers:
+  - url: http://{domain}
+    description: Encounter game server
+    variables:
+      domain:
+        default: quest.en.cx
+        description: |
+          Домен сервера Encounter. Допустимые паттерны:
+          - quest.ua, *.quest.ua
+          - *.en.cx (напр. quest.en.cx, demo.en.cx, nef.en.cx)
+          - *.encounter.cx
+          - *.encounter.ru
+        enum:
+          - quest.en.cx
+          - demo.en.cx
+          - quest.ua
+
+tags:
+  - name: auth
+    description: Авторизация пользователя
+  - name: game
+    description: Игровые действия (получение состояния, отправка кодов)
+  - name: discovery
+    description: Обнаружение игр на домене
+
+paths:
+  /login/signin:
+    post:
+      operationId: loginUser
+      tags: [auth]
+      summary: Авторизация пользователя
+      description: |
+        Авторизует пользователя на домене Encounter.
+        Сессия сохраняется через Set-Cookie в ответе.
+      parameters:
+        - $ref: '#/components/parameters/JsonParam'
+        - $ref: '#/components/parameters/LangParam'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LoginRequest'
+            example:
+              Login: player1
+              Password: secret123
+      responses:
+        '200':
+          description: Результат авторизации
+          headers:
+            Set-Cookie:
+              description: Session cookies для последующих запросов
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LoginResponse'
+              examples:
+                success:
+                  summary: Успешная авторизация
+                  value:
+                    Error: 0
+                    Message: ""
+                wrong_credentials:
+                  summary: Неверный логин/пароль
+                  value:
+                    Error: 2
+                    Message: "Неправильный логин или пароль."
+                bruteforce:
+                  summary: Обнаружен брутфорс
+                  value:
+                    Error: 9
+                    Message: "Действия пользователя расценены как брутфорс."
+
+  /gameengines/encounter/play/{gameId}:
+    post:
+      operationId: gameAction
+      tags: [game]
+      summary: Выполнить игровое действие
+      description: |
+        Основной endpoint для всех игровых действий:
+        - Получение текущего состояния игры (пустое тело)
+        - Отправка кода уровня (LevelAction.Answer)
+        - Отправка бонусного кода (BonusAction.Answer)
+
+        Данные в теле запроса кодируются через `qs.stringify`
+        (application/x-www-form-urlencoded).
+
+        Cookies сессии передаются автоматически (`withCredentials: true`).
+        Редиректы отключены (`maxRedirects: 0`).
+      parameters:
+        - $ref: '#/components/parameters/GameIdPath'
+        - $ref: '#/components/parameters/JsonParam'
+        - $ref: '#/components/parameters/LangParam'
+      requestBody:
+        required: false
+        content:
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/GameActionRequest'
+            examples:
+              poll:
+                summary: Polling (получение текущего состояния)
+                value: {}
+              send_code:
+                summary: Отправка кода уровня
+                value:
+                  LevelId: 100
+                  LevelAction.Answer: "КОД123"
+              send_bonus:
+                summary: Отправка бонусного кода
+                value:
+                  LevelId: 100
+                  BonusAction.Answer: "БОНУС456"
+      responses:
+        '200':
+          description: Модель игры
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GameModel'
+
+    get:
+      operationId: getGameModelWithParams
+      tags: [game]
+      summary: Получить модель игры (GET) / запросить штрафную подсказку
+      description: |
+        Альтернативный метод для получения модели игры.
+        Используется для запроса штрафных подсказок (pid + pact).
+
+        Параметры действия передаются через query string.
+      parameters:
+        - $ref: '#/components/parameters/GameIdPath'
+        - $ref: '#/components/parameters/JsonParam'
+        - $ref: '#/components/parameters/LangParam'
+        - name: pid
+          in: query
+          description: ID штрафной подсказки
+          schema:
+            type: integer
+        - name: pact
+          in: query
+          description: Действие с подсказкой (1 = запросить)
+          schema:
+            type: integer
+            enum: [1]
+      responses:
+        '200':
+          description: Модель игры
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GameModel'
+
+  /:
+    get:
+      operationId: getDomainGames
+      tags: [discovery]
+      summary: Получить список игр домена
+      description: |
+        Загружает главную страницу мобильной версии домена и парсит HTML
+        для извлечения списка доступных игр.
+
+        **URL:** `http://m.{domain}/` (с префиксом `m.`)
+
+        Из HTML извлекаются элементы `h1.gametitle a`:
+        - `title` — текст ссылки (название игры)
+        - `gameId` — число из атрибута href по паттерну `/details/(\d+)/`
+      servers:
+        - url: http://m.{domain}
+          variables:
+            domain:
+              default: quest.en.cx
+      responses:
+        '200':
+          description: HTML-страница с списком игр
+          content:
+            text/html:
+              schema:
+                type: string
+                description: |
+                  HTML мобильной версии. Парсится клиентом для извлечения
+                  списка игр из элементов `h1.gametitle a`.
+
+components:
+  parameters:
+    GameIdPath:
+      name: gameId
+      in: path
+      required: true
+      description: ID игры (целое число)
+      schema:
+        type: integer
+      example: 12345
+
+    JsonParam:
+      name: json
+      in: query
+      required: true
+      description: Запрос JSON-ответа (всегда `1`)
+      schema:
+        type: integer
+        const: 1
+
+    LangParam:
+      name: lang
+      in: query
+      required: true
+      description: Язык ответа
+      schema:
+        type: string
+        default: ru
+        enum: [ru]
+
+  schemas:
+    LoginRequest:
+      type: object
+      required: [Login, Password]
+      properties:
+        Login:
+          type: string
+          description: Логин пользователя на en.cx
+        Password:
+          type: string
+          description: Пароль пользователя
+          format: password
+
+    LoginResponse:
+      type: object
+      properties:
+        Error:
+          type: integer
+          description: |
+            Код ошибки авторизации:
+            - 0: Успешная авторизация
+            - 1: Превышено количество попыток (капча)
+            - 2: Неправильный логин или пароль
+            - 3: Пользователь в чёрном списке / кросс-доменная блокировка
+            - 4: Блокировка по IP в профиле
+            - 5: Ошибка на сервере
+            - 6: Не используется в JSON запросах
+            - 7: Пользователь заблокирован администратором
+            - 8: Новый пользователь не активирован
+            - 9: Обнаружен брутфорс (капча)
+            - 10: E-Mail не подтверждён
+          enum: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
+        Message:
+          type: string
+          description: Текстовое описание ошибки
+
+    GameActionRequest:
+      type: object
+      description: |
+        Параметры игрового действия. Все поля опциональны.
+        Пустой объект = polling (получение текущего состояния).
+      properties:
+        LevelId:
+          type: integer
+          description: ID текущего уровня (из Level.LevelId)
+        LevelNumber:
+          type: integer
+          description: Номер текущего уровня (отправляется при polling)
+        LevelAction.Answer:
+          type: string
+          description: Код (ответ) для прохождения уровня
+        BonusAction.Answer:
+          type: string
+          description: Код (ответ) для бонуса
+
+    GameModel:
+      type: object
+      description: Полная модель текущего состояния игры
+      properties:
+        Event:
+          type: integer
+          description: |
+            Код события:
+            - 0: Нормальное состояние (данные актуальны)
+            - 16, 18, 19, 20, 21, 22: Требуется повторный запрос
+            - Другие числа: Специальные события (показ LoadingView)
+            - Нечисловое: Ошибка авторизации (сессия истекла)
+        GameId:
+          type: integer
+          description: ID игры
+        UserId:
+          type: integer
+          description: ID авторизованного пользователя
+        LevelSequence:
+          type: integer
+          description: |
+            Тип последовательности уровней:
+            - 3: Свободная (можно выбирать уровень)
+            - Другие: Линейная последовательность
+        Levels:
+          type: array
+          description: Список всех уровней игры
+          items:
+            $ref: '#/components/schemas/LevelSummary'
+        Level:
+          $ref: '#/components/schemas/Level'
+        EngineAction:
+          $ref: '#/components/schemas/EngineAction'
+
+    LevelSummary:
+      type: object
+      properties:
+        LevelId:
+          type: integer
+        Number:
+          type: integer
+        Name:
+          type: string
+
+    Level:
+      type: object
+      description: Текущий активный уровень
+      properties:
+        LevelId:
+          type: integer
+          description: Уникальный ID уровня
+        Number:
+          type: integer
+          description: Порядковый номер уровня
+        Name:
+          type: string
+          description: Название уровня
+        Timeout:
+          type: integer
+          description: Общее время на уровень в секундах (0 = без таймера)
+        TimeoutSecondsRemain:
+          type: integer
+          description: Оставшееся время в секундах
+        TimeoutAward:
+          type: integer
+          description: Штраф/бонус за таймаут в секундах (отрицательное = штраф)
+        SectorsLeftToClose:
+          type: integer
+          description: Количество секторов, которые осталось закрыть
+        RequiredSectorsCount:
+          type: integer
+          description: Необходимое количество секторов для прохождения уровня
+        Sectors:
+          type: array
+          description: Список секторов
+          items:
+            $ref: '#/components/schemas/Sector'
+        Bonuses:
+          type: array
+          description: Список бонусов
+          items:
+            $ref: '#/components/schemas/Bonus'
+        PenaltyHelps:
+          type: array
+          description: Список штрафных подсказок
+          items:
+            $ref: '#/components/schemas/PenaltyHelp'
+        MixedActions:
+          type: array
+          description: Лог введённых кодов (всех игроков команды)
+          items:
+            $ref: '#/components/schemas/CodeAction'
+
+    Sector:
+      type: object
+      properties:
+        SectorId:
+          type: integer
+        Name:
+          type: string
+          description: Название сектора
+        IsAnswered:
+          type: boolean
+          description: Закрыт ли сектор
+        Answer:
+          type: string
+          description: Код сектора (виден только после закрытия)
+
+    Bonus:
+      type: object
+      properties:
+        BonusId:
+          type: integer
+        Name:
+          type: string
+          description: Название бонуса
+        IsAnswered:
+          type: boolean
+          description: Взят ли бонус
+
+    PenaltyHelp:
+      type: object
+      properties:
+        PenaltyHelpId:
+          type: integer
+          description: ID подсказки (используется как `pid` при запросе)
+        Number:
+          type: integer
+          description: Порядковый номер подсказки
+        RemainSeconds:
+          type: integer
+          description: Секунды до автоматического открытия
+        PenaltyComment:
+          type: string
+          description: Текст подсказки (пустой до открытия)
+        Penalty:
+          type: integer
+          description: Штрафные секунды за досрочное использование
+
+    CodeAction:
+      type: object
+      description: Запись в логе кодов (введённый код игроком команды)
+      properties:
+        ActionId:
+          type: integer
+          description: Уникальный ID действия
+        UserId:
+          type: integer
+          description: ID пользователя, отправившего код
+        Login:
+          type: string
+          description: Логин пользователя
+        Answer:
+          type: string
+          description: Введённый код
+        LocDateTime:
+          type: string
+          description: Время ввода кода (формат "YYYY-MM-DD HH:mm:ss")
+          example: "2020-01-15 23:45:12"
+        IsCorrect:
+          type: boolean
+          description: Верный ли код
+        Kind:
+          type: integer
+          description: Тип действия
+
+    EngineAction:
+      type: object
+      description: Результат последнего игрового действия
+      properties:
+        LevelAction:
+          type: object
+          properties:
+            IsCorrectAnswer:
+              type: ["boolean", "null"]
+              description: |
+                - true: последний код уровня верный
+                - false: последний код уровня неверный
+                - null: код не отправлялся
+        BonusAction:
+          type: object
+          properties:
+            IsCorrectAnswer:
+              type: ["boolean", "null"]
+              description: |
+                - true: последний бонусный код верный
+                - false: последний бонусный код неверный
+                - null: бонусный код не отправлялся
+
+  securitySchemes:
+    cookieAuth:
+      type: apiKey
+      in: cookie
+      name: SESSION_ID
+      description: |
+        Session cookie, полученный после успешной авторизации через /login/signin.
+        Передаётся автоматически с каждым запросом (withCredentials: true).
+
+security:
+  - cookieAuth: []

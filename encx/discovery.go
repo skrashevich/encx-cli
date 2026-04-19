@@ -1,0 +1,109 @@
+package encx
+
+import (
+	"context"
+	"fmt"
+	"io"
+	"net/http"
+	"net/url"
+	"regexp"
+	"strconv"
+	"strings"
+)
+
+var (
+	// Mobile format: <h1 class="gametitle"><a href="...details/{id}...">Title</a></h1>
+	gameTitleMobileRe = regexp.MustCompile(`(?i)<h1[^>]*class="gametitle"[^>]*>\s*<a[^>]*href="[^"]*details/(\d+)[^"]*"[^>]*>([^<]+)</a>`)
+	// Desktop format: <a ... ID="lnkGameTitle" href="/GameDetails.aspx?gid=12345">Title</a>
+	gameTitleDesktopRe = regexp.MustCompile(`(?i)<a[^>]*href="[^"]*gid=(\d+)[^"]*"[^>]*>([^<]+)</a>`)
+	// Matches "StartCounter":12345, in HTML/JSON response
+	startCounterRe = regexp.MustCompile(`"StartCounter"\s*:\s*(\d+)`)
+)
+
+// GetDomainGames fetches the domain's main page and parses the list of available games.
+// It first tries the mobile version (m.{domain}), then falls back to the desktop version.
+func (c *Client) GetDomainGames(ctx context.Context) ([]DomainGame, error) {
+	// Try mobile first, fall back to desktop
+	games, err := c.fetchGames(ctx, c.mobileBaseURL()+"/", gameTitleMobileRe)
+	if err == nil && len(games) > 0 {
+		return games, nil
+	}
+
+	return c.fetchGames(ctx, c.baseURL()+"/", gameTitleDesktopRe)
+}
+
+func (c *Client) fetchGames(ctx context.Context, u string, re *regexp.Regexp) ([]DomainGame, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u, nil)
+	if err != nil {
+		return nil, fmt.Errorf("encx: create domain games request: %w", err)
+	}
+	c.setHeaders(req)
+
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("encx: domain games request: %w", err)
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("encx: read domain games body: %w", err)
+	}
+
+	matches := re.FindAllSubmatch(body, -1)
+	seen := map[int]bool{}
+	games := make([]DomainGame, 0, len(matches))
+	for _, m := range matches {
+		id, err := strconv.Atoi(string(m[1]))
+		if err != nil || seen[id] {
+			continue
+		}
+		seen[id] = true
+		title := strings.TrimSpace(string(m[2]))
+		games = append(games, DomainGame{Title: title, GameId: id})
+	}
+
+	return games, nil
+}
+
+// GetTimeoutToGame fetches the game page (HTML) and extracts the StartCounter value,
+// which indicates seconds until the game starts. Returns nil if no counter is found.
+func (c *Client) GetTimeoutToGame(ctx context.Context, gameId int) (*int, error) {
+	u, err := url.Parse(fmt.Sprintf("%s/gameengines/encounter/play/%d", c.mobileBaseURL(), gameId))
+	if err != nil {
+		return nil, fmt.Errorf("encx: parse timeout URL: %w", err)
+	}
+
+	q := u.Query()
+	q.Set("lang", c.lang)
+	u.RawQuery = q.Encode()
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u.String(), nil)
+	if err != nil {
+		return nil, fmt.Errorf("encx: create timeout request: %w", err)
+	}
+	c.setHeaders(req)
+
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("encx: timeout request: %w", err)
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("encx: read timeout body: %w", err)
+	}
+
+	match := startCounterRe.FindSubmatch(body)
+	if match == nil {
+		return nil, nil
+	}
+
+	val, err := strconv.Atoi(string(match[1]))
+	if err != nil {
+		return nil, nil
+	}
+
+	return &val, nil
+}
