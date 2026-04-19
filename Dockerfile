@@ -7,8 +7,6 @@ COPY . .
 ARG VERSION=dev
 RUN CGO_ENABLED=0 go build -ldflags="-s -w -X main.version=${VERSION}" -o /encli ./cmd/encli/
 
-FROM alpine:3.21
-RUN apk add --no-cache ca-certificates && adduser -D -u 10001 encli
+FROM gcr.io/distroless/static:nonroot
 COPY --from=builder /encli /usr/local/bin/encli
-USER 10001
 ENTRYPOINT ["encli"]
