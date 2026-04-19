@@ -1,6 +1,7 @@
 package encx_test
 
 import (
+	"encoding/json"
 	"os"
 	"testing"
 
@@ -148,6 +149,171 @@ func TestEventText(t *testing.T) {
 			t.Errorf("EventText(%d) = %q, want %q", tt.code, got, tt.want)
 		}
 	}
+}
+
+// --- JSON serialization unit tests ---
+
+func TestLoginResponseJSON(t *testing.T) {
+	resp := encx.LoginResponse{Error: 0, Message: "OK"}
+	data, err := json.Marshal(resp)
+	if err != nil {
+		t.Fatalf("Marshal LoginResponse: %v", err)
+	}
+	var parsed map[string]any
+	if err := json.Unmarshal(data, &parsed); err != nil {
+		t.Fatalf("Unmarshal LoginResponse: %v", err)
+	}
+	if parsed["Error"].(float64) != 0 {
+		t.Errorf("Expected Error=0, got %v", parsed["Error"])
+	}
+}
+
+func TestGameModelJSON(t *testing.T) {
+	model := encx.GameModel{
+		GameId:    123,
+		GameTitle: "Test Game",
+		Level: &encx.Level{
+			LevelId: 1,
+			Number:  1,
+			Name:    "Level 1",
+			Task:    &encx.LevelTask{TaskText: "Do something"},
+		},
+	}
+	data, err := json.Marshal(model)
+	if err != nil {
+		t.Fatalf("Marshal GameModel: %v", err)
+	}
+	var parsed map[string]any
+	if err := json.Unmarshal(data, &parsed); err != nil {
+		t.Fatalf("Unmarshal GameModel: %v", err)
+	}
+	if parsed["GameId"].(float64) != 123 {
+		t.Errorf("Expected GameId=123, got %v", parsed["GameId"])
+	}
+	if parsed["GameTitle"].(string) != "Test Game" {
+		t.Errorf("Expected GameTitle='Test Game', got %v", parsed["GameTitle"])
+	}
+	level := parsed["Level"].(map[string]any)
+	if level["Name"].(string) != "Level 1" {
+		t.Errorf("Expected Level.Name='Level 1', got %v", level["Name"])
+	}
+}
+
+func TestDomainGameJSON(t *testing.T) {
+	games := []encx.DomainGame{
+		{Title: "Game A", GameId: 1},
+		{Title: "Game B", GameId: 2},
+	}
+	data, err := json.Marshal(games)
+	if err != nil {
+		t.Fatalf("Marshal DomainGame slice: %v", err)
+	}
+	var parsed []map[string]any
+	if err := json.Unmarshal(data, &parsed); err != nil {
+		t.Fatalf("Unmarshal DomainGame slice: %v", err)
+	}
+	if len(parsed) != 2 {
+		t.Fatalf("Expected 2 games, got %d", len(parsed))
+	}
+	if parsed[0]["title"].(string) != "Game A" {
+		t.Errorf("Expected title='Game A', got %v", parsed[0]["title"])
+	}
+}
+
+func TestGameListResponseJSON(t *testing.T) {
+	list := encx.GameListResponse{
+		ActiveGames: []encx.GameInfo{{GameID: 10, Title: "Active"}},
+		ComingGames: []encx.GameInfo{{GameID: 20, Title: "Coming"}},
+	}
+	data, err := json.Marshal(list)
+	if err != nil {
+		t.Fatalf("Marshal GameListResponse: %v", err)
+	}
+	var parsed map[string]any
+	if err := json.Unmarshal(data, &parsed); err != nil {
+		t.Fatalf("Unmarshal GameListResponse: %v", err)
+	}
+	active := parsed["ActiveGames"].([]any)
+	if len(active) != 1 {
+		t.Errorf("Expected 1 active game, got %d", len(active))
+	}
+	coming := parsed["ComingGames"].([]any)
+	if len(coming) != 1 {
+		t.Errorf("Expected 1 coming game, got %d", len(coming))
+	}
+}
+
+// --- Integration tests for JSON output ---
+
+func TestLoginJSON(t *testing.T) {
+	skipIfNoIntegration(t)
+
+	client := newTestClient()
+	resp, err := client.Login(t.Context(), testLogin(), testPassword())
+	if err != nil {
+		t.Fatalf("Login failed: %v", err)
+	}
+	data, err := json.Marshal(resp)
+	if err != nil {
+		t.Fatalf("Marshal login response: %v", err)
+	}
+	if !json.Valid(data) {
+		t.Fatal("Login response is not valid JSON")
+	}
+	t.Logf("Login JSON: %s", data)
+}
+
+func TestGetDomainGamesJSON(t *testing.T) {
+	skipIfNoIntegration(t)
+
+	client := newTestClient()
+	games, err := client.GetDomainGames(t.Context())
+	if err != nil {
+		t.Fatalf("GetDomainGames failed: %v", err)
+	}
+	data, err := json.Marshal(games)
+	if err != nil {
+		t.Fatalf("Marshal games: %v", err)
+	}
+	if !json.Valid(data) {
+		t.Fatal("Games response is not valid JSON")
+	}
+	// Verify it's a JSON array
+	var arr []any
+	if err := json.Unmarshal(data, &arr); err != nil {
+		t.Fatalf("Expected JSON array: %v", err)
+	}
+	t.Logf("Got %d games as JSON", len(arr))
+}
+
+func TestGetGameListJSON(t *testing.T) {
+	skipIfNoIntegration(t)
+
+	client := newTestClient()
+	loginTestClient(t, client)
+
+	list, err := client.GetGameList(t.Context())
+	if err != nil {
+		t.Fatalf("GetGameList failed: %v", err)
+	}
+	data, err := json.Marshal(list)
+	if err != nil {
+		t.Fatalf("Marshal game list: %v", err)
+	}
+	if !json.Valid(data) {
+		t.Fatal("GameList response is not valid JSON")
+	}
+	var parsed map[string]any
+	if err := json.Unmarshal(data, &parsed); err != nil {
+		t.Fatalf("Expected JSON object: %v", err)
+	}
+	if _, ok := parsed["ComingGames"]; !ok {
+		t.Error("Expected ComingGames field in JSON")
+	}
+	if _, ok := parsed["ActiveGames"]; !ok {
+		t.Error("Expected ActiveGames field in JSON")
+	}
+	t.Logf("GameList JSON has %d active, %d coming", len(list.ActiveGames), len(list.ComingGames))
 }
 
 func TestGetGameList(t *testing.T) {

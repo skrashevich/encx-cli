@@ -5,6 +5,7 @@ import (
 	"bufio"
 	"cmp"
 	"context"
+	"encoding/json"
 	"flag"
 	"fmt"
 	"os"
@@ -20,16 +21,20 @@ import (
 	"github.com/skrashevich/encx-cli/encx"
 )
 
-var version = "dev"
+var (
+	version  = "dev"
+	jsonMode bool
+)
 
 // Config holds parsed CLI configuration.
 type config struct {
-	domain   string
-	login    string
-	password string
-	gameId   int
-	insecure bool
-	useHTTP  bool
+	domain     string
+	login      string
+	password   string
+	gameId     int
+	insecure   bool
+	useHTTP    bool
+	jsonOutput bool
 }
 
 func main() {
@@ -79,9 +84,11 @@ func main() {
 	fs.IntVar(&cfg.gameId, "game-id", envInt("ENCX_GAME_ID", 0), "Game ID (env: ENCX_GAME_ID)")
 	fs.BoolVar(&cfg.insecure, "insecure", envBool("ENCX_INSECURE"), "Skip TLS verification (env: ENCX_INSECURE)")
 	fs.BoolVar(&cfg.useHTTP, "http", false, "Use plain HTTP instead of HTTPS")
+	fs.BoolVar(&cfg.jsonOutput, "json", false, "Output results as JSON")
 
 	fs.Usage = func() { printCommandHelp(cmd) }
 	fs.Parse(args)
+	jsonMode = cfg.jsonOutput
 
 	var opts []encx.Option
 	if cfg.insecure {
@@ -102,10 +109,10 @@ func main() {
 		cmdLogout(cfg)
 	case "games":
 		loadSession(cfg, client)
-		cmdGames(ctx, client)
+		cmdGames(ctx, cfg, client)
 	case "game-list":
 		loadSession(cfg, client)
-		cmdGameList(ctx, client)
+		cmdGameList(ctx, cfg, client)
 	case "status":
 		requireAuth(ctx, cfg, client)
 		cmdStatus(ctx, cfg, client)
@@ -288,18 +295,30 @@ func cmdLogin(ctx context.Context, cfg *config, client *encx.Client) {
 		fatal("Login error %d: %s", resp.Error, encx.LoginErrorText(resp.Error))
 	}
 	saveSession(cfg, client)
+	if cfg.jsonOutput {
+		outputJSON(map[string]any{"success": true, "session_file": sessionFile(cfg)})
+		return
+	}
 	fmt.Printf("Login successful (session saved to %s)\n", sessionFile(cfg))
 }
 
 func cmdLogout(cfg *config) {
 	os.Remove(sessionFile(cfg))
+	if cfg.jsonOutput {
+		outputJSON(map[string]any{"success": true})
+		return
+	}
 	fmt.Println("Session cleared")
 }
 
-func cmdGames(ctx context.Context, client *encx.Client) {
+func cmdGames(ctx context.Context, cfg *config, client *encx.Client) {
 	games, err := client.GetDomainGames(ctx)
 	if err != nil {
 		fatal("Failed to get games: %v", err)
+	}
+	if cfg.jsonOutput {
+		outputJSON(games)
+		return
 	}
 	if len(games) == 0 {
 		fmt.Println("No games found")
@@ -314,10 +333,14 @@ func cmdGames(ctx context.Context, client *encx.Client) {
 	w.Flush()
 }
 
-func cmdGameList(ctx context.Context, client *encx.Client) {
+func cmdGameList(ctx context.Context, cfg *config, client *encx.Client) {
 	list, err := client.GetGameList(ctx)
 	if err != nil {
 		fatal("Failed to get game list: %v", err)
+	}
+	if cfg.jsonOutput {
+		outputJSON(list)
+		return
 	}
 
 	w := tabwriter.NewWriter(os.Stdout, 0, 4, 2, ' ', 0)
@@ -358,6 +381,11 @@ func cmdStatus(ctx context.Context, cfg *config, client *encx.Client) {
 	model, err := client.GetGameModel(ctx, cfg.gameId)
 	if err != nil {
 		fatal("Failed to get game model: %v", err)
+	}
+
+	if cfg.jsonOutput {
+		outputJSON(model)
+		return
 	}
 
 	eventCode := parseEventCode(model.Event)
@@ -508,6 +536,10 @@ func cmdTask(ctx context.Context, cfg *config, client *encx.Client) {
 		fatal("No active level")
 	}
 	l := model.Level
+	if cfg.jsonOutput {
+		outputJSON(map[string]any{"level": l.Number, "name": l.Name, "task": l.Task})
+		return
+	}
 	fmt.Printf("Level %d: %s\n\n", l.Number, l.Name)
 	if l.Task == nil || l.Task.TaskText == "" {
 		fmt.Println("No task text")
@@ -525,6 +557,10 @@ func cmdMessages(ctx context.Context, cfg *config, client *encx.Client) {
 	if model.Level == nil {
 		fatal("No active level")
 	}
+	if cfg.jsonOutput {
+		outputJSON(model.Level.Messages)
+		return
+	}
 	if len(model.Level.Messages) == 0 {
 		fmt.Println("No messages")
 		return
@@ -536,9 +572,13 @@ func cmdMessages(ctx context.Context, cfg *config, client *encx.Client) {
 
 func cmdEnter(ctx context.Context, cfg *config, client *encx.Client) {
 	requireGameId(cfg)
-	_, err := client.EnterGame(ctx, cfg.gameId)
+	body, err := client.EnterGame(ctx, cfg.gameId)
 	if err != nil {
 		fatal("Failed to enter game: %v", err)
+	}
+	if cfg.jsonOutput {
+		outputJSON(map[string]any{"success": true, "body": body})
+		return
 	}
 	fmt.Println("Enter game request sent. Use 'encli status' to check game state.")
 }
@@ -562,6 +602,10 @@ func cmdSendCode(ctx context.Context, cfg *config, client *encx.Client, args []s
 	if err != nil {
 		fatal("Failed to send code: %v", err)
 	}
+	if cfg.jsonOutput {
+		outputJSON(result.EngineAction)
+		return
+	}
 	printActionResult(result, "Level")
 }
 
@@ -584,6 +628,10 @@ func cmdSendBonus(ctx context.Context, cfg *config, client *encx.Client, args []
 	if err != nil {
 		fatal("Failed to send bonus code: %v", err)
 	}
+	if cfg.jsonOutput {
+		outputJSON(result.EngineAction)
+		return
+	}
 	printActionResult(result, "Bonus")
 }
 
@@ -600,6 +648,10 @@ func cmdHint(ctx context.Context, cfg *config, client *encx.Client, args []strin
 	model, err := client.GetPenaltyHint(ctx, cfg.gameId, pid)
 	if err != nil {
 		fatal("Failed to request hint: %v", err)
+	}
+	if cfg.jsonOutput {
+		outputJSON(model)
+		return
 	}
 	fmt.Println("Penalty hint requested")
 	if model.Level != nil {
@@ -730,8 +782,19 @@ func formatDuration(seconds int) string {
 	return fmt.Sprintf("%dm%02ds", m, s)
 }
 
+func outputJSON(v any) {
+	enc := json.NewEncoder(os.Stdout)
+	enc.SetIndent("", "  ")
+	enc.Encode(v)
+}
+
 func fatal(format string, args ...any) {
-	fmt.Fprintf(os.Stderr, format+"\n", args...)
+	msg := fmt.Sprintf(format, args...)
+	if jsonMode {
+		outputJSON(map[string]string{"error": msg})
+		os.Exit(1)
+	}
+	fmt.Fprintln(os.Stderr, msg)
 	os.Exit(1)
 }
 
