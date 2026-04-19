@@ -205,11 +205,17 @@ go build -o encli ./cmd/encli/
 | `GetTeamDetails` | `GET /Teams/TeamDetails.aspx?tid={id}` | Информация о команде |
 | `AcceptTeamInvitation` | `GET /Teams/TeamDetails.aspx?action=accept_invitation&tid={id}` | Принять приглашение |
 
-Подробности лежат в [openapi.yaml](openapi.yaml).
+Полная неофициальная (полученная методом реверс-инжиниринга) спецификация API в формате OpenAPI 3.1: [openapi.yaml](openapi.yaml).
+
+Поддерживаемые домены: `*.en.cx`, `*.encounter.cx`, `*.encounter.ru`, `quest.ua`.
+
+## Тестовый домен
+
+Для тестирования собственных разработок предусмотрен специализированный домен `tech.en.cx`. Чтобы получить на нём права создания игр (исключительно в технологических целях) — напишите в [техподдержку сети](https://world.en.cx/UserDetails.aspx?uid=7).
 
 ## Тесты
 
-Интеграционные тесты ходят в реальный сервер `tech.en.cx`:
+Интеграционные тесты ходят в `tech.en.cx`:
 
 ```sh
 ENCX_INTEGRATION=1 go test ./encx/ -v -count=1
