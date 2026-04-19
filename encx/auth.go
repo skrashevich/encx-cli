@@ -7,12 +7,15 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
+	"strconv"
 )
 
 // Login authenticates the user on the Encounter domain.
 // On success (Error == 0), session cookies are stored in the client's cookie jar
 // and used for subsequent requests.
-func (c *Client) Login(ctx context.Context, login, password string) (*LoginResponse, error) {
+//
+// Optional LoginOptions can be passed to specify network or CAPTCHA digits.
+func (c *Client) Login(ctx context.Context, login, password string, opts ...LoginOptions) (*LoginResponse, error) {
 	u, err := url.Parse(c.baseURL() + "/login/signin")
 	if err != nil {
 		return nil, fmt.Errorf("encx: parse login URL: %w", err)
@@ -23,10 +26,22 @@ func (c *Client) Login(ctx context.Context, login, password string) (*LoginRespo
 	q.Set("lang", c.lang)
 	u.RawQuery = q.Encode()
 
-	body, err := json.Marshal(map[string]string{
+	payload := map[string]string{
 		"Login":    login,
 		"Password": password,
-	})
+	}
+
+	if len(opts) > 0 {
+		opt := opts[0]
+		if opt.Network > 0 {
+			payload["ddlNetwork"] = strconv.Itoa(opt.Network)
+		}
+		if opt.MagicNumbers != "" {
+			payload["MagicNumbers"] = opt.MagicNumbers
+		}
+	}
+
+	body, err := json.Marshal(payload)
 	if err != nil {
 		return nil, fmt.Errorf("encx: marshal login body: %w", err)
 	}

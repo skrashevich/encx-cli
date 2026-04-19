@@ -131,3 +131,41 @@ func TestLoginErrorText(t *testing.T) {
 		}
 	}
 }
+
+func TestEventText(t *testing.T) {
+	tests := []struct {
+		code int
+		want string
+	}{
+		{0, "Игра в процессе"},
+		{6, "Игра завершена"},
+		{17, "Игра окончена"},
+		{22, "Таймаут уровня"},
+		{-1, "Неизвестный статус"},
+	}
+	for _, tt := range tests {
+		got := encx.EventText(tt.code)
+		if got != tt.want {
+			t.Errorf("EventText(%d) = %q, want %q", tt.code, got, tt.want)
+		}
+	}
+}
+
+func TestGetGameList(t *testing.T) {
+	skipIfNoIntegration(t)
+
+	client := newTestClient()
+	loginTestClient(t, client)
+
+	list, err := client.GetGameList(context.Background())
+	if err != nil {
+		t.Fatalf("GetGameList failed: %v", err)
+	}
+	t.Logf("Active games: %d, Coming games: %d", len(list.ActiveGames), len(list.ComingGames))
+	for _, g := range list.ActiveGames {
+		t.Logf("Active: %d - %s (type=%d, zone=%d)", g.GameID, g.Title, g.GameTypeID, g.ZoneId)
+	}
+	for _, g := range list.ComingGames {
+		t.Logf("Coming: %d - %s (type=%d, zone=%d)", g.GameID, g.Title, g.GameTypeID, g.ZoneId)
+	}
+}

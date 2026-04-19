@@ -4,5 +4,7 @@
 *-decompiled
 *.apk
 *.ipa
-./encx-cli
+encli
 .DS_Store
+apks
+*.log
