@@ -5,3 +5,4 @@
 *.apk
 *.ipa
 encx-cli
+.DS_Store
