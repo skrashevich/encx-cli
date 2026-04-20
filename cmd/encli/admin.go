@@ -473,6 +473,31 @@ func cmdAdminDeleteCorrection(ctx context.Context, cfg *config, client *encx.Cli
 	fmt.Printf("Correction %s deleted\n", args[0])
 }
 
+func cmdAdminCopyGame(ctx context.Context, cfg *config, client *encx.Client, args []string) {
+	requireGameId(cfg)
+	if len(args) == 0 {
+		fatal("Usage: encli admin-copy-game -game-id <source-id> <target-id>")
+	}
+	targetId, err := strconv.Atoi(args[0])
+	if err != nil || targetId <= 0 {
+		fatal("Invalid target game ID: %s", args[0])
+	}
+
+	progress := func(msg string) {
+		if !cfg.jsonOutput {
+			fmt.Println(msg)
+		}
+	}
+
+	if err := client.AdminCopyGame(ctx, cfg.gameId, targetId, progress); err != nil {
+		fatal("Failed to copy game: %v", err)
+	}
+
+	if cfg.jsonOutput {
+		outputJSON(map[string]any{"success": true, "source": cfg.gameId, "target": targetId})
+	}
+}
+
 // parseHMS parses a time string in format "HH:MM:SS" or "MM:SS" or "SS".
 func parseHMS(s string) (h, m, sec int) {
 	parts := strings.Split(s, ":")

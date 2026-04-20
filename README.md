@@ -234,6 +234,9 @@ encli admin-teams -game-id 12345
 encli admin-corrections -game-id 12345
 encli admin-add-correction -game-id 12345 "Team Name" bonus 0:10:00 0 "за красоту"
 encli admin-delete-correction -game-id 12345 444
+
+# Копирование игры целиком (из 12345 в 67890)
+encli admin-copy-game -game-id 12345 67890
 ```
 
 ### Команды CLI
@@ -281,6 +284,7 @@ encli admin-delete-correction -game-id 12345 444
 | `admin-corrections` | Показывает начисления бонусного/штрафного времени |
 | `admin-add-correction` | Добавляет начисление времени |
 | `admin-delete-correction` | Удаляет начисление по ID |
+| `admin-copy-game` | Копирует всю игру (уровни, настройки, бонусы, секторы, подсказки) в другую |
 
 ### Флаги и переменные окружения
 
@@ -356,6 +360,7 @@ go build -o encli ./cmd/encli/
 | `AdminGetCorrections` | `GET /GameBonusPenaltyTime.aspx` | Список начислений времени |
 | `AdminAddCorrection` | `POST /GameBonusPenaltyTime.aspx?action=save` | Добавление начисления |
 | `AdminDeleteCorrection` | `GET /GameBonusPenaltyTime.aspx?action=delete` | Удаление начисления |
+| `AdminCopyGame` | (комбинированный) | Полное копирование игры (уровни, настройки, бонусы, секторы, подсказки) |
 
 Полная неофициальная (полученная методом реверс-инжиниринга) спецификация API в формате OpenAPI 3.1: [openapi.yaml](openapi.yaml).
 
