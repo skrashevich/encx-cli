@@ -182,6 +182,58 @@ encli -v
 
 # Выход
 encli logout
+
+# --- Admin-команды ---
+
+# Список уровней с ID
+encli admin-levels -game-id 12345
+
+# Создать 3 уровня
+encli admin-create-levels -game-id 12345 3
+
+# Удалить уровень №5
+encli admin-delete-level -game-id 12345 5
+
+# Переименовать уровень (ID из admin-levels)
+encli admin-rename-level -game-id 12345 67890 "Новое название"
+
+# Установить автопереход 1ч 30мин с штрафом 15мин
+encli admin-set-autopass -game-id 12345 1 1:30:00 0:15:00
+
+# Блокировка: 3 попытки за 1 минуту, на игрока
+encli admin-set-block -game-id 12345 1 3 0:01:00 player
+
+# Создать бонус (уровень 1, level-id 67890, название, ответы)
+encli admin-create-bonus -game-id 12345 1 67890 "Бонус 1" "ответ1" "ответ2"
+
+# Удалить бонус
+encli admin-delete-bonus -game-id 12345 1 111
+
+# Создать сектор
+encli admin-create-sector -game-id 12345 1 "Сектор А" "код1" "код2"
+
+# Удалить сектор
+encli admin-delete-sector -game-id 12345 1 222
+
+# Создать подсказку (откроется через 30 минут)
+encli admin-create-hint -game-id 12345 1 0:30:00 "Текст подсказки"
+
+# Удалить подсказку
+encli admin-delete-hint -game-id 12345 1 333
+
+# Создать задание
+encli admin-create-task -game-id 12345 1 "Текст задания уровня"
+
+# Установить имя и комментарий уровня
+encli admin-set-comment -game-id 12345 1 "Название" "Комментарий для орга"
+
+# Список команд в игре
+encli admin-teams -game-id 12345
+
+# Начисления бонусного/штрафного времени
+encli admin-corrections -game-id 12345
+encli admin-add-correction -game-id 12345 "Team Name" bonus 0:10:00 0 "за красоту"
+encli admin-delete-correction -game-id 12345 444
 ```
 
 ### Команды CLI
@@ -206,6 +258,29 @@ encli logout
 | `hint` | Запрашивает штрафную подсказку |
 | `game-stats` | Показывает статистику игры (уровни, команды, результаты) |
 | `-v` | Показывает версию |
+
+**Admin-команды (требуют прав редактора игры):**
+
+| Команда | Что делает |
+|---|---|
+| `admin-levels` | Показывает все уровни с их ID (админка) |
+| `admin-create-levels` | Создаёт указанное количество новых уровней |
+| `admin-delete-level` | Удаляет уровень по номеру |
+| `admin-rename-level` | Переименовывает уровень |
+| `admin-set-autopass` | Устанавливает таймер автоперехода |
+| `admin-set-block` | Настраивает блокировку ответов |
+| `admin-create-bonus` | Создаёт бонус на уровне |
+| `admin-delete-bonus` | Удаляет бонус по ID |
+| `admin-create-sector` | Создаёт сектор на уровне |
+| `admin-delete-sector` | Удаляет сектор по ID |
+| `admin-create-hint` | Создаёт подсказку на уровне |
+| `admin-delete-hint` | Удаляет подсказку по ID |
+| `admin-create-task` | Создаёт задание на уровне |
+| `admin-set-comment` | Устанавливает название и комментарий уровня |
+| `admin-teams` | Показывает команды в игре |
+| `admin-corrections` | Показывает начисления бонусного/штрафного времени |
+| `admin-add-correction` | Добавляет начисление времени |
+| `admin-delete-correction` | Удаляет начисление по ID |
 
 ### Флаги и переменные окружения
 
@@ -258,6 +333,29 @@ go build -o encli ./cmd/encli/
 | `GetGameDetails` | `GET /GameDetails.aspx?gid={id}` | Детали игры (HTML) |
 | `GetTeamDetails` | `GET /Teams/TeamDetails.aspx?tid={id}` | Информация о команде |
 | `AcceptTeamInvitation` | `GET /Teams/TeamDetails.aspx?action=accept_invitation&tid={id}` | Принять приглашение |
+
+**Admin API (требует прав редактора):**
+
+| Метод | Endpoint | Описание |
+|---|---|---|
+| `AdminGetLevels` | `GET /Administration/Games/LevelManager.aspx` | Список уровней (ID, названия) |
+| `AdminCreateLevels` | `GET /Administration/Games/LevelManager.aspx?levels=create` | Создание уровней |
+| `AdminDeleteLevel` | `GET /Administration/Games/LevelManager.aspx?levels=delete` | Удаление уровня |
+| `AdminRenameLevels` | `POST /Administration/Games/LevelManager.aspx?level_names=update` | Переименование уровней |
+| `AdminUpdateAutopass` | `POST /Administration/Games/LevelEditor.aspx` | Настройка автоперехода |
+| `AdminUpdateAnswerBlock` | `POST /Administration/Games/LevelEditor.aspx` | Настройка блокировки ответов |
+| `AdminCreateBonus` | `POST /Administration/Games/BonusEdit.aspx?action=save` | Создание бонуса |
+| `AdminDeleteBonus` | `GET /Administration/Games/BonusEdit.aspx?action=delete` | Удаление бонуса |
+| `AdminCreateSector` | `POST /Administration/Games/LevelEditor.aspx` | Создание сектора |
+| `AdminDeleteSector` | `GET /Administration/Games/LevelEditor.aspx?delsector={id}` | Удаление сектора |
+| `AdminCreateHint` | `POST /Administration/Games/PromptEdit.aspx` | Создание подсказки |
+| `AdminDeleteHint` | `GET /Administration/Games/PromptEdit.aspx?action=PromptDelete` | Удаление подсказки |
+| `AdminCreateTask` | `POST /Administration/Games/TaskEdit.aspx` | Создание задания |
+| `AdminUpdateComment` | `POST /Administration/Games/NameCommentEdit.aspx` | Обновление названия/комментария |
+| `AdminGetTeams` | `GET /Administration/Games/TaskEdit.aspx` | Список команд |
+| `AdminGetCorrections` | `GET /GameBonusPenaltyTime.aspx` | Список начислений времени |
+| `AdminAddCorrection` | `POST /GameBonusPenaltyTime.aspx?action=save` | Добавление начисления |
+| `AdminDeleteCorrection` | `GET /GameBonusPenaltyTime.aspx?action=delete` | Удаление начисления |
 
 Полная неофициальная (полученная методом реверс-инжиниринга) спецификация API в формате OpenAPI 3.1: [openapi.yaml](openapi.yaml).
 
