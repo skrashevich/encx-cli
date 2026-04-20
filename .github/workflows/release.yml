@@ -30,6 +30,8 @@ jobs:
             goarch: arm64
           - goos: windows
             goarch: amd64
+          - goos: windows
+            goarch: arm64
     steps:
       - uses: actions/checkout@v5
 
@@ -47,6 +49,13 @@ jobs:
           if [ "${{ matrix.goos }}" = "windows" ]; then ext=".exe"; fi
           VERSION="${GITHUB_REF_NAME#v}"
           go build -ldflags="-s -w -X main.version=${VERSION}" -o encli-${{ matrix.goos }}-${{ matrix.goarch }}${ext} ./cmd/encli/
+
+      - name: Compress with UPX
+        if: matrix.goos == 'linux' || matrix.goos == 'windows'
+        uses: crazy-max/ghaction-upx@v3
+        with:
+          files: encli-${{ matrix.goos }}-${{ matrix.goarch }}*
+          args: --best --lzma
 
       - uses: actions/upload-artifact@v5
         with:
