@@ -75,7 +75,9 @@ func New(domain string, opts ...Option) *Client {
 			Timeout: defaultTimeout,
 			Jar:     jar,
 			Transport: &http.Transport{
-				TLSClientConfig: &tls.Config{},
+				TLSClientConfig: &tls.Config{
+					NextProtos: []string{"http/1.1"},
+				},
 			},
 			CheckRedirect: func(req *http.Request, via []*http.Request) error {
 				return http.ErrUseLastResponse

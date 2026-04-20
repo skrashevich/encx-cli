@@ -39,6 +39,10 @@ func (c *Client) EnterGame(ctx context.Context, gameId int) (string, error) {
 	}
 	defer resp.Body.Close()
 
+	if resp.StatusCode != http.StatusOK {
+		return "", fmt.Errorf("encx: enter game failed with HTTP %d", resp.StatusCode)
+	}
+
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
 		return "", fmt.Errorf("encx: read enter game body: %w", err)

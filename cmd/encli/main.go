@@ -1321,6 +1321,9 @@ func outputJSON(v any) {
 
 func fatal(format string, args ...any) {
 	msg := fmt.Sprintf(format, args...)
+	if agentMode {
+		panic(agentFatalError{Message: msg})
+	}
 	if jsonMode {
 		outputJSON(map[string]string{"error": msg})
 		os.Exit(1)
