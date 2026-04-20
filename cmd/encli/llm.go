@@ -51,6 +51,7 @@ type llmFunction struct {
 
 type llmRequest struct {
 	Model    string       `json:"model"`
+	Stream   bool         `json:"stream"`
 	Messages []llmMessage `json:"messages"`
 	Tools    []llmTool    `json:"tools,omitempty"`
 }
