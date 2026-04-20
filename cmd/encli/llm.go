@@ -402,7 +402,7 @@ Rules:
 	}
 
 	tools := getTools(session.reviewApprovalMode)
-	debugf("llm mode initialized: model=%s review_mode=%v tools=%d prompt=%q", model, session.reviewApprovalMode, len(tools), summarizeDebugText(prompt, 0))
+	debugf("llm mode initialized: url=%s model=%s review_mode=%v tools=%d prompt=%q", apiURL, model, session.reviewApprovalMode, len(tools), summarizeDebugText(prompt, 0))
 
 	for turn := 0; turn < maxAgentTurns; turn++ {
 		debugf("llm turn=%d request: messages=%d", turn+1, len(messages))
@@ -491,7 +491,7 @@ func callLLM(ctx context.Context, apiURL, apiKey, model string, messages []llmMe
 	if err != nil {
 		return nil, fmt.Errorf("marshal request: %w", err)
 	}
-	debugf("llm http request: model=%s messages=%d tools=%d bytes=%d", model, len(messages), len(tools), len(body))
+	debugf("llm http request: url=%s model=%s messages=%d tools=%d bytes=%d", apiURL, model, len(messages), len(tools), len(body))
 
 	httpReq, err := http.NewRequestWithContext(ctx, "POST", apiURL, bytes.NewReader(body))
 	if err != nil {
@@ -532,6 +532,12 @@ func callLLM(ctx context.Context, apiURL, apiKey, model string, messages []llmMe
 
 func isRetryableLLMError(err error) bool {
 	s := err.Error()
+	// Permanent API errors — never retry.
+	for _, perm := range []string{"unknown provider", "invalid model", "model not found", "unauthorized", "forbidden"} {
+		if strings.Contains(strings.ToLower(s), perm) {
+			return false
+		}
+	}
 	return strings.Contains(s, "context deadline exceeded") ||
 		strings.Contains(s, "HTTP 429") ||
 		strings.Contains(s, "HTTP 502") ||
