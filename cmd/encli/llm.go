@@ -480,7 +480,7 @@ Rules:
 }
 
 func callLLM(ctx context.Context, apiURL, apiKey, model string, messages []llmMessage, tools []llmTool) (*llmResponse, error) {
-	ctx, cancel := context.WithTimeout(ctx, 180*time.Second)
+	ctx, cancel := context.WithTimeout(ctx, 600*time.Second)
 	defer cancel()
 
 	req := llmRequest{
@@ -503,6 +503,23 @@ func callLLM(ctx context.Context, apiURL, apiKey, model string, messages []llmMe
 	if apiKey != "" {
 		httpReq.Header.Set("Authorization", "Bearer "+apiKey)
 	}
+
+	// Progress indicator so the user knows we're waiting for the LLM.
+	waitDone := make(chan struct{})
+	defer close(waitDone)
+	go func() {
+		start := time.Now()
+		ticker := time.NewTicker(15 * time.Second)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ticker.C:
+				fmt.Fprintf(os.Stderr, "[llm] ожидание ответа... %s\n", time.Since(start).Round(time.Second))
+			case <-waitDone:
+				return
+			}
+		}
+	}()
 
 	resp, err := http.DefaultClient.Do(httpReq)
 	if err != nil {
