@@ -25,6 +25,10 @@
 
 ## Установка
 
+### Готовые бинарники
+
+Подписанные и нотаризованные бинарники для macOS, Linux и Windows доступны на странице [Releases](https://github.com/skrashevich/encx-cli/releases). macOS-бинарники подписаны сертификатом Developer ID и прошли нотаризацию Apple — Gatekeeper не покажет предупреждение о недоверенном разработчике.
+
 ### CLI
 
 ```sh
@@ -252,6 +256,15 @@ encli admin-corrections -game-id 12345
 encli admin-add-correction -game-id 12345 "Team Name" bonus 0:10:00 0 "за красоту"
 encli admin-delete-correction -game-id 12345 444
 
+# Чтение содержимого уровня (задание, секторы, бонусы, подсказки, настройки)
+encli admin-level-content -game-id 12345 1
+
+# Информация об игре (название, авторы, описание, дата финиша)
+encli admin-game-info -game-id 12345
+
+# Обновить настройки игры (название, описание, приз)
+encli admin-update-game -game-id 12345 title="Новое название" description="Описание"
+
 # Полная очистка игры (обнуление)
 encli admin-wipe-game -game-id 67890
 
@@ -308,6 +321,9 @@ encli admin-copy-game -game-id 12345 67890
 | `admin-corrections` | Показывает начисления бонусного/штрафного времени |
 | `admin-add-correction` | Добавляет начисление времени |
 | `admin-delete-correction` | Удаляет начисление по ID |
+| `admin-level-content` | Читает содержимое уровня (задание, секторы, бонусы, подсказки, настройки) |
+| `admin-game-info` | Показывает информацию об игре (название, авторы, описание, дата) |
+| `admin-update-game` | Обновляет настройки игры (название, описание, приз и др.) |
 | `admin-wipe-game` | Полностью обнуляет игру (удаляет всё содержимое) |
 | `admin-copy-game` | Копирует всю игру (уровни, настройки, бонусы, секторы, подсказки) в другую |
 
@@ -411,6 +427,8 @@ go build -o encli ./cmd/encli/
 | `AdminGetTask` | `GET /Administration/Games/TaskEdit.aspx?action=TaskEdit` | Чтение деталей задания |
 | `AdminGetComment` | `GET /Administration/Games/NameCommentEdit.aspx` | Чтение названия и комментария уровня |
 | `AdminGetSectorAnswers` | `GET /ALoader/LevelInfo.aspx` | Чтение секторов и ответов уровня |
+| `AdminGetGameInfo` | `GET /Administration/Games/GameEditor.aspx` | Чтение настроек игры (название, авторы, описание, приз, дата) |
+| `AdminUpdateGameInfo` | `POST /Administration/Games/GameEditor.aspx` | Обновление настроек игры |
 | `AdminWipeGame` | (комбинированный) | Полная очистка игры (удаление всего содержимого) |
 | `AdminCopyGame` | (комбинированный) | Полное копирование игры (уровни, настройки, бонусы, секторы, подсказки) |
 
