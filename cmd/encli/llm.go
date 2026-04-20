@@ -19,7 +19,7 @@ import (
 const (
 	openRouterURL      = "https://openrouter.ai/api/v1/chat/completions"
 	defaultLLMModel    = "openai/gpt-oss-120b:free"
-	maxAgentTurns      = 20
+	maxAgentTurns      = 200
 	maxToolItemsForLLM = 200
 	maxToolTextForLLM  = 240
 	maxFixSteps        = 8
@@ -382,6 +382,7 @@ Rules:
 - For reading level text, answers, hints, and other scenario content from the organizer side, prefer admin_level_content instead of player tools.
 - Starting/launching a game is NOT available via CLI — only through the web interface. Inform the user if they ask.
 - When asked to CREATE a game/levels, make them INTERESTING and DIFFERENT: give unique names, add tasks with creative quest text, add sectors with answers, add hints. Don't just create empty shells.
+- ALWAYS COMPLETE THE FULL TASK. If asked to create N levels, create ALL N levels with tasks, sectors (answers), and hints. Never stop partway through and offer to "continue if needed". You have up to 200 tool calls — use them. Do not summarize partial work as if it were complete.
 - SELF-VERIFICATION: After creating or modifying levels, verify your own work by calling admin_level_content for each affected level. Check that: (1) all sector codes/answers are present and correct, (2) timings (autopass, answer block) are set to non-zero values if the level is timed, (3) hints are present if needed and have correct text/delays, (4) task text matches the intended answers. If you discover errors, fix them immediately before reporting success.
 - Respond in the same language as the user's request.` + func() string {
 		if !session.reviewApprovalMode {
