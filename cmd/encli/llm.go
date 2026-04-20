@@ -10,6 +10,7 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -635,7 +636,7 @@ func executeLLMToolCall(ctx context.Context, cfg *config, client *encx.Client, s
 			return ""
 		}
 		s, _ := v.(string)
-		return s
+		return decodeBareUnicodeEscapes(s)
 	}
 
 	getStringSlice := func(key string) []string {
@@ -650,7 +651,7 @@ func executeLLMToolCall(ctx context.Context, cfg *config, client *encx.Client, s
 		result := make([]string, 0, len(arr))
 		for _, item := range arr {
 			if s, ok := item.(string); ok {
-				result = append(result, s)
+				result = append(result, decodeBareUnicodeEscapes(s))
 			}
 		}
 		return result
@@ -1147,6 +1148,9 @@ func formatToolCallForDisplay(session *llmSession, name, argsJSON string) string
 	json.Unmarshal([]byte(argsJSON), &args)
 
 	lvl := getAnyInt(args["level_number"])
+	if lvl == 0 {
+		lvl = getAnyInt(args["level_id"])
+	}
 	itemName := getAnyString(args["name"])
 	rt := session.reviewText
 
@@ -1347,9 +1351,26 @@ func cloneAnyMap(src map[string]any) map[string]any {
 	return out
 }
 
+// bareUnicodeRe matches bare uXXXX sequences (without leading \) that some
+// LLM API proxies produce instead of proper \uXXXX JSON escapes.
+var bareUnicodeRe = regexp.MustCompile(`u([0-9a-fA-F]{4})`)
+
+func decodeBareUnicodeEscapes(s string) string {
+	if s == "" {
+		return s
+	}
+	return bareUnicodeRe.ReplaceAllStringFunc(s, func(m string) string {
+		r, err := strconv.ParseInt(m[1:], 16, 32)
+		if err != nil {
+			return m
+		}
+		return string(rune(r))
+	})
+}
+
 func getAnyString(v any) string {
 	s, _ := v.(string)
-	return s
+	return decodeBareUnicodeEscapes(s)
 }
 
 func getAnyInt(v any) int {
