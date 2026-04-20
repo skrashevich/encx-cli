@@ -180,6 +180,13 @@ encli game-stats -game-id 12345
 # Версия
 encli -v
 
+# LLM-режим через OpenRouter
+OPENROUTER_API_KEY=... encli -game-id 12345 --llm "создай 3 уровня с бонусами и подсказками"
+
+# Отладка CLI и LLM-потока
+OPENROUTER_API_KEY=... encli -debug -game-id 12345 --llm "покажи статус игры"
+OPENROUTER_API_KEY=... encli -game-id 12345 --llm "покажи статус игры" -debug
+
 # Выход
 encli logout
 
@@ -267,6 +274,7 @@ encli admin-copy-game -game-id 12345 67890
 | `send-bonus` | Отправляет бонусный код |
 | `hint` | Запрашивает штрафную подсказку |
 | `game-stats` | Показывает статистику игры (уровни, команды, результаты) |
+| `--llm <prompt>` | Выполняет естественно-языковую команду через OpenRouter |
 | `-v` | Показывает версию |
 
 **Admin-команды (требуют прав редактора игры):**
@@ -308,6 +316,9 @@ encli admin-copy-game -game-id 12345 67890
 | `-insecure` | `ENCX_INSECURE` | Пропустить проверку TLS-сертификата |
 | `-http` | — | Использовать HTTP вместо HTTPS |
 | `-json` | — | Выводить результат в формате JSON |
+| `-debug` | `ENCX_DEBUG` | Включить отладочный вывод в `stderr` |
+| — | `OPENROUTER_API_KEY` | API-ключ для `--llm` |
+| — | `OPENROUTER_MODEL` | Переопределить модель для `--llm` |
 
 Пример:
 
@@ -316,10 +327,16 @@ export ENCX_DOMAIN=tech.en.cx
 export ENCX_LOGIN=my_login
 export ENCX_PASSWORD=my_password
 export ENCX_GAME_ID=12345
+export ENCX_DEBUG=1
 
 encli login -insecure
 encli status
+encli -debug status
 ```
+
+В `-debug` режиме `encli` пишет в `stderr` разбор аргументов, шаги LLM-агента, запуск и завершение tool-call'ов, а также HTTP-запросы `encx` с таймингами. Это полезно, когда нужно понять, на каком шаге процесс завис или долго ждёт сеть/ответ модели.
+
+В `--llm` режиме большие результаты tool-call'ов автоматически ужимаются перед отправкой обратно в модель: вместо многомегабайтного сырого JSON в prompt уходит компактная сводка. Это снижает риск зависаний и ошибок по лимиту токенов.
 
 ### Сборка из исходников
 

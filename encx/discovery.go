@@ -25,11 +25,19 @@ var (
 // It first tries the mobile version (m.{domain}), then falls back to the desktop version.
 func (c *Client) GetDomainGames(ctx context.Context) ([]DomainGame, error) {
 	// Try mobile first, fall back to desktop
+	c.debugf("encx games: trying mobile catalog at %s/", c.mobileBaseURL())
 	games, err := c.fetchGames(ctx, c.mobileBaseURL()+"/", gameTitleMobileRe)
 	if err == nil && len(games) > 0 {
+		c.debugf("encx games: mobile catalog returned %d game(s)", len(games))
 		return games, nil
 	}
+	if err != nil {
+		c.debugf("encx games: mobile catalog failed: %v", err)
+	} else {
+		c.debugf("encx games: mobile catalog returned 0 game(s), falling back to desktop")
+	}
 
+	c.debugf("encx games: trying desktop catalog at %s/", c.baseURL())
 	return c.fetchGames(ctx, c.baseURL()+"/", gameTitleDesktopRe)
 }
 
@@ -71,6 +79,12 @@ func (c *Client) fetchGames(ctx context.Context, u string, re *regexp.Regexp) ([
 // Returns structured data with ComingGames and ActiveGames.
 // An optional page number can be passed for pagination (1-based).
 func (c *Client) GetGameList(ctx context.Context, page ...int) (*GameListResponse, error) {
+	pageNum := 1
+	if len(page) > 0 && page[0] > 0 {
+		pageNum = page[0]
+	}
+	c.debugf("encx game-list: requesting page=%d", pageNum)
+
 	u, err := url.Parse(c.baseURL() + "/home/")
 	if err != nil {
 		return nil, fmt.Errorf("encx: parse game list URL: %w", err)

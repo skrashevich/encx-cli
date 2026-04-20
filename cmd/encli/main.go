@@ -22,8 +22,9 @@ import (
 )
 
 var (
-	version  = "dev"
-	jsonMode bool
+	version   = "dev"
+	jsonMode  bool
+	debugMode bool
 )
 
 // Config holds parsed CLI configuration.
@@ -35,6 +36,7 @@ type config struct {
 	insecure   bool
 	useHTTP    bool
 	jsonOutput bool
+	debug      bool
 }
 
 func main() {
@@ -51,9 +53,10 @@ func main() {
 	// Check for --llm mode: encli [flags] --llm <natural language prompt>
 	for i := 1; i < len(os.Args); i++ {
 		if os.Args[i] == "--llm" {
-			// Collect flags before --llm and prompt after --llm
-			flagArgs := os.Args[1:i]
-			promptParts := os.Args[i+1:]
+			flagArgs, promptParts, err := splitLLMArgs(os.Args[1:])
+			if err != nil {
+				fatal("%v", err)
+			}
 			if len(promptParts) == 0 {
 				fatal("Usage: encli [flags] --llm <prompt>")
 			}
@@ -67,7 +70,11 @@ func main() {
 			fs.BoolVar(&cfg.insecure, "insecure", envBool("ENCX_INSECURE"), "Skip TLS verification")
 			fs.BoolVar(&cfg.useHTTP, "http", false, "Use plain HTTP")
 			fs.BoolVar(&cfg.jsonOutput, "json", false, "Output as JSON")
+			fs.BoolVar(&cfg.debug, "debug", envBool("ENCX_DEBUG"), "Enable debug logging")
 			fs.Parse(flagArgs)
+			debugMode = cfg.debug
+			debugf("starting llm mode: domain=%s game_id=%d insecure=%v http=%v json=%v login_set=%v password_set=%v prompt_len=%d",
+				cfg.domain, cfg.gameId, cfg.insecure, cfg.useHTTP, cfg.jsonOutput, cfg.login != "", cfg.password != "", len(strings.Join(promptParts, " ")))
 
 			var opts []encx.Option
 			if cfg.insecure {
@@ -76,8 +83,12 @@ func main() {
 			if cfg.useHTTP {
 				opts = append(opts, encx.WithHTTP())
 			}
+			if cfg.debug {
+				opts = append(opts, encx.WithDebugLogger(debugf))
+			}
 
 			client := encx.New(cfg.domain, opts...)
+			debugf("created encx client for domain=%s", cfg.domain)
 			loadSession(cfg, client)
 			cmdLLM(context.Background(), cfg, client, strings.Join(promptParts, " "))
 			return
@@ -96,7 +107,7 @@ func main() {
 		// Skip flag value (e.g. -domain tech.en.cx)
 		if i+1 < len(os.Args) && !strings.HasPrefix(os.Args[i+1], "-") &&
 			strings.HasPrefix(os.Args[i], "-") && !strings.Contains(os.Args[i], "=") &&
-			os.Args[i] != "-insecure" && os.Args[i] != "-http" {
+			!isBoolFlag(os.Args[i]) {
 			i++ // skip the value
 		}
 	}
@@ -121,10 +132,14 @@ func main() {
 	fs.BoolVar(&cfg.insecure, "insecure", envBool("ENCX_INSECURE"), "Skip TLS verification (env: ENCX_INSECURE)")
 	fs.BoolVar(&cfg.useHTTP, "http", false, "Use plain HTTP instead of HTTPS")
 	fs.BoolVar(&cfg.jsonOutput, "json", false, "Output results as JSON")
+	fs.BoolVar(&cfg.debug, "debug", envBool("ENCX_DEBUG"), "Enable debug logging (env: ENCX_DEBUG)")
 
 	fs.Usage = func() { printCommandHelp(cmd) }
 	fs.Parse(args)
 	jsonMode = cfg.jsonOutput
+	debugMode = cfg.debug
+	debugf("parsed command=%s domain=%s game_id=%d insecure=%v http=%v json=%v login_set=%v password_set=%v positional=%d",
+		cmd, cfg.domain, cfg.gameId, cfg.insecure, cfg.useHTTP, cfg.jsonOutput, cfg.login != "", cfg.password != "", len(fs.Args()))
 
 	var opts []encx.Option
 	if cfg.insecure {
@@ -133,10 +148,15 @@ func main() {
 	if cfg.useHTTP {
 		opts = append(opts, encx.WithHTTP())
 	}
+	if cfg.debug {
+		opts = append(opts, encx.WithDebugLogger(debugf))
+	}
 
 	client := encx.New(cfg.domain, opts...)
+	debugf("created encx client for domain=%s", cfg.domain)
 	ctx := context.Background()
 	positional := fs.Args()
+	debugf("dispatching command=%s positional=%v", cmd, positional)
 
 	switch cmd {
 	case "login":
@@ -325,6 +345,7 @@ Global flags:
   -game-id     Game ID
   -insecure    Skip TLS certificate verification
   -http        Use plain HTTP instead of HTTPS
+  -debug       Enable debug logging
 
 Environment variables:
   ENCX_DOMAIN          Domain (default: tech.en.cx)
@@ -332,6 +353,7 @@ Environment variables:
   ENCX_PASSWORD        Login password
   ENCX_GAME_ID         Game ID
   ENCX_INSECURE        Skip TLS verification (1/true)
+  ENCX_DEBUG           Enable debug logging (1/true)
   OPENROUTER_API_KEY   API key for --llm mode (required)
   OPENROUTER_MODEL     LLM model override (default: openai/gpt-4o-mini)
 
@@ -492,27 +514,40 @@ func sessionFile(cfg *config) string {
 func saveSession(cfg *config, client *encx.Client) {
 	data, err := client.ExportCookies()
 	if err != nil {
+		debugf("save session skipped: export cookies failed: %v", err)
 		return
 	}
+	path := sessionFile(cfg)
+	debugf("saving session to %s (%d bytes)", path, len(data))
 	os.MkdirAll(sessionDir(), 0700)
-	os.WriteFile(sessionFile(cfg), data, 0600)
+	os.WriteFile(path, data, 0600)
 }
 
 func loadSession(cfg *config, client *encx.Client) bool {
-	data, err := os.ReadFile(sessionFile(cfg))
+	path := sessionFile(cfg)
+	data, err := os.ReadFile(path)
 	if err != nil {
+		debugf("load session miss: %s: %v", path, err)
 		return false
 	}
-	return client.ImportCookies(data) == nil
+	if err := client.ImportCookies(data); err != nil {
+		debugf("load session failed: %s: %v", path, err)
+		return false
+	}
+	debugf("loaded session from %s (%d bytes)", path, len(data))
+	return true
 }
 
 func requireAuth(ctx context.Context, cfg *config, client *encx.Client) {
+	debugf("require auth: login_set=%v password_set=%v", cfg.login != "", cfg.password != "")
 	if loadSession(cfg, client) && cfg.login == "" {
+		debugf("require auth: using saved session")
 		return
 	}
 	if cfg.login == "" || cfg.password == "" {
 		fatal("No saved session. Run 'encli login' first, or pass -login and -password")
 	}
+	debugf("require auth: logging in with explicit credentials for %s", cfg.login)
 	resp, err := client.Login(ctx, cfg.login, cfg.password)
 	if err != nil {
 		fatal("Login failed: %v", err)
@@ -520,6 +555,7 @@ func requireAuth(ctx context.Context, cfg *config, client *encx.Client) {
 	if resp.Error != 0 {
 		fatal("Login error %d: %s", resp.Error, encx.LoginErrorText(resp.Error))
 	}
+	debugf("require auth: login successful for %s", cfg.login)
 	saveSession(cfg, client)
 }
 
@@ -532,6 +568,7 @@ func cmdLogin(ctx context.Context, cfg *config, client *encx.Client) {
 	if cfg.password == "" {
 		cfg.password = promptPassword("Password: ")
 	}
+	debugf("cmd login: attempting login for %s", cfg.login)
 	resp, err := client.Login(ctx, cfg.login, cfg.password)
 	if err != nil {
 		fatal("Login failed: %v", err)
@@ -539,6 +576,7 @@ func cmdLogin(ctx context.Context, cfg *config, client *encx.Client) {
 	if resp.Error != 0 {
 		fatal("Login error %d: %s", resp.Error, encx.LoginErrorText(resp.Error))
 	}
+	debugf("cmd login: login successful for %s", cfg.login)
 	saveSession(cfg, client)
 	if cfg.jsonOutput {
 		outputJSON(map[string]any{"success": true, "session_file": sessionFile(cfg)})
@@ -548,7 +586,9 @@ func cmdLogin(ctx context.Context, cfg *config, client *encx.Client) {
 }
 
 func cmdLogout(cfg *config) {
-	os.Remove(sessionFile(cfg))
+	path := sessionFile(cfg)
+	debugf("cmd logout: removing session file %s", path)
+	os.Remove(path)
 	if cfg.jsonOutput {
 		outputJSON(map[string]any{"success": true})
 		return
@@ -1330,6 +1370,81 @@ func fatal(format string, args ...any) {
 	}
 	fmt.Fprintln(os.Stderr, msg)
 	os.Exit(1)
+}
+
+func debugf(format string, args ...any) {
+	if !debugMode {
+		return
+	}
+	fmt.Fprintf(os.Stderr, "[debug %s] "+format+"\n", append([]any{time.Now().Format("15:04:05.000")}, args...)...)
+}
+
+func isBoolFlag(arg string) bool {
+	switch arg {
+	case "-insecure", "-http", "-json", "-debug":
+		return true
+	default:
+		return false
+	}
+}
+
+func isValueFlag(arg string) bool {
+	switch arg {
+	case "-domain", "-login", "-password", "-game-id":
+		return true
+	default:
+		return false
+	}
+}
+
+func splitLLMArgs(args []string) ([]string, []string, error) {
+	var (
+		flagArgs   []string
+		promptArgs []string
+		seenLLM    bool
+	)
+
+	for i := 0; i < len(args); i++ {
+		arg := args[i]
+		if arg == "--llm" {
+			seenLLM = true
+			continue
+		}
+
+		switch {
+		case isBoolFlag(arg):
+			flagArgs = append(flagArgs, arg)
+		case isValueFlag(arg):
+			if i+1 >= len(args) {
+				return nil, nil, fmt.Errorf("flag %s requires a value", arg)
+			}
+			flagArgs = append(flagArgs, arg, args[i+1])
+			i++
+		case strings.HasPrefix(arg, "-") && strings.Contains(arg, "="):
+			name, _, _ := strings.Cut(arg, "=")
+			if isBoolFlag(name) || isValueFlag(name) {
+				flagArgs = append(flagArgs, arg)
+				continue
+			}
+			promptArgs = append(promptArgs, arg)
+		default:
+			promptArgs = append(promptArgs, arg)
+		}
+	}
+
+	if !seenLLM {
+		return nil, nil, fmt.Errorf("missing --llm")
+	}
+
+	return flagArgs, promptArgs, nil
+}
+
+func summarizeDebugText(s string, limit int) string {
+	s = strings.Join(strings.Fields(strings.TrimSpace(s)), " ")
+	if limit > 0 && len(s) > limit {
+		return s[:limit] + "..."
+	}
+	return s
 }
 
 func prompt(label string) string {

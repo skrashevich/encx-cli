@@ -20,6 +20,7 @@ type Client struct {
 	httpClient *http.Client
 	userAgent  string
 	lang       string
+	debugLog   func(string, ...any)
 }
 
 // Option configures the Client.
@@ -61,6 +62,13 @@ func WithLang(lang string) Option {
 	}
 }
 
+// WithDebugLogger enables verbose request/response logging.
+func WithDebugLogger(logf func(string, ...any)) Option {
+	return func(c *Client) {
+		c.debugLog = logf
+	}
+}
+
 // New creates a new Encounter API client for the given domain.
 // By default it uses HTTPS, a 15-second timeout, and the standard User-Agent.
 func New(domain string, opts ...Option) *Client {
@@ -88,6 +96,16 @@ func New(domain string, opts ...Option) *Client {
 	for _, opt := range opts {
 		opt(c)
 	}
+	if c.debugLog != nil {
+		base := c.httpClient.Transport
+		if base == nil {
+			base = http.DefaultTransport
+		}
+		c.httpClient.Transport = &debugTransport{
+			base:   base,
+			debugf: c.debugf,
+		}
+	}
 
 	return c
 }
@@ -102,6 +120,47 @@ func (c *Client) mobileBaseURL() string {
 
 func (c *Client) setHeaders(req *http.Request) {
 	req.Header.Set("User-Agent", c.userAgent)
+}
+
+func (c *Client) debugf(format string, args ...any) {
+	if c.debugLog == nil {
+		return
+	}
+	c.debugLog(format, args...)
+}
+
+type debugTransport struct {
+	base   http.RoundTripper
+	debugf func(string, ...any)
+}
+
+func (t *debugTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	start := time.Now()
+	urlStr := req.URL.String()
+	if req.ContentLength > 0 {
+		t.debugf("encx http start: %s %s body_bytes=%d", req.Method, urlStr, req.ContentLength)
+	} else {
+		t.debugf("encx http start: %s %s", req.Method, urlStr)
+	}
+
+	resp, err := t.base.RoundTrip(req)
+	duration := time.Since(start).Round(time.Millisecond)
+	if err != nil {
+		t.debugf("encx http error: %s %s duration=%s err=%v", req.Method, urlStr, duration, err)
+		return nil, err
+	}
+
+	location := resp.Header.Get("Location")
+	contentType := resp.Header.Get("Content-Type")
+	if location != "" {
+		t.debugf("encx http done: %s %s status=%d duration=%s redirect=%s content_type=%q",
+			req.Method, urlStr, resp.StatusCode, duration, location, contentType)
+	} else {
+		t.debugf("encx http done: %s %s status=%d duration=%s content_type=%q",
+			req.Method, urlStr, resp.StatusCode, duration, contentType)
+	}
+
+	return resp, nil
 }
 
 // doGet performs a GET request and returns the response body as a string.
