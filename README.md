@@ -181,12 +181,14 @@ encli game-stats -game-id 12345
 encli -v
 
 # LLM-режим через OpenRouter
-OPENROUTER_API_KEY=... encli -game-id 12345 --llm "создай 3 уровня с бонусами и подсказками"
-OPENROUTER_API_KEY=... encli -game-id 12345 --llm "пройдись по уровням, проверь ответы и предложи исправления"
+LLM_API_KEY=... encli -game-id 12345 --llm "создай 3 уровня с бонусами и подсказками"
+LLM_API_KEY=... encli -game-id 12345 --llm "пройдись по уровням, проверь ответы и предложи исправления"
+
+# LLM-режим через локальный OpenAI-совместимый прокси (API-ключ не нужен)
+LLM_BASE_URL=http://127.0.0.1:8317/v1 LLM_MODEL=opus-4.7 encli -game-id 12345 --llm "покажи уровни"
 
 # Отладка CLI и LLM-потока
-OPENROUTER_API_KEY=... encli -debug -game-id 12345 --llm "покажи статус игры"
-OPENROUTER_API_KEY=... encli -game-id 12345 --llm "покажи статус игры" -debug
+LLM_API_KEY=... encli -debug -game-id 12345 --llm "покажи статус игры"
 
 # Для review-запросов encli не применяет admin-правки сразу:
 # сначала модель формирует предложения по исправлению,
@@ -323,8 +325,11 @@ encli admin-copy-game -game-id 12345 67890
 | `-http` | — | Использовать HTTP вместо HTTPS |
 | `-json` | — | Выводить результат в формате JSON |
 | `-debug` | `ENCX_DEBUG` | Включить отладочный вывод в `stderr` |
-| — | `OPENROUTER_API_KEY` | API-ключ для `--llm` |
-| — | `OPENROUTER_MODEL` | Переопределить модель для `--llm` (по умолчанию: `openai/gpt-oss-120b:free`) |
+| — | `LLM_BASE_URL` | Base URL OpenAI-совместимого API (по умолчанию: `https://openrouter.ai/api/v1`) |
+| — | `LLM_API_KEY` | API-ключ для `--llm` (не нужен для localhost) |
+| — | `LLM_MODEL` | Модель для `--llm` (по умолчанию: `openai/gpt-oss-120b:free`) |
+| — | `OPENROUTER_API_KEY` | Алиас для `LLM_API_KEY` (обратная совместимость) |
+| — | `OPENROUTER_MODEL` | Алиас для `LLM_MODEL` (обратная совместимость) |
 
 Пример:
 

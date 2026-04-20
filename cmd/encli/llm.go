@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"cmp"
 	"context"
 	"encoding/json"
 	"errors"
@@ -17,7 +18,7 @@ import (
 )
 
 const (
-	openRouterURL      = "https://openrouter.ai/api/v1/chat/completions"
+	defaultLLMBaseURL  = "https://openrouter.ai/api/v1"
 	defaultLLMModel    = "openai/gpt-oss-120b:free"
 	maxAgentTurns      = 200
 	maxToolItemsForLLM = 200
@@ -343,15 +344,15 @@ func getTools(reviewMode bool) []llmTool {
 }
 
 func cmdLLM(ctx context.Context, cfg *config, client *encx.Client, prompt string) {
-	apiKey := os.Getenv("OPENROUTER_API_KEY")
-	if apiKey == "" {
-		fatal("OPENROUTER_API_KEY environment variable is required for --llm mode")
+	baseURL := cmp.Or(os.Getenv("LLM_BASE_URL"), os.Getenv("OPENROUTER_BASE_URL"), defaultLLMBaseURL)
+	apiURL := strings.TrimRight(baseURL, "/") + "/chat/completions"
+
+	apiKey := cmp.Or(os.Getenv("LLM_API_KEY"), os.Getenv("OPENROUTER_API_KEY"))
+	if apiKey == "" && !strings.Contains(baseURL, "127.0.0.1") && !strings.Contains(baseURL, "localhost") {
+		fatal("LLM_API_KEY (or OPENROUTER_API_KEY) environment variable is required for --llm mode")
 	}
 
-	model := os.Getenv("OPENROUTER_MODEL")
-	if model == "" {
-		model = defaultLLMModel
-	}
+	model := cmp.Or(os.Getenv("LLM_MODEL"), os.Getenv("OPENROUTER_MODEL"), defaultLLMModel)
 
 	// Force JSON output in LLM mode for structured results.
 	// Keep fatal exit behavior at the top level; only nested tool calls should
@@ -415,7 +416,7 @@ Rules:
 					session.reviewText("Retrying in", "Повтор через"), delay)
 				time.Sleep(delay)
 			}
-			resp, lastErr = callLLM(ctx, apiKey, model, messages, tools)
+			resp, lastErr = callLLM(ctx, apiURL, apiKey, model, messages, tools)
 			if lastErr == nil {
 				break
 			}
@@ -476,7 +477,7 @@ Rules:
 	fmt.Fprintln(os.Stderr, "Warning: agent reached maximum iterations")
 }
 
-func callLLM(ctx context.Context, apiKey, model string, messages []llmMessage, tools []llmTool) (*llmResponse, error) {
+func callLLM(ctx context.Context, apiURL, apiKey, model string, messages []llmMessage, tools []llmTool) (*llmResponse, error) {
 	ctx, cancel := context.WithTimeout(ctx, 180*time.Second)
 	defer cancel()
 
@@ -492,12 +493,14 @@ func callLLM(ctx context.Context, apiKey, model string, messages []llmMessage, t
 	}
 	debugf("llm http request: model=%s messages=%d tools=%d bytes=%d", model, len(messages), len(tools), len(body))
 
-	httpReq, err := http.NewRequestWithContext(ctx, "POST", openRouterURL, bytes.NewReader(body))
+	httpReq, err := http.NewRequestWithContext(ctx, "POST", apiURL, bytes.NewReader(body))
 	if err != nil {
 		return nil, fmt.Errorf("create request: %w", err)
 	}
 	httpReq.Header.Set("Content-Type", "application/json")
-	httpReq.Header.Set("Authorization", "Bearer "+apiKey)
+	if apiKey != "" {
+		httpReq.Header.Set("Authorization", "Bearer "+apiKey)
+	}
 
 	resp, err := http.DefaultClient.Do(httpReq)
 	if err != nil {
