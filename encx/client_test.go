@@ -170,13 +170,16 @@ func TestLoginResponseJSON(t *testing.T) {
 
 func TestGameModelJSON(t *testing.T) {
 	model := encx.GameModel{
-		GameId:    123,
-		GameTitle: "Test Game",
+		GameId:     123,
+		GameTitle:  "Test Game",
+		GameTypeId: 1,
+		GameZoneId: 0,
+		IsCaptain:  true,
 		Level: &encx.Level{
 			LevelId: 1,
 			Number:  1,
 			Name:    "Level 1",
-			Task:    &encx.LevelTask{TaskText: "Do something"},
+			Tasks:   []encx.LevelTask{{TaskText: "Do something"}},
 		},
 	}
 	data, err := json.Marshal(model)
@@ -192,6 +195,9 @@ func TestGameModelJSON(t *testing.T) {
 	}
 	if parsed["GameTitle"].(string) != "Test Game" {
 		t.Errorf("Expected GameTitle='Test Game', got %v", parsed["GameTitle"])
+	}
+	if parsed["IsCaptain"].(bool) != true {
+		t.Errorf("Expected IsCaptain=true, got %v", parsed["IsCaptain"])
 	}
 	level := parsed["Level"].(map[string]any)
 	if level["Name"].(string) != "Level 1" {
@@ -332,5 +338,187 @@ func TestGetGameList(t *testing.T) {
 	}
 	for _, g := range list.ComingGames {
 		t.Logf("Coming: %d - %s (type=%d, zone=%d)", g.GameID, g.Title, g.GameTypeID, g.ZoneId)
+	}
+}
+
+func TestGetGameListPaginated(t *testing.T) {
+	skipIfNoIntegration(t)
+
+	client := newTestClient()
+	loginTestClient(t, client)
+
+	page1, err := client.GetGameList(t.Context(), 1)
+	if err != nil {
+		t.Fatalf("GetGameList page 1 failed: %v", err)
+	}
+	page2, err := client.GetGameList(t.Context(), 2)
+	if err != nil {
+		t.Fatalf("GetGameList page 2 failed: %v", err)
+	}
+
+	p1Total := len(page1.ActiveGames) + len(page1.ComingGames)
+	p2Total := len(page2.ActiveGames) + len(page2.ComingGames)
+	t.Logf("Page 1: %d games, Page 2: %d games", p1Total, p2Total)
+
+	// Verify extended fields are populated
+	allGames := append(page1.ActiveGames, page1.ComingGames...)
+	if len(allGames) > 0 {
+		g := allGames[0]
+		if g.SiteID == 0 {
+			t.Error("Expected SiteID to be populated")
+		}
+		t.Logf("Extended fields: SiteID=%d, OwnerID=%d, LevelNumber=%d, ComplexityFactor=%d",
+			g.SiteID, g.OwnerID, g.LevelNumber, g.ComplexityFactor)
+	}
+}
+
+func TestGetGameStatistics(t *testing.T) {
+	skipIfNoIntegration(t)
+
+	client := newTestClient()
+	loginTestClient(t, client)
+
+	games, err := client.GetDomainGames(t.Context())
+	if err != nil || len(games) == 0 {
+		t.Skip("No games available for testing")
+	}
+
+	gid := games[0].GameId
+	t.Logf("Testing game statistics for game ID: %d (%s)", gid, games[0].Title)
+
+	stats, err := client.GetGameStatistics(t.Context(), gid)
+	if err != nil {
+		t.Fatalf("GetGameStatistics failed: %v", err)
+	}
+
+	if stats.Game == nil {
+		t.Fatal("Expected Game to be non-nil")
+	}
+	if stats.Game.GameID != gid {
+		t.Errorf("Expected GameID=%d, got %d", gid, stats.Game.GameID)
+	}
+
+	t.Logf("Game: %s (ID: %d)", stats.Game.Title, stats.Game.GameID)
+	t.Logf("Levels: %d, IsLevelNamesVisible: %v", len(stats.Levels), stats.IsLevelNamesVisible)
+	t.Logf("StatItems (level groups): %d", len(stats.StatItems))
+
+	for _, l := range stats.Levels {
+		t.Logf("  Level %d: %q dismissed=%v passedPlayers=%d",
+			l.LevelNumber, l.LevelName, l.Dismissed, l.PassedPlayers)
+	}
+	for _, lp := range stats.LevelPlayers {
+		t.Logf("  LevelPlayers: level %d -> %d players", lp.LevelNum, lp.Count)
+	}
+
+	if stats.User != nil {
+		t.Logf("User: %s (ID: %d, Points: %.2f, Rank: %d)",
+			stats.User.Login, stats.User.ID, stats.User.Points, stats.User.RankID)
+	}
+}
+
+func TestGetGameStatisticsJSON(t *testing.T) {
+	skipIfNoIntegration(t)
+
+	client := newTestClient()
+	loginTestClient(t, client)
+
+	games, err := client.GetDomainGames(t.Context())
+	if err != nil || len(games) == 0 {
+		t.Skip("No games available for testing")
+	}
+
+	stats, err := client.GetGameStatistics(t.Context(), games[0].GameId)
+	if err != nil {
+		t.Fatalf("GetGameStatistics failed: %v", err)
+	}
+
+	data, err := json.Marshal(stats)
+	if err != nil {
+		t.Fatalf("Marshal game statistics: %v", err)
+	}
+	if !json.Valid(data) {
+		t.Fatal("Game statistics response is not valid JSON")
+	}
+	t.Logf("GameStatistics JSON size: %d bytes", len(data))
+}
+
+// --- Unit tests for new types ---
+
+func TestGameStatisticsResponseJSON(t *testing.T) {
+	stats := encx.GameStatisticsResponse{
+		Game: &encx.GameInfo{GameID: 100, Title: "Test"},
+		Levels: []encx.LevelStatInfo{
+			{LevelId: 1, LevelNumber: 1, LevelName: "First"},
+		},
+		StatItems: [][]encx.StatItem{
+			{
+				{UserId: 10, TeamName: "Team A", LevelNum: 1, SpentSeconds: 3600},
+			},
+		},
+		LevelPlayers: []encx.LevelPlayerCount{
+			{LevelNum: 1, Count: 5},
+		},
+		User: &encx.UserProfile{
+			ID: 42, Login: "testuser", Points: 100.5,
+		},
+		IsLevelNamesVisible: true,
+	}
+
+	data, err := json.Marshal(stats)
+	if err != nil {
+		t.Fatalf("Marshal GameStatisticsResponse: %v", err)
+	}
+	if !json.Valid(data) {
+		t.Fatal("GameStatisticsResponse is not valid JSON")
+	}
+
+	var parsed encx.GameStatisticsResponse
+	if err := json.Unmarshal(data, &parsed); err != nil {
+		t.Fatalf("Unmarshal GameStatisticsResponse: %v", err)
+	}
+	if parsed.Game.GameID != 100 {
+		t.Errorf("Expected GameID=100, got %d", parsed.Game.GameID)
+	}
+	if parsed.User.Login != "testuser" {
+		t.Errorf("Expected Login='testuser', got %q", parsed.User.Login)
+	}
+	if len(parsed.Levels) != 1 || parsed.Levels[0].LevelName != "First" {
+		t.Error("Levels not correctly roundtripped")
+	}
+	if len(parsed.StatItems) != 1 || parsed.StatItems[0][0].TeamName != "Team A" {
+		t.Error("StatItems not correctly roundtripped")
+	}
+}
+
+func TestExtendedGameInfoJSON(t *testing.T) {
+	g := encx.GameInfo{
+		GameID:            42,
+		Title:             "Extended",
+		SiteID:            100,
+		OwnerID:           200,
+		LevelNumber:       5,
+		ComplexityFactor:  360,
+		QualityRate:       -1,
+		IsSectorsSupported: true,
+		TopicId:           12345,
+	}
+
+	data, err := json.Marshal(g)
+	if err != nil {
+		t.Fatalf("Marshal extended GameInfo: %v", err)
+	}
+
+	var parsed map[string]any
+	if err := json.Unmarshal(data, &parsed); err != nil {
+		t.Fatalf("Unmarshal extended GameInfo: %v", err)
+	}
+	if parsed["SiteID"].(float64) != 100 {
+		t.Errorf("Expected SiteID=100, got %v", parsed["SiteID"])
+	}
+	if parsed["OwnerID"].(float64) != 200 {
+		t.Errorf("Expected OwnerID=200, got %v", parsed["OwnerID"])
+	}
+	if parsed["TopicId"].(float64) != 12345 {
+		t.Errorf("Expected TopicId=12345, got %v", parsed["TopicId"])
 	}
 }

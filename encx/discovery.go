@@ -69,7 +69,8 @@ func (c *Client) fetchGames(ctx context.Context, u string, re *regexp.Regexp) ([
 
 // GetGameList fetches the full game list via the JSON endpoint GET /home/?json=1.
 // Returns structured data with ComingGames and ActiveGames.
-func (c *Client) GetGameList(ctx context.Context) (*GameListResponse, error) {
+// An optional page number can be passed for pagination (1-based).
+func (c *Client) GetGameList(ctx context.Context, page ...int) (*GameListResponse, error) {
 	u, err := url.Parse(c.baseURL() + "/home/")
 	if err != nil {
 		return nil, fmt.Errorf("encx: parse game list URL: %w", err)
@@ -77,6 +78,9 @@ func (c *Client) GetGameList(ctx context.Context) (*GameListResponse, error) {
 
 	q := u.Query()
 	q.Set("json", "1")
+	if len(page) > 0 && page[0] > 0 {
+		q.Set("page", strconv.Itoa(page[0]))
+	}
 	u.RawQuery = q.Encode()
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u.String(), nil)

@@ -91,6 +91,21 @@ func main() {
 		*result.EngineAction.LevelAction.IsCorrectAnswer {
 		fmt.Println("Верный код!")
 	}
+
+	// Список игр с пагинацией
+	page2, _ := client.GetGameList(ctx, 2)
+	for _, g := range page2.ComingGames {
+		fmt.Printf("%d: %s (levels: %d)\n", g.GameID, g.Title, g.LevelNumber)
+	}
+
+	// Статистика игры
+	stats, _ := client.GetGameStatistics(ctx, 12345)
+	if stats.Game != nil {
+		fmt.Printf("Игра: %s, Уровней: %d\n", stats.Game.Title, len(stats.Levels))
+		for _, l := range stats.Levels {
+			fmt.Printf("  Уровень %d: %s\n", l.LevelNumber, l.LevelName)
+		}
+	}
 }
 ```
 
@@ -129,7 +144,22 @@ encli game-list
 encli status -game-id 12345
 
 # Задание текущего уровня
-encli task -game-id 12345
+encli level -game-id 12345
+
+# Все уровни с прогрессом
+encli levels -game-id 12345
+
+# Бонусы текущего уровня
+encli bonuses -game-id 12345
+
+# Подсказки (обычные и штрафные)
+encli hints -game-id 12345
+
+# Секторы текущего уровня
+encli sectors -game-id 12345
+
+# Лог пробитий кодов
+encli log -game-id 12345
 
 # Сообщения от организаторов
 encli messages -game-id 12345
@@ -143,6 +173,9 @@ encli send-bonus -game-id 12345 "БОНУС"
 
 # Запрос штрафной подсказки
 encli hint -game-id 12345 42
+
+# Статистика игры
+encli game-stats -game-id 12345
 
 # Версия
 encli -v
@@ -160,12 +193,18 @@ encli logout
 | `games` | Показывает список игр через HTML-страницу домена |
 | `game-list` | Показывает список игр через JSON API |
 | `status` | Показывает текущее состояние игры |
-| `task` | Печатает текст текущего задания |
+| `level` | Печатает текст текущего задания |
+| `levels` | Показывает все уровни с прогрессом |
+| `bonuses` | Показывает бонусы текущего уровня |
+| `hints` | Показывает подсказки (обычные и штрафные) |
+| `sectors` | Показывает секторы текущего уровня |
+| `log` | Показывает лог пробитий кодов |
 | `messages` | Показывает сообщения от организаторов |
 | `enter` | Подает заявку на вход в игру |
 | `send-code` | Отправляет код уровня |
 | `send-bonus` | Отправляет бонусный код |
 | `hint` | Запрашивает штрафную подсказку |
+| `game-stats` | Показывает статистику игры (уровни, команды, результаты) |
 | `-v` | Показывает версию |
 
 ### Флаги и переменные окружения
@@ -211,8 +250,9 @@ go build -o encli ./cmd/encli/
 | `SendCode` | `POST /gameengines/encounter/play/{id}` | Отправка кода уровня |
 | `SendBonusCode` | `POST /gameengines/encounter/play/{id}` | Отправка бонусного кода |
 | `GetPenaltyHint` | `GET /gameengines/encounter/play/{id}` | Запрос штрафной подсказки |
-| `GetGameList` | `GET /home/?json=1` | Список игр (JSON) |
+| `GetGameList` | `GET /home/?json=1` | Список игр (JSON, с пагинацией) |
 | `GetDomainGames` | `GET m.{domain}/` | Список игр (HTML) |
+| `GetGameStatistics` | `GET /gamestatistics/full/{id}?json=1` | Полная статистика игры |
 | `GetTimeoutToGame` | `GET m.{domain}/gameengines/encounter/play/{id}` | Таймер до начала |
 | `EnterGame` | `POST /gameengines/encounter/makefee/Login.aspx` | Вступить в игру |
 | `GetGameDetails` | `GET /GameDetails.aspx?gid={id}` | Детали игры (HTML) |
