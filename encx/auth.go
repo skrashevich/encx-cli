@@ -59,6 +59,10 @@ func (c *Client) Login(ctx context.Context, login, password string, opts ...Logi
 	}
 	defer resp.Body.Close()
 
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("encx: login request failed with HTTP %d", resp.StatusCode)
+	}
+
 	var result LoginResponse
 	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
 		return nil, fmt.Errorf("encx: decode login response: %w", err)

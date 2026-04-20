@@ -17,7 +17,18 @@ import (
 const (
 	openRouterURL   = "https://openrouter.ai/api/v1/chat/completions"
 	defaultLLMModel = "openai/gpt-4o-mini"
+	maxAgentTurns   = 20
 )
+
+// agentMode controls fatal behavior for nested tool execution: when true,
+// fatal panics instead of os.Exit so executeToolCallSafe can recover and
+// return a structured tool error back to the LLM.
+var agentMode bool
+
+// agentFatalError is the panic value used by fatal in agent mode.
+type agentFatalError struct {
+	Message string
+}
 
 // llmTool defines an OpenAI-compatible function tool.
 type llmTool struct {
@@ -34,12 +45,14 @@ type llmFunction struct {
 type llmRequest struct {
 	Model    string       `json:"model"`
 	Messages []llmMessage `json:"messages"`
-	Tools    []llmTool    `json:"tools"`
+	Tools    []llmTool    `json:"tools,omitempty"`
 }
 
 type llmMessage struct {
-	Role    string `json:"role"`
-	Content string `json:"content"`
+	Role       string        `json:"role"`
+	Content    string        `json:"content,omitempty"`
+	ToolCalls  []llmToolCall `json:"tool_calls,omitempty"`
+	ToolCallID string        `json:"tool_call_id,omitempty"`
 }
 
 type llmResponse struct {
@@ -50,15 +63,18 @@ type llmResponse struct {
 }
 
 type llmChoice struct {
-	Message llmAssistantMessage `json:"message"`
+	Message     llmAssistantMessage `json:"message"`
+	FinishReason string             `json:"finish_reason"`
 }
 
 type llmAssistantMessage struct {
-	Content   string         `json:"content"`
-	ToolCalls []llmToolCall  `json:"tool_calls"`
+	Content   string        `json:"content"`
+	ToolCalls []llmToolCall `json:"tool_calls"`
 }
 
 type llmToolCall struct {
+	ID       string              `json:"id"`
+	Type     string              `json:"type"`
 	Function llmToolCallFunction `json:"function"`
 }
 
@@ -101,7 +117,7 @@ func getTools() []llmTool {
 		}},
 		{Type: "function", Function: llmFunction{
 			Name:        "levels",
-			Description: "Show all levels with their pass/dismiss status",
+			Description: "Show all levels with pass/dismiss status for a game IN PROGRESS (player view). Use admin_levels for games not yet started or for management.",
 			Parameters:  json.RawMessage(`{"type":"object","properties":{"game_id":{"type":"integer","description":"Game ID"}},"required":["game_id"]}`),
 		}},
 		{Type: "function", Function: llmFunction{
@@ -131,7 +147,7 @@ func getTools() []llmTool {
 		}},
 		{Type: "function", Function: llmFunction{
 			Name:        "enter",
-			Description: "Enter a game (submit application to join)",
+			Description: "Submit application to join a game as a player (NOT start/launch a game — that can only be done via web UI)",
 			Parameters:  json.RawMessage(`{"type":"object","properties":{"game_id":{"type":"integer","description":"Game ID"}},"required":["game_id"]}`),
 		}},
 		{Type: "function", Function: llmFunction{
@@ -166,7 +182,7 @@ func getTools() []llmTool {
 		}},
 		{Type: "function", Function: llmFunction{
 			Name:        "admin_levels",
-			Description: "List all levels with their IDs in the admin panel",
+			Description: "List all levels with their IDs (admin panel). Works for any game you author — use this to see/manage levels even if game hasn't started.",
 			Parameters:  json.RawMessage(`{"type":"object","properties":{"game_id":{"type":"integer","description":"Game ID"}},"required":["game_id"]}`),
 		}},
 		{Type: "function", Function: llmFunction{
@@ -278,12 +294,14 @@ func cmdLLM(ctx context.Context, cfg *config, client *encx.Client, prompt string
 		model = defaultLLMModel
 	}
 
-	// Force JSON output in LLM mode for structured results
+	// Force JSON output in LLM mode for structured results.
+	// Keep fatal exit behavior at the top level; only nested tool calls should
+	// panic and be recovered back into the agent loop.
 	cfg.jsonOutput = true
 	jsonMode = true
 
-	systemPrompt := `You are an assistant for the Encounter (en.cx) game engine CLI tool.
-The user gives you a natural language request. You must call the appropriate tool to fulfill it.
+	systemPrompt := `You are an autonomous agent for the Encounter (en.cx) game engine CLI tool.
+The user gives you a natural language request. Execute it step by step using the available tools.
 The current domain is: ` + cfg.domain + `
 ` + func() string {
 		if cfg.gameId != 0 {
@@ -292,82 +310,150 @@ The current domain is: ` + cfg.domain + `
 		return ""
 	}() + `
 Rules:
-- Always use tool calls to execute commands. Never just describe what to do.
-- If the user mentions a game ID, use it. If not and there's a current game ID set, use that.
-- For admin_copy_game: the source is -game-id (or mentioned first), the target is the second game ID mentioned.
+- Execute multi-step tasks by calling tools one at a time. You will receive the result of each tool call.
+- Use tool results to inform your next action (e.g., get level IDs before renaming levels).
+- When all steps are complete, respond with a text summary of what was done.
+- If a tool call fails, try to recover or report the error.
+- For admin_copy_game: source is the first game mentioned, target is the second.
+- Prefer admin_* tools for game management (viewing levels, creating content). Player tools (levels, status, bonuses) are for games IN PROGRESS.
+- Starting/launching a game is NOT available via CLI — only through the web interface. Inform the user if they ask.
+- When asked to CREATE a game/levels, make them INTERESTING and DIFFERENT: give unique names, add tasks with creative quest text, add sectors with answers, add hints. Don't just create empty shells.
 - Respond in the same language as the user's request.`
 
+	messages := []llmMessage{
+		{Role: "system", Content: systemPrompt},
+		{Role: "user", Content: prompt},
+	}
+
+	tools := getTools()
+
+	for turn := 0; turn < maxAgentTurns; turn++ {
+		resp, err := callLLM(ctx, apiKey, model, messages, tools)
+		if err != nil {
+			fatal("LLM API error: %v", err)
+		}
+
+		if len(resp.Choices) == 0 {
+			fatal("LLM returned no choices")
+		}
+
+		choice := resp.Choices[0]
+
+		// No tool calls — LLM is done, print final response
+		if len(choice.Message.ToolCalls) == 0 {
+			if choice.Message.Content != "" {
+				fmt.Println(choice.Message.Content)
+			}
+			return
+		}
+
+		// Append assistant message with tool calls to conversation
+		messages = append(messages, llmMessage{
+			Role:      "assistant",
+			ToolCalls: choice.Message.ToolCalls,
+		})
+
+		// Execute each tool call and append results
+		for _, tc := range choice.Message.ToolCalls {
+			fmt.Fprintf(os.Stderr, "[%s] %s\n", tc.Function.Name, tc.Function.Arguments)
+
+			result := executeToolCallSafe(ctx, cfg, client, tc.Function.Name, tc.Function.Arguments)
+
+			messages = append(messages, llmMessage{
+				Role:       "tool",
+				Content:    result,
+				ToolCallID: tc.ID,
+			})
+		}
+	}
+
+	fmt.Fprintln(os.Stderr, "Warning: agent reached maximum iterations")
+}
+
+func callLLM(ctx context.Context, apiKey, model string, messages []llmMessage, tools []llmTool) (*llmResponse, error) {
+	ctx, cancel := context.WithTimeout(ctx, 60*time.Second)
+	defer cancel()
+
 	req := llmRequest{
-		Model: model,
-		Messages: []llmMessage{
-			{Role: "system", Content: systemPrompt},
-			{Role: "user", Content: prompt},
-		},
-		Tools: getTools(),
+		Model:    model,
+		Messages: messages,
+		Tools:    tools,
 	}
 
 	body, err := json.Marshal(req)
 	if err != nil {
-		fatal("Failed to marshal LLM request: %v", err)
+		return nil, fmt.Errorf("marshal request: %w", err)
 	}
-
-	ctx, cancel := context.WithTimeout(ctx, 60*time.Second)
-	defer cancel()
 
 	httpReq, err := http.NewRequestWithContext(ctx, "POST", openRouterURL, bytes.NewReader(body))
 	if err != nil {
-		fatal("Failed to create HTTP request: %v", err)
+		return nil, fmt.Errorf("create request: %w", err)
 	}
 	httpReq.Header.Set("Content-Type", "application/json")
 	httpReq.Header.Set("Authorization", "Bearer "+apiKey)
 
 	resp, err := http.DefaultClient.Do(httpReq)
 	if err != nil {
-		fatal("LLM API request failed: %v", err)
+		return nil, fmt.Errorf("HTTP request: %w", err)
 	}
 	defer resp.Body.Close()
 
 	respBody, err := io.ReadAll(io.LimitReader(resp.Body, 10*1024*1024))
 	if err != nil {
-		fatal("Failed to read LLM response: %v", err)
+		return nil, fmt.Errorf("read response: %w", err)
 	}
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		fatal("LLM API HTTP error %d: %s", resp.StatusCode, string(respBody))
+		return nil, fmt.Errorf("HTTP %d: %s", resp.StatusCode, string(respBody))
 	}
 
 	var llmResp llmResponse
 	if err := json.Unmarshal(respBody, &llmResp); err != nil {
-		fatal("Failed to parse LLM response: %v", err)
+		return nil, fmt.Errorf("parse response: %w", err)
 	}
 
 	if llmResp.Error != nil {
-		fatal("LLM API error: %s", llmResp.Error.Message)
+		return nil, fmt.Errorf("%s", llmResp.Error.Message)
 	}
 
-	if len(llmResp.Choices) == 0 {
-		fatal("LLM returned no choices")
-	}
+	return &llmResp, nil
+}
 
-	choice := llmResp.Choices[0]
+// executeToolCallSafe runs a tool call, capturing stdout and recovering from fatal panics.
+func executeToolCallSafe(ctx context.Context, cfg *config, client *encx.Client, name, argsJSON string) string {
+	// Capture stdout
+	oldStdout := os.Stdout
+	r, w, _ := os.Pipe()
+	os.Stdout = w
+	oldAgentMode := agentMode
+	agentMode = true
 
-	if len(choice.Message.ToolCalls) == 0 {
-		// No tool call — just print the text response
-		if choice.Message.Content != "" {
-			fmt.Println(choice.Message.Content)
-		} else {
-			fatal("LLM did not produce a tool call or text response")
-		}
-		return
-	}
+	var result string
+	func() {
+		defer func() {
+			agentMode = oldAgentMode
+			if rec := recover(); rec != nil {
+				if fe, ok := rec.(agentFatalError); ok {
+					result = fmt.Sprintf(`{"error": %q}`, fe.Message)
+				} else {
+					result = fmt.Sprintf(`{"error": "panic: %v"}`, rec)
+				}
+			}
+		}()
+		executeLLMToolCall(ctx, cfg, client, name, argsJSON)
+	}()
 
-	// Execute the first tool call
-	tc := choice.Message.ToolCalls[0]
-	if len(choice.Message.ToolCalls) > 1 {
-		fmt.Fprintf(os.Stderr, "Warning: LLM produced %d tool calls, executing only the first (%s)\n",
-			len(choice.Message.ToolCalls), tc.Function.Name)
+	w.Close()
+	captured, _ := io.ReadAll(r)
+	os.Stdout = oldStdout
+
+	if result == "" {
+		result = string(captured)
 	}
-	executeLLMToolCall(ctx, cfg, client, tc.Function.Name, tc.Function.Arguments)
+	if result == "" {
+		result = `{"success": true}`
+	}
+	return result
 }
 
 func executeLLMToolCall(ctx context.Context, cfg *config, client *encx.Client, name, argsJSON string) {
@@ -378,7 +464,6 @@ func executeLLMToolCall(ctx context.Context, cfg *config, client *encx.Client, n
 		}
 	}
 
-	// Helper to extract int from args
 	getInt := func(key string) int {
 		v, ok := args[key]
 		if !ok {
@@ -421,7 +506,6 @@ func executeLLMToolCall(ctx context.Context, cfg *config, client *encx.Client, n
 		return result
 	}
 
-	// Apply game_id from args if present
 	if gid := getInt("game_id"); gid != 0 {
 		cfg.gameId = gid
 	}
@@ -653,4 +737,3 @@ func executeLLMToolCall(ctx context.Context, cfg *config, client *encx.Client, n
 		fatal("Unknown tool call: %s", name)
 	}
 }
-
