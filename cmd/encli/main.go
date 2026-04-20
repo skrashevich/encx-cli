@@ -358,8 +358,11 @@ Environment variables:
   ENCX_GAME_ID         Game ID
   ENCX_INSECURE        Skip TLS verification (1/true)
   ENCX_DEBUG           Enable debug logging (1/true)
-  OPENROUTER_API_KEY   API key for --llm mode (required)
-  OPENROUTER_MODEL     LLM model override (default: openai/gpt-oss-120b:free)
+  LLM_BASE_URL         OpenAI-compatible API base URL (default: https://openrouter.ai/api/v1)
+  LLM_API_KEY          API key for --llm mode (not required for localhost)
+  LLM_MODEL            LLM model override (default: openai/gpt-oss-120b:free)
+  OPENROUTER_API_KEY   Alias for LLM_API_KEY (backward compat)
+  OPENROUTER_MODEL     Alias for LLM_MODEL (backward compat)
 
 Examples:
   encli login -login svk -password secret -insecure
