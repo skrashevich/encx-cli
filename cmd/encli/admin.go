@@ -562,6 +562,65 @@ func cmdAdminCopyGame(ctx context.Context, cfg *config, client *encx.Client, arg
 	}
 }
 
+func cmdAdminGameInfo(ctx context.Context, cfg *config, client *encx.Client) {
+	requireGameId(cfg)
+	info, err := client.AdminGetGameInfo(ctx, cfg.gameId)
+	if err != nil {
+		fatal("Failed to get game info: %v", err)
+	}
+	if cfg.jsonOutput {
+		outputJSON(info)
+		return
+	}
+	fmt.Printf("Title:       %s\n", info.Title)
+	fmt.Printf("Authors:     %s\n", info.Authors)
+	fmt.Printf("Prize:       %s\n", info.Prize)
+	fmt.Printf("Finish:      %s\n", info.FinishDateTime)
+	fmt.Printf("Moderated:   %v\n", info.IsModerated)
+	fmt.Printf("Description: %s\n", stripHTML(info.Description))
+}
+
+func cmdAdminUpdateGame(ctx context.Context, cfg *config, client *encx.Client, args []string) {
+	requireGameId(cfg)
+
+	// First read current info to preserve unchanged fields.
+	info, err := client.AdminGetGameInfo(ctx, cfg.gameId)
+	if err != nil {
+		fatal("Failed to read current game info: %v", err)
+	}
+
+	// Parse key=value args to override specific fields.
+	for _, arg := range args {
+		key, val, ok := strings.Cut(arg, "=")
+		if !ok {
+			fatal("Arguments must be in key=value format. Got: %s", arg)
+		}
+		switch strings.ToLower(key) {
+		case "title":
+			info.Title = val
+		case "authors":
+			info.Authors = val
+		case "description", "descr":
+			info.Description = val
+		case "prize":
+			info.Prize = val
+		case "finish":
+			info.FinishDateTime = val
+		default:
+			fatal("Unknown field: %s (supported: title, authors, description, prize, finish)", key)
+		}
+	}
+
+	if err := client.AdminUpdateGameInfo(ctx, cfg.gameId, *info); err != nil {
+		fatal("Failed to update game info: %v", err)
+	}
+	if cfg.jsonOutput {
+		outputJSON(map[string]any{"success": true, "game_id": cfg.gameId})
+		return
+	}
+	fmt.Println("Game info updated")
+}
+
 // parseHMS parses a time string in format "HH:MM:SS" or "MM:SS" or "SS".
 func parseHMS(s string) (h, m, sec int) {
 	parts := strings.Split(s, ":")

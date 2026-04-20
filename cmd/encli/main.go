@@ -279,6 +279,12 @@ func main() {
 	case "admin-copy-game":
 		requireAuth(ctx, cfg, client)
 		cmdAdminCopyGame(ctx, cfg, client, positional)
+	case "admin-game-info":
+		requireAuth(ctx, cfg, client)
+		cmdAdminGameInfo(ctx, cfg, client)
+	case "admin-update-game":
+		requireAuth(ctx, cfg, client)
+		cmdAdminUpdateGame(ctx, cfg, client, positional)
 
 	case "help":
 		printUsage()

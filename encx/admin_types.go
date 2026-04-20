@@ -110,6 +110,35 @@ type AdminCorrection struct {
 	Comment  string `json:"comment"`
 }
 
+// AdminGameInfo holds the data from the game editor page (GameEditor.aspx).
+type AdminGameInfo struct {
+	Title          string `json:"title"`
+	Authors        string `json:"authors"`
+	Description    string `json:"description"`
+	Prize          string `json:"prize"`
+	FinishDateTime string `json:"finish_datetime,omitempty"`
+	RequestLastDate string `json:"request_last_date,omitempty"`
+	IsModerated    bool   `json:"is_moderated"`
+
+	// Visibility settings
+	GameStatAvailability     string `json:"game_stat_availability,omitempty"`
+	GameScenarioAvailability string `json:"game_scenario_availability,omitempty"`
+	ShowFinishPlace          bool   `json:"show_finish_place"`
+
+	// Limits
+	MaxPlayers     string `json:"max_players,omitempty"`
+	MaxTeamPlayers string `json:"max_team_players,omitempty"`
+
+	// Rating/certificates
+	ShowFee         string `json:"show_fee,omitempty"`
+	CertificateMode string `json:"certificate_mode,omitempty"`
+	FirstPlaces     string `json:"first_places,omitempty"`
+	NotFirstPlaces  string `json:"not_first_places,omitempty"`
+	AcceptRateMode  string `json:"accept_rate_mode,omitempty"`
+	AcceptRateFrom  string `json:"accept_rate_from,omitempty"`
+	AuthorComplexity string `json:"author_complexity,omitempty"`
+}
+
 // AdminCorrectionAdd holds the data for adding a new time correction.
 type AdminCorrectionAdd struct {
 	TeamName       string `json:"team_name"`

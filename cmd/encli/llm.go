@@ -334,6 +334,16 @@ func getTools(reviewMode bool) []llmTool {
 			Description: "Copy entire game (levels, settings, bonuses, sectors, hints) from source to target game",
 			Parameters:  json.RawMessage(`{"type":"object","properties":{"source_game_id":{"type":"integer","description":"Source game ID to copy from"},"target_game_id":{"type":"integer","description":"Target game ID to copy to"}},"required":["source_game_id","target_game_id"]}`),
 		}},
+		{Type: "function", Function: llmFunction{
+			Name:        "admin_game_info",
+			Description: "Read game settings: title, authors, description, prize, dates",
+			Parameters:  json.RawMessage(`{"type":"object","properties":{"game_id":{"type":"integer","description":"Game ID"}},"required":["game_id"]}`),
+		}},
+		{Type: "function", Function: llmFunction{
+			Name:        "admin_update_game",
+			Description: "Update game settings (title, description, authors, prize, finish date). Only specified fields are changed; others are preserved.",
+			Parameters:  json.RawMessage(`{"type":"object","properties":{"game_id":{"type":"integer","description":"Game ID"},"title":{"type":"string","description":"Game title"},"authors":{"type":"string","description":"Game authors"},"description":{"type":"string","description":"Game description (HTML)"},"prize":{"type":"string","description":"Prize value"},"finish":{"type":"string","description":"Finish datetime DD.MM.YYYY HH:MM:SS"}},"required":["game_id"]}`),
+		}},
 	}
 	if reviewMode {
 		tools = append(tools, llmTool{Type: "function", Function: llmFunction{
@@ -413,6 +423,9 @@ Rules:
 	tools := getTools(session.reviewApprovalMode)
 	debugf("llm mode initialized: url=%s model=%s review_mode=%v tools=%d prompt=%q", apiURL, model, session.reviewApprovalMode, len(tools), summarizeDebugText(prompt, 0))
 
+	// Fetch pricing info (OpenRouter → from API, localhost → free).
+	pricing := fetchLLMPricing(ctx, baseURL, apiKey, model)
+
 	// Timing and usage tracking.
 	totalStart := time.Now()
 	var llmDuration time.Duration
@@ -427,27 +440,44 @@ Rules:
 		if otherDuration < 0 {
 			otherDuration = 0
 		}
-		rt := session.reviewText
 
-		fmt.Fprintln(os.Stderr)
-		fmt.Fprintln(os.Stderr, rt("--- Execution Report ---", "--- Отчёт о выполнении ---"))
-		fmt.Fprintf(os.Stderr, rt("Total time:    %s\n", "Общее время:      %s\n"), totalElapsed.Round(time.Millisecond))
-		fmt.Fprintf(os.Stderr, rt("  LLM time:    %s\n", "  Время LLM:      %s\n"), llmDuration.Round(time.Millisecond))
-		fmt.Fprintf(os.Stderr, rt("  Tool time:   %s\n", "  Время тулзов:   %s\n"), toolDuration.Round(time.Millisecond))
-		fmt.Fprintf(os.Stderr, rt("  Overhead:    %s\n", "  Накладные:      %s\n"), otherDuration.Round(time.Millisecond))
-		fmt.Fprintf(os.Stderr, rt("LLM turns:     %d\n", "Запросов к LLM:   %d\n"), turns)
-		fmt.Fprintf(os.Stderr, rt("Tool calls:    %d\n", "Вызовов тулзов:   %d\n"), totalToolCalls)
-
-		if totalPromptTokens > 0 || totalCompletionTokens > 0 {
-			total := totalPromptTokens + totalCompletionTokens
-			fmt.Fprintf(os.Stderr, rt("Tokens:        %d (in: %d, out: %d)\n",
-				"Токены:           %d (вход: %d, выход: %d)\n"),
-				total, totalPromptTokens, totalCompletionTokens)
-			cost := estimateLLMCost(model, totalPromptTokens, totalCompletionTokens)
-			if cost > 0 {
-				fmt.Fprintf(os.Stderr, rt("Est. cost:     $%.4f\n", "Прим. стоимость:  $%.4f\n"), cost)
+		var report strings.Builder
+		if session.preferRussian {
+			fmt.Fprintf(&report, "\n--- Отчёт о выполнении ---\n")
+			fmt.Fprintf(&report, "Общее время:      %s\n", totalElapsed.Round(time.Millisecond))
+			fmt.Fprintf(&report, "  Время LLM:      %s\n", llmDuration.Round(time.Millisecond))
+			fmt.Fprintf(&report, "  Время тулзов:   %s\n", toolDuration.Round(time.Millisecond))
+			fmt.Fprintf(&report, "  Накладные:      %s\n", otherDuration.Round(time.Millisecond))
+			fmt.Fprintf(&report, "Запросов к LLM:   %d\n", turns)
+			fmt.Fprintf(&report, "Вызовов тулзов:   %d\n", totalToolCalls)
+			if totalPromptTokens > 0 || totalCompletionTokens > 0 {
+				fmt.Fprintf(&report, "Токены:           %d (вход: %d, выход: %d)\n",
+					totalPromptTokens+totalCompletionTokens, totalPromptTokens, totalCompletionTokens)
+				if pricing != nil && pricing.isLocal {
+					fmt.Fprintf(&report, "Стоимость:        $0 (локальный прокси)\n")
+				} else if cost := computeLLMCost(pricing, totalPromptTokens, totalCompletionTokens); cost > 0 {
+					fmt.Fprintf(&report, "Стоимость:        $%.4f\n", cost)
+				}
+			}
+		} else {
+			fmt.Fprintf(&report, "\n--- Execution Report ---\n")
+			fmt.Fprintf(&report, "Total time:    %s\n", totalElapsed.Round(time.Millisecond))
+			fmt.Fprintf(&report, "  LLM time:    %s\n", llmDuration.Round(time.Millisecond))
+			fmt.Fprintf(&report, "  Tool time:   %s\n", toolDuration.Round(time.Millisecond))
+			fmt.Fprintf(&report, "  Overhead:    %s\n", otherDuration.Round(time.Millisecond))
+			fmt.Fprintf(&report, "LLM turns:     %d\n", turns)
+			fmt.Fprintf(&report, "Tool calls:    %d\n", totalToolCalls)
+			if totalPromptTokens > 0 || totalCompletionTokens > 0 {
+				fmt.Fprintf(&report, "Tokens:        %d (in: %d, out: %d)\n",
+					totalPromptTokens+totalCompletionTokens, totalPromptTokens, totalCompletionTokens)
+				if pricing != nil && pricing.isLocal {
+					fmt.Fprintf(&report, "Cost:          $0 (local proxy)\n")
+				} else if cost := computeLLMCost(pricing, totalPromptTokens, totalCompletionTokens); cost > 0 {
+					fmt.Fprintf(&report, "Cost:          $%.4f\n", cost)
+				}
 			}
 		}
+		fmt.Fprint(os.Stderr, report.String())
 	}
 
 	for turn := 0; turn < maxAgentTurns; turn++ {
@@ -982,6 +1012,30 @@ func executeLLMToolCall(ctx context.Context, cfg *config, client *encx.Client, s
 		requireAuth(ctx, cfg, client)
 		cmdAdminCopyGame(ctx, cfg, client, []string{strconv.Itoa(targetID)})
 
+	case "admin_game_info":
+		requireAuth(ctx, cfg, client)
+		cmdAdminGameInfo(ctx, cfg, client)
+
+	case "admin_update_game":
+		requireAuth(ctx, cfg, client)
+		var positional []string
+		if t := getString("title"); t != "" {
+			positional = append(positional, "title="+t)
+		}
+		if a := getString("authors"); a != "" {
+			positional = append(positional, "authors="+a)
+		}
+		if d := getString("description"); d != "" {
+			positional = append(positional, "description="+d)
+		}
+		if p := getString("prize"); p != "" {
+			positional = append(positional, "prize="+p)
+		}
+		if f := getString("finish"); f != "" {
+			positional = append(positional, "finish="+f)
+		}
+		cmdAdminUpdateGame(ctx, cfg, client, positional)
+
 	default:
 		fatal("Unknown tool call: %s", name)
 	}
@@ -1012,7 +1066,8 @@ func isAdminMutationTool(name string) bool {
 		"admin_add_correction",
 		"admin_delete_correction",
 		"admin_wipe_game",
-		"admin_copy_game":
+		"admin_copy_game",
+		"admin_update_game":
 		return true
 	default:
 		return false
@@ -1317,6 +1372,10 @@ func formatToolCallForDisplay(session *llmSession, name, argsJSON string) string
 	case "admin_copy_game":
 		src := getAnyInt(args["source_game_id"])
 		return fmt.Sprintf("[admin_copy_game] "+rt("Copying game from %d", "Копирую игру из %d"), src)
+	case "admin_game_info":
+		return "[admin_game_info] " + rt("Reading game info", "Читаю информацию об игре")
+	case "admin_update_game":
+		return "[admin_update_game] " + rt("Updating game info", "Обновляю информацию об игре")
 	case "propose_admin_fix":
 		title := getAnyString(args["title"])
 		return "[propose_admin_fix] " + title
@@ -1500,39 +1559,106 @@ func (s *llmSession) reviewText(english, russian string) string {
 	return english
 }
 
-// estimateLLMCost returns estimated cost in USD based on model and token counts.
-// Pricing is approximate for common OpenRouter models; returns 0 for unknown models.
-func estimateLLMCost(model string, promptTokens, completionTokens int) float64 {
-	type pricing struct {
-		prefix     string
-		inputPerM  float64
-		outputPerM float64
+// llmPricing holds per-token costs fetched from the provider API.
+type llmPricing struct {
+	promptCostPerToken     float64
+	completionCostPerToken float64
+	isLocal                bool // local proxy = free subscription
+}
+
+// fetchLLMPricing resolves pricing for the model at session start.
+// Returns nil if cost cannot be determined.
+func fetchLLMPricing(ctx context.Context, baseURL, apiKey, model string) *llmPricing {
+	if strings.Contains(baseURL, "localhost") || strings.Contains(baseURL, "127.0.0.1") {
+		return &llmPricing{isLocal: true}
 	}
 
-	// Ordered longest-prefix-first so that more specific entries win.
-	prices := []pricing{
-		{"openai/gpt-4o-mini", 0.15, 0.6},
-		{"openai/gpt-4o", 2.5, 10.0},
-		{"openai/gpt-4-turbo", 10.0, 30.0},
-		{"openai/gpt-4.1-nano", 0.1, 0.4},
-		{"openai/gpt-4.1-mini", 0.4, 1.6},
-		{"openai/gpt-4.1", 2.0, 8.0},
-		{"anthropic/claude-sonnet-4", 3.0, 15.0},
-		{"anthropic/claude-3.5-sonnet", 3.0, 15.0},
-		{"anthropic/claude-3-haiku", 0.25, 1.25},
-		{"google/gemini-2.5-pro", 1.25, 10.0},
-		{"google/gemini-2.5-flash", 0.15, 0.6},
-		{"deepseek/deepseek-chat", 0.14, 0.28},
-		{"deepseek/deepseek-r1", 0.55, 2.19},
+	if !strings.Contains(baseURL, "openrouter.ai") {
+		return nil
 	}
 
-	for _, p := range prices {
-		if model == p.prefix || strings.HasPrefix(model, p.prefix) {
-			return (float64(promptTokens)/1_000_000)*p.inputPerM +
-				(float64(completionTokens)/1_000_000)*p.outputPerM
+	modelsURL := strings.TrimRight(baseURL, "/") + "/models"
+	debugf("fetching model pricing from %s for model=%s", modelsURL, model)
+
+	reqCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+
+	httpReq, err := http.NewRequestWithContext(reqCtx, "GET", modelsURL, nil)
+	if err != nil {
+		debugf("pricing fetch: create request failed: %v", err)
+		return nil
+	}
+	if apiKey != "" {
+		httpReq.Header.Set("Authorization", "Bearer "+apiKey)
+	}
+
+	resp, err := http.DefaultClient.Do(httpReq)
+	if err != nil {
+		debugf("pricing fetch: request failed: %v", err)
+		return nil
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != 200 {
+		debugf("pricing fetch: HTTP %d", resp.StatusCode)
+		return nil
+	}
+
+	body, err := io.ReadAll(io.LimitReader(resp.Body, 5*1024*1024))
+	if err != nil {
+		debugf("pricing fetch: read failed: %v", err)
+		return nil
+	}
+
+	var result struct {
+		Data []struct {
+			ID      string `json:"id"`
+			Pricing *struct {
+				Prompt     string `json:"prompt"`
+				Completion string `json:"completion"`
+			} `json:"pricing"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(body, &result); err != nil {
+		debugf("pricing fetch: parse failed: %v", err)
+		return nil
+	}
+
+	// Strip :free, :extended etc. suffixes for matching.
+	baseModel := model
+	if idx := strings.LastIndex(model, ":"); idx > 0 {
+		baseModel = model[:idx]
+	}
+
+	for _, m := range result.Data {
+		if m.ID == model || m.ID == baseModel {
+			if m.Pricing == nil {
+				return nil
+			}
+			promptCost, _ := strconv.ParseFloat(m.Pricing.Prompt, 64)
+			completionCost, _ := strconv.ParseFloat(m.Pricing.Completion, 64)
+			if promptCost == 0 && completionCost == 0 {
+				return &llmPricing{} // free model
+			}
+			debugf("pricing resolved: model=%s prompt=%.10f/tok completion=%.10f/tok", model, promptCost, completionCost)
+			return &llmPricing{
+				promptCostPerToken:     promptCost,
+				completionCostPerToken: completionCost,
+			}
 		}
 	}
-	return 0
+
+	debugf("pricing fetch: model %q not found in %d models", model, len(result.Data))
+	return nil
+}
+
+// computeLLMCost returns the total cost in USD given pricing and token counts.
+func computeLLMCost(pricing *llmPricing, promptTokens, completionTokens int) float64 {
+	if pricing == nil || pricing.isLocal {
+		return 0
+	}
+	return float64(promptTokens)*pricing.promptCostPerToken +
+		float64(completionTokens)*pricing.completionCostPerToken
 }
 
 func summarizeDebugArgs(argsJSON string) string {
