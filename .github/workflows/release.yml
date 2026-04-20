@@ -51,7 +51,7 @@ jobs:
           go build -ldflags="-s -w -X main.version=${VERSION}" -o encli-${{ matrix.goos }}-${{ matrix.goarch }}${ext} ./cmd/encli/
 
       - name: Compress with UPX
-        if: matrix.goos == 'linux' || matrix.goos == 'windows'
+        if: (matrix.goos == 'linux' || matrix.goos == 'windows') && !(matrix.goos == 'windows' && matrix.goarch == 'arm64')
         uses: crazy-max/ghaction-upx@v3
         with:
           files: encli-${{ matrix.goos }}-${{ matrix.goarch }}*
