@@ -235,7 +235,11 @@ encli admin-corrections -game-id 12345
 encli admin-add-correction -game-id 12345 "Team Name" bonus 0:10:00 0 "за красоту"
 encli admin-delete-correction -game-id 12345 444
 
+# Полная очистка игры (обнуление)
+encli admin-wipe-game -game-id 67890
+
 # Копирование игры целиком (из 12345 в 67890)
+# Рекомендуется сначала admin-wipe-game на целевой
 encli admin-copy-game -game-id 12345 67890
 ```
 
@@ -284,6 +288,7 @@ encli admin-copy-game -game-id 12345 67890
 | `admin-corrections` | Показывает начисления бонусного/штрафного времени |
 | `admin-add-correction` | Добавляет начисление времени |
 | `admin-delete-correction` | Удаляет начисление по ID |
+| `admin-wipe-game` | Полностью обнуляет игру (удаляет всё содержимое) |
 | `admin-copy-game` | Копирует всю игру (уровни, настройки, бонусы, секторы, подсказки) в другую |
 
 ### Флаги и переменные окружения
@@ -360,6 +365,16 @@ go build -o encli ./cmd/encli/
 | `AdminGetCorrections` | `GET /GameBonusPenaltyTime.aspx` | Список начислений времени |
 | `AdminAddCorrection` | `POST /GameBonusPenaltyTime.aspx?action=save` | Добавление начисления |
 | `AdminDeleteCorrection` | `GET /GameBonusPenaltyTime.aspx?action=delete` | Удаление начисления |
+| `AdminGetLevelSettings` | `GET /Administration/Games/LevelEditor.aspx` | Чтение настроек уровня (автопереход, блокировка) |
+| `AdminGetBonusIds` | `GET /Administration/Games/LevelEditor.aspx` | Список ID бонусов на уровне |
+| `AdminGetBonus` | `GET /Administration/Games/BonusEdit.aspx?action=edit` | Чтение деталей бонуса |
+| `AdminGetHintIds` | `GET /Administration/Games/LevelEditor.aspx` | Список ID подсказок на уровне |
+| `AdminGetHint` | `GET /Administration/Games/PromptEdit.aspx?action=PromptEdit` | Чтение деталей подсказки (обычной и штрафной) |
+| `AdminGetTaskIds` | `GET /Administration/Games/LevelEditor.aspx` | Список ID заданий на уровне |
+| `AdminGetTask` | `GET /Administration/Games/TaskEdit.aspx?action=TaskEdit` | Чтение деталей задания |
+| `AdminGetComment` | `GET /Administration/Games/NameCommentEdit.aspx` | Чтение названия и комментария уровня |
+| `AdminGetSectorAnswers` | `GET /ALoader/LevelInfo.aspx` | Чтение секторов и ответов уровня |
+| `AdminWipeGame` | (комбинированный) | Полная очистка игры (удаление всего содержимого) |
 | `AdminCopyGame` | (комбинированный) | Полное копирование игры (уровни, настройки, бонусы, секторы, подсказки) |
 
 Полная неофициальная (полученная методом реверс-инжиниринга) спецификация API в формате OpenAPI 3.1: [openapi.yaml](openapi.yaml).
