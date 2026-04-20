@@ -152,6 +152,63 @@ func main() {
 	case "game-stats":
 		requireAuth(ctx, cfg, client)
 		cmdGameStats(ctx, cfg, client)
+
+	// Admin commands
+	case "admin-levels":
+		requireAuth(ctx, cfg, client)
+		cmdAdminLevels(ctx, cfg, client)
+	case "admin-create-levels":
+		requireAuth(ctx, cfg, client)
+		cmdAdminCreateLevels(ctx, cfg, client, positional)
+	case "admin-delete-level":
+		requireAuth(ctx, cfg, client)
+		cmdAdminDeleteLevel(ctx, cfg, client, positional)
+	case "admin-rename-level":
+		requireAuth(ctx, cfg, client)
+		cmdAdminRenameLevel(ctx, cfg, client, positional)
+	case "admin-set-autopass":
+		requireAuth(ctx, cfg, client)
+		cmdAdminUpdateAutopass(ctx, cfg, client, positional)
+	case "admin-set-block":
+		requireAuth(ctx, cfg, client)
+		cmdAdminUpdateAnswerBlock(ctx, cfg, client, positional)
+	case "admin-create-bonus":
+		requireAuth(ctx, cfg, client)
+		cmdAdminCreateBonus(ctx, cfg, client, positional)
+	case "admin-delete-bonus":
+		requireAuth(ctx, cfg, client)
+		cmdAdminDeleteBonus(ctx, cfg, client, positional)
+	case "admin-create-sector":
+		requireAuth(ctx, cfg, client)
+		cmdAdminCreateSector(ctx, cfg, client, positional)
+	case "admin-delete-sector":
+		requireAuth(ctx, cfg, client)
+		cmdAdminDeleteSector(ctx, cfg, client, positional)
+	case "admin-create-hint":
+		requireAuth(ctx, cfg, client)
+		cmdAdminCreateHint(ctx, cfg, client, positional)
+	case "admin-delete-hint":
+		requireAuth(ctx, cfg, client)
+		cmdAdminDeleteHint(ctx, cfg, client, positional)
+	case "admin-create-task":
+		requireAuth(ctx, cfg, client)
+		cmdAdminCreateTask(ctx, cfg, client, positional)
+	case "admin-set-comment":
+		requireAuth(ctx, cfg, client)
+		cmdAdminSetComment(ctx, cfg, client, positional)
+	case "admin-teams":
+		requireAuth(ctx, cfg, client)
+		cmdAdminTeams(ctx, cfg, client)
+	case "admin-corrections":
+		requireAuth(ctx, cfg, client)
+		cmdAdminCorrections(ctx, cfg, client)
+	case "admin-add-correction":
+		requireAuth(ctx, cfg, client)
+		cmdAdminAddCorrection(ctx, cfg, client, positional)
+	case "admin-delete-correction":
+		requireAuth(ctx, cfg, client)
+		cmdAdminDeleteCorrection(ctx, cfg, client, positional)
+
 	case "help":
 		printUsage()
 	default:
@@ -184,6 +241,26 @@ Commands:
   send-bonus  Send a bonus code
   hint        Request a penalty hint
   game-stats  Show game statistics (levels, teams, rankings)
+
+Admin commands (require game editor rights):
+  admin-levels             List levels with IDs (admin)
+  admin-create-levels      Create new levels
+  admin-delete-level       Delete a level by number
+  admin-rename-level       Rename a level
+  admin-set-autopass       Set level autopass timer
+  admin-set-block          Set level answer block settings
+  admin-create-bonus       Create a bonus on a level
+  admin-delete-bonus       Delete a bonus by ID
+  admin-create-sector      Create a sector on a level
+  admin-delete-sector      Delete a sector by ID
+  admin-create-hint        Create a hint on a level
+  admin-delete-hint        Delete a hint by ID
+  admin-create-task        Create a task on a level
+  admin-set-comment        Set level name and comment
+  admin-teams              List teams in the game
+  admin-corrections        List bonus/penalty time corrections
+  admin-add-correction     Add a time correction
+  admin-delete-correction  Delete a time correction
 
 Global flags:
   -domain      Encounter domain (default: tech.en.cx)
@@ -268,6 +345,60 @@ func printCommandHelp(cmd string) {
 	case "game-stats":
 		fmt.Fprintln(os.Stderr, "Usage: encli game-stats -game-id <id>")
 		fmt.Fprintln(os.Stderr, "  Show game statistics: levels, teams, rankings.")
+	case "admin-levels":
+		fmt.Fprintln(os.Stderr, "Usage: encli admin-levels -game-id <id>")
+		fmt.Fprintln(os.Stderr, "  List all levels with their IDs (admin panel).")
+	case "admin-create-levels":
+		fmt.Fprintln(os.Stderr, "Usage: encli admin-create-levels -game-id <id> <count>")
+		fmt.Fprintln(os.Stderr, "  Create the specified number of new levels.")
+	case "admin-delete-level":
+		fmt.Fprintln(os.Stderr, "Usage: encli admin-delete-level -game-id <id> <level-number>")
+		fmt.Fprintln(os.Stderr, "  Delete a level by its number (from the end).")
+	case "admin-rename-level":
+		fmt.Fprintln(os.Stderr, "Usage: encli admin-rename-level -game-id <id> <level-id> <new-name>")
+		fmt.Fprintln(os.Stderr, "  Rename a level (use level ID from admin-levels).")
+	case "admin-set-autopass":
+		fmt.Fprintln(os.Stderr, "Usage: encli admin-set-autopass -game-id <id> <level-number> <HH:MM:SS> [penalty HH:MM:SS]")
+		fmt.Fprintln(os.Stderr, "  Set autopass timer. Optional penalty time if timeout penalty enabled.")
+	case "admin-set-block":
+		fmt.Fprintln(os.Stderr, "Usage: encli admin-set-block -game-id <id> <level-number> <attempts> <period HH:MM:SS> [player]")
+		fmt.Fprintln(os.Stderr, "  Set answer block: max attempts per period. Add 'player' to apply per player.")
+	case "admin-create-bonus":
+		fmt.Fprintln(os.Stderr, "Usage: encli admin-create-bonus -game-id <id> <level-num> <level-id> <name> <answer1> [answer2 ...]")
+		fmt.Fprintln(os.Stderr, "  Create a bonus with one or more answers.")
+	case "admin-delete-bonus":
+		fmt.Fprintln(os.Stderr, "Usage: encli admin-delete-bonus -game-id <id> <level-number> <bonus-id>")
+		fmt.Fprintln(os.Stderr, "  Delete a bonus by its ID.")
+	case "admin-create-sector":
+		fmt.Fprintln(os.Stderr, "Usage: encli admin-create-sector -game-id <id> <level-number> <name> <answer1> [answer2 ...]")
+		fmt.Fprintln(os.Stderr, "  Create a sector with one or more answers.")
+	case "admin-delete-sector":
+		fmt.Fprintln(os.Stderr, "Usage: encli admin-delete-sector -game-id <id> <level-number> <sector-id>")
+		fmt.Fprintln(os.Stderr, "  Delete a sector by its ID.")
+	case "admin-create-hint":
+		fmt.Fprintln(os.Stderr, "Usage: encli admin-create-hint -game-id <id> <level-number> <delay HH:MM:SS> <text>")
+		fmt.Fprintln(os.Stderr, "  Create a hint with the specified delay before it opens.")
+	case "admin-delete-hint":
+		fmt.Fprintln(os.Stderr, "Usage: encli admin-delete-hint -game-id <id> <level-number> <hint-id>")
+		fmt.Fprintln(os.Stderr, "  Delete a hint by its ID.")
+	case "admin-create-task":
+		fmt.Fprintln(os.Stderr, "Usage: encli admin-create-task -game-id <id> <level-number> <text>")
+		fmt.Fprintln(os.Stderr, "  Create a task (assignment) on the specified level.")
+	case "admin-set-comment":
+		fmt.Fprintln(os.Stderr, "Usage: encli admin-set-comment -game-id <id> <level-number> <name> [comment]")
+		fmt.Fprintln(os.Stderr, "  Set level name and optional comment (visible to organizers).")
+	case "admin-teams":
+		fmt.Fprintln(os.Stderr, "Usage: encli admin-teams -game-id <id>")
+		fmt.Fprintln(os.Stderr, "  List teams registered in the game (admin panel).")
+	case "admin-corrections":
+		fmt.Fprintln(os.Stderr, "Usage: encli admin-corrections -game-id <id>")
+		fmt.Fprintln(os.Stderr, "  List bonus/penalty time corrections for the game.")
+	case "admin-add-correction":
+		fmt.Fprintln(os.Stderr, "Usage: encli admin-add-correction -game-id <id> <team> <bonus|penalty> <HH:MM:SS> [level] [comment]")
+		fmt.Fprintln(os.Stderr, "  Add a time correction. Level '0' applies to all levels.")
+	case "admin-delete-correction":
+		fmt.Fprintln(os.Stderr, "Usage: encli admin-delete-correction -game-id <id> <correction-id>")
+		fmt.Fprintln(os.Stderr, "  Delete a time correction by its ID.")
 	default:
 		printUsage()
 	}
