@@ -3,6 +3,7 @@ package encx
 import (
 	"context"
 	"fmt"
+	"html"
 	"regexp"
 	"strconv"
 	"strings"
@@ -369,9 +370,9 @@ func (c *Client) AdminGetTask(ctx context.Context, gameId, levelNum, taskId int)
 
 	t := &AdminTask{}
 
-	// Task text from textarea
+	// Task text from textarea (HTML-encoded in source, decode for round-tripping)
 	if m := adminTaskTextareaRe.FindStringSubmatch(body); m != nil {
-		t.Text = m[1]
+		t.Text = html.UnescapeString(m[1])
 	}
 
 	// ReplaceNlToBr checkbox
