@@ -11,6 +11,30 @@ import (
 	"github.com/skrashevich/encx-cli/encx"
 )
 
+func cmdProfile(ctx context.Context, cfg *config, client *encx.Client) {
+	profile, err := client.GetProfile(ctx)
+	if err != nil {
+		fatal("Failed to get profile: %v", err)
+	}
+	if cfg.jsonOutput {
+		outputJSON(profile)
+		return
+	}
+	fmt.Printf("ID:      %d\n", profile.ID)
+	fmt.Printf("Login:   %s\n", profile.Login)
+	fmt.Printf("Name:    %s\n", profile.Name)
+	fmt.Printf("Rank:    %s\n", profile.Rank)
+	if profile.Team != "" {
+		fmt.Printf("Team:    %s (ID: %d)\n", profile.Team, profile.TeamID)
+	}
+	if profile.Domain != "" {
+		fmt.Printf("Domain:  %s\n", profile.Domain)
+	}
+	if profile.Points != "" {
+		fmt.Printf("Points:  %s\n", profile.Points)
+	}
+}
+
 func cmdAdminGames(ctx context.Context, cfg *config, client *encx.Client) {
 	games, err := client.AdminGetGames(ctx)
 	if err != nil {

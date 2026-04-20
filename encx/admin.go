@@ -21,8 +21,6 @@ var (
 	adminBonusIdRe = regexp.MustCompile(`(?i)data-bonusid="(\d+)"`)
 	// Hint link: prid=123
 	adminHintIdRe = regexp.MustCompile(`(?i)prid=(\d+)`)
-	// Sector div: id="...SectorEdit_123..."
-	adminSectorIdRe = regexp.MustCompile(`(?i)id="[^"]*SectorEdit_(\d+)"`)
 	// Correction row parsing
 	adminCorrectionRe = regexp.MustCompile(`(?i)<tr\s+class="toWinnerItem"[^>]*>(.*?)</tr>`)
 	adminTdRe         = regexp.MustCompile(`(?i)<td[^>]*>(.*?)</td>`)
@@ -51,6 +49,81 @@ func (c *Client) doPost(ctx context.Context, rawURL string, form url.Values) (st
 	}
 
 	return string(body), nil
+}
+
+// Profile represents user profile data parsed from the profile page.
+type Profile struct {
+	ID       int    `json:"id"`
+	Login    string `json:"login"`
+	Name     string `json:"name"`
+	Rank     string `json:"rank"`
+	Team     string `json:"team"`
+	TeamID   int    `json:"team_id,omitempty"`
+	Domain   string `json:"domain"`
+	Points   string `json:"points"`
+	Location string `json:"location,omitempty"`
+}
+
+// GetProfile fetches the current user's profile from /UserDetails.aspx.
+func (c *Client) GetProfile(ctx context.Context) (*Profile, error) {
+	u := fmt.Sprintf("%s/UserDetails.aspx", c.baseURL())
+	body, err := c.doGet(ctx, u)
+	if err != nil {
+		return nil, fmt.Errorf("encx: get profile: %w", err)
+	}
+
+	p := &Profile{}
+
+	// User ID from uid= in page links
+	uidRe := regexp.MustCompile(`(?i)uid=(\d+)`)
+	if m := uidRe.FindStringSubmatch(body); m != nil {
+		p.ID, _ = strconv.Atoi(m[1])
+	}
+
+	// Login from header link: <a ... href="/UserDetails.aspx">login</a>
+	loginRe := regexp.MustCompile(`(?i)<a[^>]*href="/UserDetails\.aspx"[^>]*>([^<]+)</a>`)
+	if m := loginRe.FindStringSubmatch(body); m != nil {
+		p.Login = strings.TrimSpace(m[1])
+	}
+
+	// Full name (second UserDetails link usually has full name)
+	nameMatches := loginRe.FindAllStringSubmatch(body, 3)
+	if len(nameMatches) >= 2 {
+		p.Name = strings.TrimSpace(nameMatches[1][1])
+	}
+
+	// Rank - appears as a span near the points, pattern: "points / <span>Rank</span>"
+	rankRe := regexp.MustCompile(`(?i)\d+[,\.]\d+\s*/\s*(?:<[^>]*>)*\s*<span[^>]*>([^<]+)</span>`)
+	if m := rankRe.FindStringSubmatch(body); m != nil {
+		p.Rank = strings.TrimSpace(m[1])
+	}
+
+	// Team
+	teamRe := regexp.MustCompile(`(?i)<a[^>]*href="/Teams/TeamDetails\.aspx\?tid=(\d+)"[^>]*>([^<]+)</a>`)
+	if m := teamRe.FindStringSubmatch(body); m != nil {
+		p.TeamID, _ = strconv.Atoi(m[1])
+		p.Team = strings.TrimSpace(m[2])
+	}
+
+	// Domain - look for link like href="http://moscow.en.cx/">moscow.en.cx</a>
+	domainRe := regexp.MustCompile(`(?i)<a[^>]*href="https?://([^/"]*\.en\.cx)"[^>]*>[^<]*</a>`)
+	if m := domainRe.FindStringSubmatch(body); m != nil {
+		p.Domain = m[1]
+	}
+
+	// Points - pattern: ">132,51 /" in the user info block (near uid link)
+	pointsRe := regexp.MustCompile(`(?i)uid=\d+[^>]*>.*?(\d+[,\.]\d+)\s*/`)
+	if m := pointsRe.FindStringSubmatch(body); m != nil {
+		p.Points = m[1]
+	} else {
+		// Fallback: first occurrence of points pattern after the login
+		fallbackRe := regexp.MustCompile(`(?i)>(\d{2,}[,\.]\d+)\s*/`)
+		if m := fallbackRe.FindStringSubmatch(body); m != nil {
+			p.Points = m[1]
+		}
+	}
+
+	return p, nil
 }
 
 // AdminGame represents a game in the admin game manager.
