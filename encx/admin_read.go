@@ -6,16 +6,63 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"time"
 )
 
 // Regex patterns for reading admin data from HTML.
 var (
-	adminInputValueRe = regexp.MustCompile(`(?i)<input[^>]*name="([^"]*)"[^>]*value="([^"]*)"`)
-	adminInputCheckRe = regexp.MustCompile(`(?i)<input[^>]*name="([^"]*)"[^>]*checked`)
-	adminTextareaRe   = regexp.MustCompile(`(?i)<textarea[^>]*name="([^"]*)"[^>]*>([\s\S]*?)</textarea>`)
-	adminSelectValRe  = regexp.MustCompile(`(?i)<option[^>]*selected[^>]*value="([^"]*)"`)
-	adminAnswerRe     = regexp.MustCompile(`(?i)<input[^>]*name="((?:answer_-?\d+|txtAnswer_?\d*))"[^>]*value="([^"]*)"`)
+	adminInputDisabledRe = regexp.MustCompile(`(?i)disabled`)
+	adminTextareaRe      = regexp.MustCompile(`(?i)<textarea[^>]*name="([^"]*)"[^>]*>([\s\S]*?)</textarea>`)
+	adminTaskTextareaRe  = regexp.MustCompile(`(?i)<textarea[^>]*>([\s\S]*?)</textarea>`)
+	adminCheckedLevelRe  = regexp.MustCompile(`(?i)<input[^>]*name="(level_\d+)"[^>]*checked`)
+	adminRbAllLevelsRe   = regexp.MustCompile(`(?i)<input[^>]*name="rbAllLevels"[^>]*checked`)
 )
+
+// parseEnabledInputs extracts name/value pairs from enabled (not disabled) input elements.
+func parseEnabledInputs(body string) map[string]string {
+	result := make(map[string]string)
+	// Find all input tags
+	inputTagRe := regexp.MustCompile(`(?i)<input[^>]*>`)
+	tags := inputTagRe.FindAllString(body, -1)
+	nameRe := regexp.MustCompile(`(?i)name="([^"]*)"`)
+	valueRe := regexp.MustCompile(`(?i)value="([^"]*)"`)
+
+	for _, tag := range tags {
+		// Skip disabled inputs
+		if adminInputDisabledRe.MatchString(tag) {
+			continue
+		}
+		nameM := nameRe.FindStringSubmatch(tag)
+		valueM := valueRe.FindStringSubmatch(tag)
+		if nameM != nil && valueM != nil {
+			result[nameM[1]] = valueM[1]
+		}
+	}
+	return result
+}
+
+// parseCheckedInputs returns names of checked (but not disabled) inputs.
+func parseCheckedInputs(body string) map[string]bool {
+	result := make(map[string]bool)
+	inputTagRe := regexp.MustCompile(`(?i)<input[^>]*>`)
+	tags := inputTagRe.FindAllString(body, -1)
+	nameRe := regexp.MustCompile(`(?i)name="([^"]*)"`)
+	checkedRe := regexp.MustCompile(`(?i)checked`)
+
+	for _, tag := range tags {
+		if adminInputDisabledRe.MatchString(tag) {
+			continue
+		}
+		if !checkedRe.MatchString(tag) {
+			continue
+		}
+		nameM := nameRe.FindStringSubmatch(tag)
+		if nameM != nil {
+			result[nameM[1]] = true
+		}
+	}
+	return result
+}
 
 // AdminGetLevelSettings reads the level settings (autopass, answer block) from the admin panel.
 func (c *Client) AdminGetLevelSettings(ctx context.Context, gameId, levelNum int) (*AdminLevelSettings, error) {
@@ -26,46 +73,79 @@ func (c *Client) AdminGetLevelSettings(ctx context.Context, gameId, levelNum int
 	}
 
 	s := &AdminLevelSettings{}
-	inputs := adminInputValueRe.FindAllStringSubmatch(body, -1)
-	for _, m := range inputs {
-		name, val := m[1], m[2]
-		switch name {
-		case "txtApHours":
-			s.AutopassHours, _ = strconv.Atoi(val)
-		case "txtApMinutes":
-			s.AutopassMinutes, _ = strconv.Atoi(val)
-		case "txtApSeconds":
-			s.AutopassSeconds, _ = strconv.Atoi(val)
-		case "txtApPenaltyHours":
-			s.PenaltyHours, _ = strconv.Atoi(val)
-		case "txtApPenaltyMinutes":
-			s.PenaltyMinutes, _ = strconv.Atoi(val)
-		case "txtApPenaltySeconds":
-			s.PenaltySeconds, _ = strconv.Atoi(val)
-		case "txtAttemptsNumber":
-			s.AttemptsNumber, _ = strconv.Atoi(val)
-		case "txtAttemptsPeriodHours":
-			s.AttemptsPeriodHours, _ = strconv.Atoi(val)
-		case "txtAttemptsPeriodMinutes":
-			s.AttemptsPeriodMinutes, _ = strconv.Atoi(val)
-		case "txtAttemptsPeriodSeconds":
-			s.AttemptsPeriodSeconds, _ = strconv.Atoi(val)
+	inputs := parseEnabledInputs(body)
+	checked := parseCheckedInputs(body)
+
+	// Try input fields first (may not exist if form is collapsed)
+	s.AutopassHours, _ = strconv.Atoi(inputs["txtApHours"])
+	s.AutopassMinutes, _ = strconv.Atoi(inputs["txtApMinutes"])
+	s.AutopassSeconds, _ = strconv.Atoi(inputs["txtApSeconds"])
+	s.PenaltyHours, _ = strconv.Atoi(inputs["txtApPenaltyHours"])
+	s.PenaltyMinutes, _ = strconv.Atoi(inputs["txtApPenaltyMinutes"])
+	s.PenaltySeconds, _ = strconv.Atoi(inputs["txtApPenaltySeconds"])
+
+	// If no input fields, parse autopass from displayed text like "через 30 минут" or "1 час 30 минут, 15 минут штрафа"
+	if s.AutopassHours == 0 && s.AutopassMinutes == 0 && s.AutopassSeconds == 0 {
+		s.AutopassHours, s.AutopassMinutes, s.AutopassSeconds = parseAutopassText(body)
+		// Check for penalty part (after comma)
+		penaltyRe := regexp.MustCompile(`(?i)lnkAdjustAutopass[^>]*>[^<]*,\s*([^<]+)`)
+		if m := penaltyRe.FindStringSubmatch(body); m != nil {
+			ph, pm, ps := parseTimeText(m[1])
+			if ph > 0 || pm > 0 || ps > 0 {
+				s.TimeoutPenalty = true
+				s.PenaltyHours = ph
+				s.PenaltyMinutes = pm
+				s.PenaltySeconds = ps
+			}
 		}
 	}
 
-	// Check for checked inputs
-	checks := adminInputCheckRe.FindAllStringSubmatch(body, -1)
-	for _, m := range checks {
-		switch m[1] {
-		case "chkTimeoutPenalty":
-			s.TimeoutPenalty = true
-		case "rbApplyForPlayer":
-			s.ApplyForPlayer = 1
-		}
+	s.AttemptsNumber, _ = strconv.Atoi(inputs["txtAttemptsNumber"])
+	s.AttemptsPeriodHours, _ = strconv.Atoi(inputs["txtAttemptsPeriodHours"])
+	s.AttemptsPeriodMinutes, _ = strconv.Atoi(inputs["txtAttemptsPeriodMinutes"])
+	s.AttemptsPeriodSeconds, _ = strconv.Atoi(inputs["txtAttemptsPeriodSeconds"])
+
+	if checked["chkTimeoutPenalty"] {
+		s.TimeoutPenalty = true
+	}
+	if checked["rbApplyForPlayer"] {
+		s.ApplyForPlayer = 1
 	}
 
 	return s, nil
 }
+
+// parseAutopassText extracts autopass time from the lnkAdjustAutopass link text.
+func parseAutopassText(body string) (h, m, s int) {
+	linkRe := regexp.MustCompile(`(?i)id="lnkAdjustAutopass"[^>]*>([^<]+)`)
+	match := linkRe.FindStringSubmatch(body)
+	if match == nil {
+		return 0, 0, 0
+	}
+	text := match[1]
+	// Split on comma (first part = autopass, second part = penalty)
+	parts := strings.SplitN(text, ",", 2)
+	return parseTimeText(parts[0])
+}
+
+// parseTimeText extracts hours, minutes, seconds from text like "1 час 30 минут" or "30 минут".
+func parseTimeText(text string) (h, m, s int) {
+	hourRe := regexp.MustCompile(`(\d+)\s*час`)
+	minRe := regexp.MustCompile(`(\d+)\s*мин`)
+	secRe := regexp.MustCompile(`(\d+)\s*сек`)
+
+	if match := hourRe.FindStringSubmatch(text); match != nil {
+		h, _ = strconv.Atoi(match[1])
+	}
+	if match := minRe.FindStringSubmatch(text); match != nil {
+		m, _ = strconv.Atoi(match[1])
+	}
+	if match := secRe.FindStringSubmatch(text); match != nil {
+		s, _ = strconv.Atoi(match[1])
+	}
+	return
+}
+
 
 // AdminGetBonusIds returns the list of bonus IDs on a level.
 func (c *Client) AdminGetBonusIds(ctx context.Context, gameId, levelNum int) ([]int, error) {
@@ -96,46 +176,50 @@ func (c *Client) AdminGetBonus(ctx context.Context, gameId, levelNum, bonusId in
 	}
 
 	b := &AdminBonus{}
-	inputs := adminInputValueRe.FindAllStringSubmatch(body, -1)
-	for _, m := range inputs {
-		name, val := m[1], m[2]
-		switch {
-		case name == "txtBonusName":
-			b.Name = val
-		case name == "txtValidFrom":
-			b.ValidFrom = val
-		case name == "txtValidTo":
-			b.ValidTo = val
-		case name == "txtDelayHours":
-			b.DelayHours, _ = strconv.Atoi(val)
-		case name == "txtDelayMinutes":
-			b.DelayMinutes, _ = strconv.Atoi(val)
-		case name == "txtDelaySeconds":
-			b.DelaySeconds, _ = strconv.Atoi(val)
-		case name == "txtValidHours":
-			b.WorkHours, _ = strconv.Atoi(val)
-		case name == "txtValidMinutes":
-			b.WorkMinutes, _ = strconv.Atoi(val)
-		case name == "txtValidSeconds":
-			b.WorkSeconds, _ = strconv.Atoi(val)
-		case name == "txtHours":
-			b.AwardHours, _ = strconv.Atoi(val)
-		case name == "txtMinutes":
-			b.AwardMinutes, _ = strconv.Atoi(val)
-		case name == "txtSeconds":
-			b.AwardSeconds, _ = strconv.Atoi(val)
-		case strings.Contains(name, "nswer_"):
+	inputs := parseEnabledInputs(body)
+	checked := parseCheckedInputs(body)
+
+	b.Name = inputs["txtBonusName"]
+	b.AwardHours, _ = strconv.Atoi(inputs["txtHours"])
+	b.AwardMinutes, _ = strconv.Atoi(inputs["txtMinutes"])
+	b.AwardSeconds, _ = strconv.Atoi(inputs["txtSeconds"])
+
+	// Only read time limits if their checkboxes are checked
+	if checked["chkAbsoluteLimit"] {
+		b.ValidFrom = inputs["txtValidFrom"]
+		b.ValidTo = inputs["txtValidTo"]
+	}
+	if checked["chkDelay"] {
+		b.DelayHours, _ = strconv.Atoi(inputs["txtDelayHours"])
+		b.DelayMinutes, _ = strconv.Atoi(inputs["txtDelayMinutes"])
+		b.DelaySeconds, _ = strconv.Atoi(inputs["txtDelaySeconds"])
+	}
+	if checked["chkRelativeLimit"] {
+		b.WorkHours, _ = strconv.Atoi(inputs["txtValidHours"])
+		b.WorkMinutes, _ = strconv.Atoi(inputs["txtValidMinutes"])
+		b.WorkSeconds, _ = strconv.Atoi(inputs["txtValidSeconds"])
+	}
+	if checked["negative"] {
+		b.Negative = true
+	}
+
+	// Answers
+	for key, val := range inputs {
+		if strings.Contains(key, "nswer_") && val != "" {
 			b.Answers = append(b.Answers, val)
-		case strings.HasPrefix(name, "level_"):
-			id, _ := strconv.Atoi(name[6:])
-			b.LevelID = id
 		}
 	}
 
-	// Check negative
-	negRe := regexp.MustCompile(`(?i)name="negative"[^>]*checked`)
-	if negRe.MatchString(body) {
-		b.Negative = true
+	// Which levels this bonus applies to
+	// Check if rbAllLevels is checked (bonus for all levels)
+	if adminRbAllLevelsRe.MatchString(body) {
+		b.LevelID = -1 // sentinel: means "all levels"
+	} else {
+		// Find checked level
+		if m := adminCheckedLevelRe.FindStringSubmatch(body); m != nil {
+			idStr := strings.TrimPrefix(m[1], "level_")
+			b.LevelID, _ = strconv.Atoi(idStr)
+		}
 	}
 
 	// Textareas (task, help)
@@ -180,63 +264,130 @@ func (c *Client) AdminGetHintIds(ctx context.Context, gameId, levelNum int) ([]i
 }
 
 // AdminGetHint reads a hint's details from the admin panel.
+// It tries without penalty=1 first, then retries with penalty=1 if text is empty (penalty hints require it).
 func (c *Client) AdminGetHint(ctx context.Context, gameId, levelNum, hintId int) (*AdminHint, error) {
-	u := fmt.Sprintf("%s/Administration/Games/PromptEdit.aspx?action=PromptEdit&gid=%d&level=%d&prid=%d",
-		c.baseURL(), gameId, levelNum, hintId)
+	h, err := c.adminGetHintFromURL(ctx, gameId, levelNum, hintId, false)
+	if err != nil {
+		return nil, err
+	}
+	// If no text found, it might be a penalty hint — retry with penalty=1
+	if h.Text == "" {
+		h2, err := c.adminGetHintFromURL(ctx, gameId, levelNum, hintId, true)
+		if err == nil && h2.Text != "" {
+			return h2, nil
+		}
+	}
+	return h, nil
+}
+
+func (c *Client) adminGetHintFromURL(ctx context.Context, gameId, levelNum, hintId int, penalty bool) (*AdminHint, error) {
+	var u string
+	if penalty {
+		u = fmt.Sprintf("%s/Administration/Games/PromptEdit.aspx?penalty=1&action=PromptEdit&gid=%d&level=%d&prid=%d",
+			c.baseURL(), gameId, levelNum, hintId)
+	} else {
+		u = fmt.Sprintf("%s/Administration/Games/PromptEdit.aspx?action=PromptEdit&gid=%d&level=%d&prid=%d",
+			c.baseURL(), gameId, levelNum, hintId)
+	}
 	body, err := c.doGet(ctx, u)
 	if err != nil {
 		return nil, fmt.Errorf("encx: admin get hint: %w", err)
 	}
 
 	h := &AdminHint{}
-	inputs := adminInputValueRe.FindAllStringSubmatch(body, -1)
-	for _, m := range inputs {
-		name, val := m[1], m[2]
-		switch name {
-		case "NewPromptTimeoutDays":
-			h.Days, _ = strconv.Atoi(val)
-		case "NewPromptTimeoutHours":
-			h.Hours, _ = strconv.Atoi(val)
-		case "NewPromptTimeoutMinutes":
-			h.Minutes, _ = strconv.Atoi(val)
-		case "NewPromptTimeoutSeconds":
-			h.Seconds, _ = strconv.Atoi(val)
-		case "PenaltyPromptHours":
-			h.PenaltyHours, _ = strconv.Atoi(val)
-		case "PenaltyPromptMinutes":
-			h.PenaltyMinutes, _ = strconv.Atoi(val)
-		case "PenaltyPromptSeconds":
-			h.PenaltySeconds, _ = strconv.Atoi(val)
-		}
-	}
+	inputs := parseEnabledInputs(body)
 
-	// Textarea for hint text
+	h.Days, _ = strconv.Atoi(inputs["NewPromptTimeoutDays"])
+	h.Hours, _ = strconv.Atoi(inputs["NewPromptTimeoutHours"])
+	h.Minutes, _ = strconv.Atoi(inputs["NewPromptTimeoutMinutes"])
+	h.Seconds, _ = strconv.Atoi(inputs["NewPromptTimeoutSeconds"])
+	h.PenaltyHours, _ = strconv.Atoi(inputs["PenaltyPromptHours"])
+	h.PenaltyMinutes, _ = strconv.Atoi(inputs["PenaltyPromptMinutes"])
+	h.PenaltySeconds, _ = strconv.Atoi(inputs["PenaltyPromptSeconds"])
+
+	// Hint text from textarea
 	textareas := adminTextareaRe.FindAllStringSubmatch(body, -1)
 	for _, m := range textareas {
-		if m[1] == "NewPrompt" || m[1] == "" {
+		if m[1] == "NewPrompt" {
 			h.Text = m[2]
 		}
-	}
-	// Fallback: some versions use a plain textarea without name
-	if h.Text == "" {
-		plainRe := regexp.MustCompile(`(?i)<textarea[^>]*>([\s\S]*?)</textarea>`)
-		if m := plainRe.FindStringSubmatch(body); m != nil {
-			h.Text = m[1]
+		if m[1] == "txtPenaltyComment" {
+			h.PenaltyComment = m[2]
 		}
 	}
 
 	// Check if penalty hint
-	if strings.Contains(body, "penalty=1") || h.PenaltyHours > 0 || h.PenaltyMinutes > 0 || h.PenaltySeconds > 0 {
+	if penalty || h.PenaltyHours > 0 || h.PenaltyMinutes > 0 || h.PenaltySeconds > 0 {
 		h.IsPenalty = true
 	}
 
-	// ForMemberID
-	forMemberRe := regexp.MustCompile(`(?i)<select[^>]*>[\s\S]*?<option[^>]*selected[^>]*value="([^"]*)"`)
+	// Check chkRequestPenaltyConfirm
+	checked := parseCheckedInputs(body)
+	if checked["chkRequestPenaltyConfirm"] {
+		h.RequestConfirm = true
+		h.IsPenalty = true
+	}
+
+	// ForMemberID from select
+	forMemberRe := regexp.MustCompile(`(?i)<select[^>]*name="ForMemberID"[^>]*>[\s\S]*?<option[^>]*selected[^>]*value="([^"]*)"`)
 	if m := forMemberRe.FindStringSubmatch(body); m != nil && m[1] != "0" {
 		h.ForMemberID = m[1]
 	}
 
 	return h, nil
+}
+
+// AdminGetTaskIds returns task IDs for a level from the admin panel.
+func (c *Client) AdminGetTaskIds(ctx context.Context, gameId, levelNum int) ([]int, error) {
+	u := fmt.Sprintf("%s/Administration/Games/LevelEditor.aspx?level=%d&gid=%d", c.baseURL(), levelNum, gameId)
+	body, err := c.doGet(ctx, u)
+	if err != nil {
+		return nil, fmt.Errorf("encx: admin get task ids: %w", err)
+	}
+
+	taskIdRe := regexp.MustCompile(`(?i)tid=(\d+)`)
+	matches := taskIdRe.FindAllStringSubmatch(body, -1)
+	seen := map[int]bool{}
+	ids := make([]int, 0, len(matches))
+	for _, m := range matches {
+		id, _ := strconv.Atoi(m[1])
+		if id > 0 && !seen[id] {
+			seen[id] = true
+			ids = append(ids, id)
+		}
+	}
+	return ids, nil
+}
+
+// AdminGetTask reads task details from the admin panel.
+func (c *Client) AdminGetTask(ctx context.Context, gameId, levelNum, taskId int) (*AdminTask, error) {
+	u := fmt.Sprintf("%s/Administration/Games/TaskEdit.aspx?action=TaskEdit&gid=%d&level=%d&tid=%d",
+		c.baseURL(), gameId, levelNum, taskId)
+	body, err := c.doGet(ctx, u)
+	if err != nil {
+		return nil, fmt.Errorf("encx: admin get task: %w", err)
+	}
+
+	t := &AdminTask{}
+
+	// Task text from textarea
+	if m := adminTaskTextareaRe.FindStringSubmatch(body); m != nil {
+		t.Text = m[1]
+	}
+
+	// ReplaceNlToBr checkbox
+	checked := parseCheckedInputs(body)
+	if checked["chkReplaceNlToBr"] {
+		t.ReplaceNl = true
+	}
+
+	// ForMemberID from select
+	forMemberRe := regexp.MustCompile(`(?i)<select[^>]*id="forMemberID"[^>]*>[\s\S]*?<option[^>]*selected[^>]*value="([^"]*)"`)
+	if m := forMemberRe.FindStringSubmatch(body); m != nil && m[1] != "0" {
+		t.ForMemberID = m[1]
+	}
+
+	return t, nil
 }
 
 // AdminGetComment reads the level name and comment from the admin panel.
@@ -252,17 +403,13 @@ func (c *Client) AdminGetComment(ctx context.Context, gameId, levelNum int) (nam
 		switch m[1] {
 		case "txtLevelComment":
 			comment = m[2]
-		case "txtLevelName":
-			name = m[2]
 		}
 	}
 
-	// Level name might be in an input field
-	inputs := adminInputValueRe.FindAllStringSubmatch(body, -1)
-	for _, m := range inputs {
-		if m[1] == "txtLevelName" {
-			name = m[2]
-		}
+	// Level name from input
+	inputs := parseEnabledInputs(body)
+	if v, ok := inputs["txtLevelName"]; ok {
+		name = v
 	}
 
 	return name, comment, nil
@@ -315,12 +462,44 @@ func (c *Client) adminGetDirectAnswers(ctx context.Context, gameId, levelNum int
 		return nil, err
 	}
 
-	answers := parseAnswerInputs(body)
-	if len(answers) == 0 {
+	// Find editanswers IDs from links on this page
+	editRe := regexp.MustCompile(`(?i)editanswers=(\d+)`)
+	editMatches := editRe.FindAllStringSubmatch(body, -1)
+
+	if len(editMatches) == 0 {
+		// Fallback: try to parse answers directly from the page
+		answers := parseAnswerInputs(body)
+		if len(answers) == 0 {
+			return nil, nil
+		}
+		return []AdminSector{{Name: "", Answers: answers}}, nil
+	}
+
+	// For each answer group, fetch the edit page to get input values
+	seen := map[string]bool{}
+	var allAnswers []string
+	for _, m := range editMatches {
+		editId := m[1]
+		if seen[editId] {
+			continue
+		}
+		seen[editId] = true
+
+		editURL := fmt.Sprintf("%s/Administration/Games/LevelEditor.aspx?level=%d&gid=%d&swanswers=1&editanswers=%s",
+			c.baseURL(), levelNum, gameId, editId)
+		editBody, err := c.doGet(ctx, editURL)
+		if err != nil {
+			continue
+		}
+		answers := parseAnswerInputs(editBody)
+		allAnswers = append(allAnswers, answers...)
+	}
+
+	if len(allAnswers) == 0 {
 		return nil, nil
 	}
 
-	return []AdminSector{{Name: "", Answers: answers}}, nil
+	return []AdminSector{{Name: "", Answers: allAnswers}}, nil
 }
 
 func parseAnswerInputs(body string) []string {
@@ -333,6 +512,62 @@ func parseAnswerInputs(body string) []string {
 		}
 	}
 	return answers
+}
+
+// adminDelay pauses between admin requests to avoid rate limiting.
+func adminDelay() {
+	time.Sleep(1200 * time.Millisecond)
+}
+
+// AdminWipeGame completely resets a game: removes all bonuses, hints, sectors, and levels.
+func (c *Client) AdminWipeGame(ctx context.Context, gameId int, progress func(string)) error {
+	if progress == nil {
+		progress = func(string) {}
+	}
+
+	levels, err := c.AdminGetLevels(ctx, gameId)
+	if err != nil {
+		return fmt.Errorf("get levels: %w", err)
+	}
+	if len(levels) == 0 {
+		progress("Game has no levels, nothing to wipe")
+		return nil
+	}
+	progress(fmt.Sprintf("Wiping game: %d levels", len(levels)))
+
+	// Delete bonuses from each level (game-wide bonuses appear on all levels)
+	for _, lvl := range levels {
+		bonusIds, err := c.AdminGetBonusIds(ctx, gameId, lvl.Number)
+		if err == nil && len(bonusIds) > 0 {
+			for _, bid := range bonusIds {
+				c.AdminDeleteBonus(ctx, gameId, lvl.Number, bid)
+				adminDelay()
+			}
+			progress(fmt.Sprintf("  Level %d: %d bonuses deleted", lvl.Number, len(bonusIds)))
+		}
+	}
+
+	// Delete levels in reverse order
+	for i := len(levels) - 1; i >= 0; i-- {
+		c.AdminDeleteLevel(ctx, gameId, levels[i].Number)
+		adminDelay()
+	}
+	progress(fmt.Sprintf("  %d levels deleted", len(levels)))
+
+	// Delete corrections
+	corrections, err := c.AdminGetCorrections(ctx, gameId)
+	if err == nil && len(corrections) > 0 {
+		for _, corr := range corrections {
+			if corr.ID != "" {
+				c.AdminDeleteCorrection(ctx, gameId, corr.ID)
+				adminDelay()
+			}
+		}
+		progress(fmt.Sprintf("  %d corrections deleted", len(corrections)))
+	}
+
+	progress("Wipe complete")
+	return nil
 }
 
 // AdminCopyGame copies all levels, settings, bonuses, sectors, hints, tasks, and comments
@@ -382,6 +617,9 @@ func (c *Client) AdminCopyGame(ctx context.Context, srcGameId, dstGameId int, pr
 	}
 	progress("Levels renamed")
 
+	// Track which bonuses are "all levels" to avoid duplicating them
+	copiedAllLevelBonuses := map[string]bool{}
+
 	// 4. Copy each level's content
 	for i, sl := range srcLevels {
 		if i >= len(dstLevels) {
@@ -391,46 +629,86 @@ func (c *Client) AdminCopyGame(ctx context.Context, srcGameId, dstGameId int, pr
 		dstNum := dstLevels[i].Number
 		progress(fmt.Sprintf("Copying level %d/%d: %s", lvlNum, len(srcLevels), sl.Name))
 
-		// Copy level settings
+		// Copy level settings (autopass + answer block)
 		settings, err := c.AdminGetLevelSettings(ctx, srcGameId, lvlNum)
 		if err == nil && settings != nil {
-			c.AdminUpdateAutopass(ctx, dstGameId, dstNum, *settings)
-			c.AdminUpdateAnswerBlock(ctx, dstGameId, dstNum, *settings)
+			if settings.AutopassHours > 0 || settings.AutopassMinutes > 0 || settings.AutopassSeconds > 0 {
+				c.AdminUpdateAutopass(ctx, dstGameId, dstNum, *settings)
+				adminDelay()
+			}
+			if settings.AttemptsNumber > 0 {
+				c.AdminUpdateAnswerBlock(ctx, dstGameId, dstNum, *settings)
+				adminDelay()
+			}
 		}
 
 		// Copy comment
 		name, comment, err := c.AdminGetComment(ctx, srcGameId, lvlNum)
-		if err == nil {
+		if err == nil && (name != "" || comment != "") {
 			c.AdminUpdateComment(ctx, dstGameId, dstNum, name, comment)
+			adminDelay()
+		}
+
+		// Copy tasks
+		taskIds, err := c.AdminGetTaskIds(ctx, srcGameId, lvlNum)
+		if err == nil {
+			copied := 0
+			for _, tid := range taskIds {
+				task, err := c.AdminGetTask(ctx, srcGameId, lvlNum, tid)
+				if err != nil || task.Text == "" {
+					continue
+				}
+				c.AdminCreateTask(ctx, dstGameId, dstNum, *task)
+				adminDelay()
+				copied++
+			}
+			if copied > 0 {
+				progress(fmt.Sprintf("  %d task(s) copied", copied))
+			}
+		}
+
+		// Copy sectors (answers)
+		sectors, err := c.AdminGetSectorAnswers(ctx, srcGameId, lvlNum)
+		if err == nil {
+			for _, sec := range sectors {
+				if len(sec.Answers) > 0 {
+					c.AdminCreateSector(ctx, dstGameId, dstNum, sec)
+					adminDelay()
+				}
+			}
+			if len(sectors) > 0 {
+				progress(fmt.Sprintf("  %d sector(s) copied", len(sectors)))
+			}
 		}
 
 		// Copy bonuses
 		bonusIds, err := c.AdminGetBonusIds(ctx, srcGameId, lvlNum)
 		if err == nil {
+			copied := 0
 			for _, bid := range bonusIds {
 				bonus, err := c.AdminGetBonus(ctx, srcGameId, lvlNum, bid)
 				if err != nil {
 					continue
 				}
-				// Remap level ID to target
-				if i < len(dstLevels) {
+
+				// Handle "all levels" bonuses - only copy once
+				if bonus.LevelID == -1 {
+					key := bonus.Name + "|" + strings.Join(bonus.Answers, ",")
+					if copiedAllLevelBonuses[key] {
+						continue // already copied this bonus
+					}
+					copiedAllLevelBonuses[key] = true
+					// Keep LevelID as -1 so AdminCreateBonus uses rbAllLevels=1
+				} else {
+					// Remap level ID to target
 					bonus.LevelID = dstLevels[i].ID
 				}
 				c.AdminCreateBonus(ctx, dstGameId, dstNum, *bonus)
+				adminDelay()
+				copied++
 			}
-			if len(bonusIds) > 0 {
-				progress(fmt.Sprintf("  %d bonuses copied", len(bonusIds)))
-			}
-		}
-
-		// Copy sectors
-		sectors, err := c.AdminGetSectorAnswers(ctx, srcGameId, lvlNum)
-		if err == nil {
-			for _, sec := range sectors {
-				c.AdminCreateSector(ctx, dstGameId, dstNum, sec)
-			}
-			if len(sectors) > 0 {
-				progress(fmt.Sprintf("  %d sectors copied", len(sectors)))
+			if copied > 0 {
+				progress(fmt.Sprintf("  %d bonus(es) copied", copied))
 			}
 		}
 
@@ -443,9 +721,10 @@ func (c *Client) AdminCopyGame(ctx context.Context, srcGameId, dstGameId int, pr
 					continue
 				}
 				c.AdminCreateHint(ctx, dstGameId, dstNum, *hint)
+				adminDelay()
 			}
 			if len(hintIds) > 0 {
-				progress(fmt.Sprintf("  %d hints copied", len(hintIds)))
+				progress(fmt.Sprintf("  %d hint(s) copied", len(hintIds)))
 			}
 		}
 	}

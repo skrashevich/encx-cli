@@ -13,8 +13,8 @@ import (
 
 // Regex patterns for parsing admin HTML responses.
 var (
-	// LevelManager: <input class="textbox" name="txtLevelName_12345" value="Level Name" ...>
-	adminLevelRe = regexp.MustCompile(`(?i)<input[^>]*class="textbox"[^>]*name="txtLevelName_(\d+)"[^>]*value="([^"]*)"`)
+	// LevelManager: <input name="txtLevelName_12345" ... value="Level Name" ...>
+	adminLevelRe = regexp.MustCompile(`(?i)<input[^>]*name="txtLevelName_(\d+)"[^>]*value="([^"]*)"`)
 	// Teams dropdown: <option value="123">Team Name</option>
 	adminTeamOptionRe = regexp.MustCompile(`(?i)<option\s+value="([^"]*)"[^>]*>([^<]+)</option>`)
 	// Bonus link: data-bonusid="123"
@@ -170,9 +170,13 @@ func (c *Client) AdminCreateBonus(ctx context.Context, gameId, levelNum int, b A
 	form.Set("txtTask", b.Task)
 	form.Set("txtHelp", b.Hint)
 	form.Set("ddlBonusFor", b.BonusFor)
-	form.Set("rbAllLevels", "1")
 
-	if b.LevelID > 0 {
+	if b.LevelID == -1 || b.LevelID == 0 {
+		// Bonus for all levels
+		form.Set("rbAllLevels", "1")
+	} else {
+		// Bonus for specific level
+		form.Set("rbAllLevels", "0")
 		form.Set(fmt.Sprintf("level_%d", b.LevelID), "on")
 	}
 
