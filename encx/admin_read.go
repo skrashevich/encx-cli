@@ -146,7 +146,6 @@ func parseTimeText(text string) (h, m, s int) {
 	return
 }
 
-
 // AdminGetBonusIds returns the list of bonus IDs on a level.
 func (c *Client) AdminGetBonusIds(ctx context.Context, gameId, levelNum int) ([]int, error) {
 	u := fmt.Sprintf("%s/Administration/Games/LevelEditor.aspx?level=%d&gid=%d", c.baseURL(), levelNum, gameId)
@@ -436,6 +435,7 @@ func (c *Client) AdminGetSectorAnswers(ctx context.Context, gameId, levelNum int
 	for _, opt := range opts {
 		sectorVal := opt[1]
 		sectorName := opt[2]
+		sectorID, _ := strconv.Atoi(sectorVal)
 
 		// Fetch answers for this sector
 		ansURL := fmt.Sprintf("%s/ALoader/LevelInfo.aspx?gid=%d&level=%d&object=3&sector=%s",
@@ -447,6 +447,7 @@ func (c *Client) AdminGetSectorAnswers(ctx context.Context, gameId, levelNum int
 
 		answers := parseAnswerInputs(ansBody)
 		sectors = append(sectors, AdminSector{
+			ID:      sectorID,
 			Name:    sectorName,
 			Answers: answers,
 		})
@@ -477,7 +478,7 @@ func (c *Client) adminGetDirectAnswers(ctx context.Context, gameId, levelNum int
 
 	// For each answer group, fetch the edit page to get input values
 	seen := map[string]bool{}
-	var allAnswers []string
+	var directSectors []AdminSector
 	for _, m := range editMatches {
 		editId := m[1]
 		if seen[editId] {
@@ -492,14 +493,21 @@ func (c *Client) adminGetDirectAnswers(ctx context.Context, gameId, levelNum int
 			continue
 		}
 		answers := parseAnswerInputs(editBody)
-		allAnswers = append(allAnswers, answers...)
+		if len(answers) == 0 {
+			continue
+		}
+		sectorID, _ := strconv.Atoi(editId)
+		directSectors = append(directSectors, AdminSector{
+			ID:      sectorID,
+			Answers: answers,
+		})
 	}
 
-	if len(allAnswers) == 0 {
+	if len(directSectors) == 0 {
 		return nil, nil
 	}
 
-	return []AdminSector{{Name: "", Answers: allAnswers}}, nil
+	return directSectors, nil
 }
 
 func parseAnswerInputs(body string) []string {
