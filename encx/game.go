@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"maps"
 	"net/http"
 	"net/url"
@@ -42,8 +43,17 @@ func (c *Client) GetGameModel(ctx context.Context, gameId int, formValues ...url
 	}
 	defer resp.Body.Close()
 
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("encx: read game response: %w", err)
+	}
+
+	if len(body) > 0 && body[0] == '<' {
+		return nil, fmt.Errorf("encx: session expired or access denied (server returned HTML instead of JSON; try re-login)")
+	}
+
 	var model GameModel
-	if err := json.NewDecoder(resp.Body).Decode(&model); err != nil {
+	if err := json.Unmarshal(body, &model); err != nil {
 		return nil, fmt.Errorf("encx: decode game model: %w", err)
 	}
 
@@ -95,8 +105,17 @@ func (c *Client) GetPenaltyHint(ctx context.Context, gameId, penaltyId int) (*Ga
 	}
 	defer resp.Body.Close()
 
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("encx: read hint response: %w", err)
+	}
+
+	if len(body) > 0 && body[0] == '<' {
+		return nil, fmt.Errorf("encx: session expired or access denied (server returned HTML instead of JSON; try re-login)")
+	}
+
 	var model GameModel
-	if err := json.NewDecoder(resp.Body).Decode(&model); err != nil {
+	if err := json.Unmarshal(body, &model); err != nil {
 		return nil, fmt.Errorf("encx: decode hint response: %w", err)
 	}
 
