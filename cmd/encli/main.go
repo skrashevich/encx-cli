@@ -152,6 +152,9 @@ func main() {
 	case "game-stats":
 		requireAuth(ctx, cfg, client)
 		cmdGameStats(ctx, cfg, client)
+	case "profile":
+		requireAuth(ctx, cfg, client)
+		cmdProfile(ctx, cfg, client)
 
 	// Admin commands
 	case "admin-games":
@@ -250,6 +253,7 @@ Commands:
   send-bonus  Send a bonus code
   hint        Request a penalty hint
   game-stats  Show game statistics (levels, teams, rankings)
+  profile     Show your profile
 
 Admin commands (require game editor rights):
   admin-games              List your authored games
@@ -357,6 +361,9 @@ func printCommandHelp(cmd string) {
 	case "game-stats":
 		fmt.Fprintln(os.Stderr, "Usage: encli game-stats -game-id <id>")
 		fmt.Fprintln(os.Stderr, "  Show game statistics: levels, teams, rankings.")
+	case "profile":
+		fmt.Fprintln(os.Stderr, "Usage: encli profile")
+		fmt.Fprintln(os.Stderr, "  Show your profile (login, name, rank, team, points).")
 	case "admin-games":
 		fmt.Fprintln(os.Stderr, "Usage: encli admin-games")
 		fmt.Fprintln(os.Stderr, "  List games where you are an author or have admin access.")
