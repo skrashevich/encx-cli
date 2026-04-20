@@ -228,6 +228,28 @@ paths:
               schema:
                 type: string
 
+  /gamestatistics/full/{gameId}:
+    get:
+      operationId: getGameStatistics
+      tags: [game]
+      summary: Получить полную статистику игры
+      description: |
+        Возвращает JSON с полной статистикой игры: расширенные метаданные,
+        результаты по уровням (время прохождения, команды, игроки),
+        информацию о уровнях, счётчики игроков и профиль текущего пользователя.
+
+        Обнаружен в EN+ v1.2.0.
+      parameters:
+        - $ref: '#/components/parameters/GameIdPath'
+        - $ref: '#/components/parameters/JsonParam'
+      responses:
+        '200':
+          description: Полная статистика игры
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GameStatisticsResponse'
+
   /GameDetails.aspx:
     get:
       operationId: getGameDetails
@@ -281,6 +303,31 @@ paths:
                 description: |
                   HTML мобильной версии. Парсится клиентом для извлечения
                   списка игр из элементов `h1.gametitle a`.
+
+  /home/:
+    get:
+      operationId: getGameList
+      tags: [discovery]
+      summary: Получить список игр (JSON)
+      description: |
+        Возвращает структурированный JSON-список игр домена с полными метаданными.
+        Поддерживает пагинацию через параметр `page`.
+      parameters:
+        - $ref: '#/components/parameters/JsonParam'
+        - $ref: '#/components/parameters/LangParam'
+        - name: page
+          in: query
+          description: Номер страницы для пагинации (1-based)
+          schema:
+            type: integer
+            minimum: 1
+      responses:
+        '200':
+          description: Список игр
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GameListResponse'
 
 components:
   parameters:
@@ -555,6 +602,215 @@ components:
                 - true: последний бонусный код верный
                 - false: последний бонусный код неверный
                 - null: бонусный код не отправлялся
+
+    GameListResponse:
+      type: object
+      description: Ответ со списком игр
+      properties:
+        ComingGames:
+          type: array
+          description: Список предстоящих игр
+          items:
+            $ref: '#/components/schemas/GameInfo'
+        ActiveGames:
+          type: array
+          description: Список активных (идущих) игр
+          items:
+            $ref: '#/components/schemas/GameInfo'
+
+    GameInfo:
+      type: object
+      description: Метаданные игры
+      properties:
+        GameID:
+          type: integer
+        GameNum:
+          type: integer
+        SiteID:
+          type: integer
+        OwnerID:
+          type: integer
+          description: ID создателя игры
+        LevelNumber:
+          type: integer
+          description: Количество уровней
+        Title:
+          type: string
+        Descr:
+          type: string
+        GameTypeID:
+          type: integer
+          description: "0=single, 1=team, 2=personal"
+        ZoneId:
+          type: integer
+          description: "0=quest, 1=brainstorm, 2=photohunt и т.д."
+        StartDateTime:
+          $ref: '#/components/schemas/DateTime'
+        FinishDateTime:
+          $ref: '#/components/schemas/DateTime'
+        Fee:
+          $ref: '#/components/schemas/Money'
+        Prize:
+          $ref: '#/components/schemas/Money'
+        Started:
+          type: boolean
+        Finished:
+          type: boolean
+        InProgress:
+          type: boolean
+        IsOnlineStatAvailable:
+          type: boolean
+        ComplexityFactor:
+          type: integer
+        QualityRate:
+          type: integer
+        TopicId:
+          type: integer
+          description: ID темы на форуме
+
+    GameStatisticsResponse:
+      type: object
+      description: Полная статистика игры
+      properties:
+        Game:
+          $ref: '#/components/schemas/GameInfo'
+        Level:
+          $ref: '#/components/schemas/LevelStatInfo'
+        StatItems:
+          type: array
+          description: Статистика по уровням (массив массивов — один массив на уровень)
+          items:
+            type: array
+            items:
+              $ref: '#/components/schemas/StatItem'
+        Levels:
+          type: array
+          description: Метаданные уровней
+          items:
+            $ref: '#/components/schemas/LevelStatInfo'
+        IsLevelNamesVisible:
+          type: boolean
+        LevelPlayers:
+          type: array
+          description: Количество игроков на каждом уровне
+          items:
+            $ref: '#/components/schemas/LevelPlayerCount'
+        User:
+          $ref: '#/components/schemas/UserProfile'
+        PagerVisible:
+          type: boolean
+        ShowAdminWarning:
+          type: boolean
+
+    StatItem:
+      type: object
+      description: Результат команды/игрока на уровне
+      properties:
+        ActionTime:
+          $ref: '#/components/schemas/DateTime'
+        UserId:
+          type: integer
+        LevelId:
+          type: integer
+        TeamId:
+          type: integer
+        UserName:
+          type: string
+        TeamName:
+          type: string
+        LevelNum:
+          type: integer
+        SpentSeconds:
+          type: integer
+          description: Время прохождения уровня в секундах
+        LevelOrder:
+          type: integer
+        PassType:
+          type: integer
+          description: Тип прохождения (0 = нормальное)
+        Scores:
+          type: integer
+
+    LevelStatInfo:
+      type: object
+      description: Метаданные уровня в статистике
+      properties:
+        LevelId:
+          type: integer
+        LevelNumber:
+          type: integer
+        LevelName:
+          type: string
+        Dismissed:
+          type: boolean
+        PassedPlayers:
+          type: integer
+
+    LevelPlayerCount:
+      type: object
+      properties:
+        LevelNum:
+          type: integer
+        Count:
+          type: integer
+
+    UserProfile:
+      type: object
+      description: Профиль пользователя (возвращается в статистике игры)
+      properties:
+        ID:
+          type: integer
+        Login:
+          type: string
+        FirstName:
+          type: string
+        LastName:
+          type: string
+        Email:
+          type: string
+        GenderID:
+          type: integer
+          description: "1=мужской, 2=женский"
+        TeamID:
+          type: integer
+        Points:
+          type: number
+        BonusPoints:
+          type: number
+        RankID:
+          type: integer
+        CityId:
+          type: integer
+        CountryId:
+          type: integer
+        IsActive:
+          type: boolean
+        RegDateTime:
+          $ref: '#/components/schemas/DateTime'
+        LastVisitTime:
+          $ref: '#/components/schemas/DateTime'
+
+    DateTime:
+      type: object
+      properties:
+        Value:
+          type: number
+          description: Внутреннее значение (.NET ticks)
+        Timestamp:
+          type: integer
+          description: Unix timestamp (секунды)
+
+    Money:
+      type: object
+      properties:
+        Cents:
+          type: integer
+        Value:
+          type: integer
+        Formated:
+          type: string
+        FormatedFull:
+          type: string
 
   securitySchemes:
     cookieAuth:

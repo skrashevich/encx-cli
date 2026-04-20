@@ -116,15 +116,30 @@ func main() {
 	case "status":
 		requireAuth(ctx, cfg, client)
 		cmdStatus(ctx, cfg, client)
-	case "task":
+	case "level":
 		requireAuth(ctx, cfg, client)
-		cmdTask(ctx, cfg, client)
+		cmdLevel(ctx, cfg, client)
 	case "messages":
 		requireAuth(ctx, cfg, client)
 		cmdMessages(ctx, cfg, client)
 	case "enter":
 		requireAuth(ctx, cfg, client)
 		cmdEnter(ctx, cfg, client)
+	case "levels":
+		requireAuth(ctx, cfg, client)
+		cmdLevels(ctx, cfg, client)
+	case "bonuses":
+		requireAuth(ctx, cfg, client)
+		cmdBonuses(ctx, cfg, client)
+	case "hints":
+		requireAuth(ctx, cfg, client)
+		cmdHints(ctx, cfg, client)
+	case "sectors":
+		requireAuth(ctx, cfg, client)
+		cmdSectors(ctx, cfg, client)
+	case "log":
+		requireAuth(ctx, cfg, client)
+		cmdLog(ctx, cfg, client)
 	case "send-code":
 		requireAuth(ctx, cfg, client)
 		cmdSendCode(ctx, cfg, client, positional)
@@ -134,6 +149,9 @@ func main() {
 	case "hint":
 		requireAuth(ctx, cfg, client)
 		cmdHint(ctx, cfg, client, positional)
+	case "game-stats":
+		requireAuth(ctx, cfg, client)
+		cmdGameStats(ctx, cfg, client)
 	case "help":
 		printUsage()
 	default:
@@ -154,12 +172,18 @@ Commands:
   games       List available games (HTML scraping)
   game-list   List games with full details (JSON API)
   status      Show current game state
-  task        Show current level task/assignment
+  level       Show current level task/assignment
+  levels      Show all levels with pass status
+  bonuses     Show bonuses for current level
+  hints       Show hints (regular and penalty) for current level
+  sectors     Show sectors for current level
+  log         Show recent code submissions
   messages    Show messages from organizers
   enter       Enter a game (submit application)
   send-code   Send a level code
   send-bonus  Send a bonus code
   hint        Request a penalty hint
+  game-stats  Show game statistics (levels, teams, rankings)
 
 Global flags:
   -domain      Encounter domain (default: tech.en.cx)
@@ -181,7 +205,7 @@ Examples:
   encli games
   encli game-list
   encli status -game-id 27053
-  encli task -game-id 27053
+  encli level -game-id 27053
   encli messages -game-id 27053
   encli enter -game-id 27053
   encli send-code -game-id 27053 "CODE123"
@@ -208,12 +232,27 @@ func printCommandHelp(cmd string) {
 	case "status":
 		fmt.Fprintln(os.Stderr, "Usage: encli status -game-id <id> [-domain <domain>]")
 		fmt.Fprintln(os.Stderr, "  Show current game state: level, sectors, bonuses, hints, messages.")
-	case "task":
-		fmt.Fprintln(os.Stderr, "Usage: encli task -game-id <id>")
+	case "level":
+		fmt.Fprintln(os.Stderr, "Usage: encli level -game-id <id>")
 		fmt.Fprintln(os.Stderr, "  Show current level task/assignment text.")
 	case "messages":
 		fmt.Fprintln(os.Stderr, "Usage: encli messages -game-id <id>")
 		fmt.Fprintln(os.Stderr, "  Show messages from game organizers.")
+	case "levels":
+		fmt.Fprintln(os.Stderr, "Usage: encli levels -game-id <id>")
+		fmt.Fprintln(os.Stderr, "  Show all levels with their pass/dismiss status.")
+	case "bonuses":
+		fmt.Fprintln(os.Stderr, "Usage: encli bonuses -game-id <id>")
+		fmt.Fprintln(os.Stderr, "  Show bonuses for the current level.")
+	case "hints":
+		fmt.Fprintln(os.Stderr, "Usage: encli hints -game-id <id>")
+		fmt.Fprintln(os.Stderr, "  Show hints (regular and penalty) for the current level.")
+	case "sectors":
+		fmt.Fprintln(os.Stderr, "Usage: encli sectors -game-id <id>")
+		fmt.Fprintln(os.Stderr, "  Show sectors for the current level.")
+	case "log":
+		fmt.Fprintln(os.Stderr, "Usage: encli log -game-id <id>")
+		fmt.Fprintln(os.Stderr, "  Show recent code submissions (action log).")
 	case "enter":
 		fmt.Fprintln(os.Stderr, "Usage: encli enter -game-id <id>")
 		fmt.Fprintln(os.Stderr, "  Submit application to enter a game.")
@@ -226,6 +265,9 @@ func printCommandHelp(cmd string) {
 	case "hint":
 		fmt.Fprintln(os.Stderr, "Usage: encli hint -game-id <id> <hint-id>")
 		fmt.Fprintln(os.Stderr, "  Request a penalty hint by its ID.")
+	case "game-stats":
+		fmt.Fprintln(os.Stderr, "Usage: encli game-stats -game-id <id>")
+		fmt.Fprintln(os.Stderr, "  Show game statistics: levels, teams, rankings.")
 	default:
 		printUsage()
 	}
@@ -392,7 +434,11 @@ func cmdStatus(ctx context.Context, cfg *config, client *encx.Client) {
 
 	fmt.Printf("Game:    %s (ID: %d)\n", model.GameTitle, model.GameId)
 	if model.TeamName != "" {
-		fmt.Printf("Team:    %s (ID: %d)\n", model.TeamName, model.TeamId)
+		captain := ""
+		if model.IsCaptain {
+			captain = " [captain]"
+		}
+		fmt.Printf("Team:    %s (ID: %d)%s\n", model.TeamName, model.TeamId, captain)
 	}
 	fmt.Printf("Player:  %s (ID: %d)\n", model.Login, model.UserId)
 	fmt.Printf("Event:   %s (%d)\n", encx.EventText(eventCode), eventCode)
@@ -429,9 +475,19 @@ func cmdStatus(ctx context.Context, cfg *config, client *encx.Client) {
 	fmt.Printf("Sectors: %d/%d closed (need: %d)\n",
 		l.PassedSectorsCount, l.PassedSectorsCount+l.SectorsLeftToClose, l.RequiredSectorsCount)
 
-	// Task preview
-	if l.Task != nil && l.Task.TaskText != "" {
-		text := stripHTML(l.Task.TaskText)
+	if l.PassedBonusesCount > 0 {
+		fmt.Printf("Bonuses passed: %d\n", l.PassedBonusesCount)
+	}
+
+	// Task preview (from Tasks array or legacy Task field)
+	taskText := ""
+	if len(l.Tasks) > 0 {
+		taskText = l.Tasks[0].TaskText
+	} else if l.Task != nil {
+		taskText = l.Task.TaskText
+	}
+	if taskText != "" {
+		text := stripHTML(taskText)
 		if len(text) > 120 {
 			text = text[:120] + "..."
 		}
@@ -456,8 +512,8 @@ func cmdStatus(ctx context.Context, cfg *config, client *encx.Client) {
 	if len(l.Helps) > 0 {
 		fmt.Println("\nHints:")
 		for _, h := range l.Helps {
-			if h.HelpText != "" {
-				fmt.Printf("  #%d: %s\n", h.Number, stripHTML(h.HelpText))
+			if h.HelpText != nil && *h.HelpText != "" {
+				fmt.Printf("  #%d: %s\n", h.Number, stripHTML(*h.HelpText))
 			} else {
 				fmt.Printf("  #%d: [opens in %s]\n", h.Number, formatDuration(h.RemainSeconds))
 			}
@@ -487,13 +543,13 @@ func cmdStatus(ctx context.Context, cfg *config, client *encx.Client) {
 		fmt.Println("\nPenalty Hints:")
 		for _, h := range l.PenaltyHelps {
 			switch {
-			case h.PenaltyHelpState == 2 && h.HelpText != "":
-				fmt.Printf("  #%d: %s (penalty: %ds)\n", h.Number, stripHTML(h.HelpText), h.Penalty)
-			case h.PenaltyComment != "":
-				fmt.Printf("  #%d: %s (penalty: %ds, pid: %d)\n", h.Number, h.PenaltyComment, h.Penalty, h.PenaltyHelpId)
+			case h.PenaltyHelpState >= 1 && h.HelpText != nil && *h.HelpText != "":
+				fmt.Printf("  #%d: %s (penalty: %ds)\n", h.Number, stripHTML(*h.HelpText), h.Penalty)
+			case h.PenaltyComment != nil && *h.PenaltyComment != "":
+				fmt.Printf("  #%d: %s (penalty: %ds, pid: %d)\n", h.Number, *h.PenaltyComment, h.Penalty, h.HelpId)
 			default:
 				fmt.Printf("  #%d: [locked, opens in %s] (penalty: %ds, pid: %d)\n",
-					h.Number, formatDuration(h.RemainSeconds), h.Penalty, h.PenaltyHelpId)
+					h.Number, formatDuration(h.RemainSeconds), h.Penalty, h.HelpId)
 			}
 		}
 	}
@@ -526,7 +582,7 @@ func cmdStatus(ctx context.Context, cfg *config, client *encx.Client) {
 	}
 }
 
-func cmdTask(ctx context.Context, cfg *config, client *encx.Client) {
+func cmdLevel(ctx context.Context, cfg *config, client *encx.Client) {
 	requireGameId(cfg)
 	model, err := client.GetGameModel(ctx, cfg.gameId)
 	if err != nil {
@@ -537,15 +593,21 @@ func cmdTask(ctx context.Context, cfg *config, client *encx.Client) {
 	}
 	l := model.Level
 	if cfg.jsonOutput {
-		outputJSON(map[string]any{"level": l.Number, "name": l.Name, "task": l.Task})
+		outputJSON(map[string]any{"level": l.Number, "name": l.Name, "tasks": l.Tasks, "task": l.Task})
 		return
 	}
 	fmt.Printf("Level %d: %s\n\n", l.Number, l.Name)
-	if l.Task == nil || l.Task.TaskText == "" {
+	taskText := ""
+	if len(l.Tasks) > 0 {
+		taskText = l.Tasks[0].TaskText
+	} else if l.Task != nil {
+		taskText = l.Task.TaskText
+	}
+	if taskText == "" {
 		fmt.Println("No task text")
 		return
 	}
-	fmt.Println(stripHTML(l.Task.TaskText))
+	fmt.Println(stripHTML(taskText))
 }
 
 func cmdMessages(ctx context.Context, cfg *config, client *encx.Client) {
@@ -568,6 +630,212 @@ func cmdMessages(ctx context.Context, cfg *config, client *encx.Client) {
 	for _, m := range model.Level.Messages {
 		fmt.Printf("[%s]: %s\n\n", m.OwnerLogin, stripHTML(m.MessageText))
 	}
+}
+
+func cmdLevels(ctx context.Context, cfg *config, client *encx.Client) {
+	requireGameId(cfg)
+	model, err := client.GetGameModel(ctx, cfg.gameId)
+	if err != nil {
+		fatal("Failed to get game model: %v", err)
+	}
+	if cfg.jsonOutput {
+		outputJSON(model.Levels)
+		return
+	}
+	if len(model.Levels) == 0 {
+		fmt.Println("No levels")
+		return
+	}
+	fmt.Printf("Game: %s (%d levels)\n\n", model.GameTitle, len(model.Levels))
+	for _, l := range model.Levels {
+		status := "[ ]"
+		if l.IsPassed {
+			status = "[v]"
+		} else if l.Dismissed {
+			status = "[x]"
+		}
+		current := ""
+		if model.Level != nil && model.Level.LevelId == l.LevelId {
+			current = " <-- current"
+		}
+		fmt.Printf("  %s %d. %s%s\n", status, l.LevelNumber, l.LevelName, current)
+	}
+}
+
+func cmdBonuses(ctx context.Context, cfg *config, client *encx.Client) {
+	requireGameId(cfg)
+	model, err := client.GetGameModel(ctx, cfg.gameId)
+	if err != nil {
+		fatal("Failed to get game model: %v", err)
+	}
+	if model.Level == nil {
+		fatal("No active level")
+	}
+	l := model.Level
+	if cfg.jsonOutput {
+		outputJSON(l.Bonuses)
+		return
+	}
+	if len(l.Bonuses) == 0 {
+		fmt.Println("No bonuses on this level")
+		return
+	}
+	fmt.Printf("Level %d: %s — Bonuses (%d)\n\n", l.Number, l.Name, len(l.Bonuses))
+	for _, b := range l.Bonuses {
+		status := "[ ]"
+		if b.IsAnswered {
+			status = "[v]"
+		}
+		fmt.Printf("  %s #%d %s\n", status, b.Number, b.Name)
+		if b.Task != "" {
+			fmt.Printf("       Task: %s\n", stripHTML(b.Task))
+		}
+		if b.IsAnswered && b.Answer != "" {
+			fmt.Printf("       Answer: %s\n", b.Answer)
+		}
+		if b.Expired {
+			fmt.Printf("       (expired)\n")
+		} else if b.SecondsToStart > 0 {
+			fmt.Printf("       Starts in: %s\n", formatDuration(b.SecondsToStart))
+		} else if b.SecondsLeft > 0 {
+			fmt.Printf("       Time left: %s\n", formatDuration(b.SecondsLeft))
+		}
+		if b.AwardTime > 0 {
+			fmt.Printf("       Award: -%s\n", formatDuration(b.AwardTime))
+		}
+	}
+}
+
+func cmdHints(ctx context.Context, cfg *config, client *encx.Client) {
+	requireGameId(cfg)
+	model, err := client.GetGameModel(ctx, cfg.gameId)
+	if err != nil {
+		fatal("Failed to get game model: %v", err)
+	}
+	if model.Level == nil {
+		fatal("No active level")
+	}
+	l := model.Level
+	if cfg.jsonOutput {
+		outputJSON(map[string]any{"helps": l.Helps, "penalty_helps": l.PenaltyHelps})
+		return
+	}
+	if len(l.Helps) == 0 && len(l.PenaltyHelps) == 0 {
+		fmt.Println("No hints on this level")
+		return
+	}
+	fmt.Printf("Level %d: %s\n", l.Number, l.Name)
+
+	if len(l.Helps) > 0 {
+		fmt.Printf("\nHints (%d):\n", len(l.Helps))
+		for _, h := range l.Helps {
+			if h.HelpText != nil && *h.HelpText != "" {
+				fmt.Printf("  #%d: %s\n", h.Number, stripHTML(*h.HelpText))
+			} else if h.RemainSeconds > 0 {
+				fmt.Printf("  #%d: [opens in %s]\n", h.Number, formatDuration(h.RemainSeconds))
+			} else {
+				fmt.Printf("  #%d: [available]\n", h.Number)
+			}
+		}
+	}
+
+	if len(l.PenaltyHelps) > 0 {
+		fmt.Printf("\nPenalty Hints (%d):\n", len(l.PenaltyHelps))
+		for _, h := range l.PenaltyHelps {
+			state := "locked"
+			switch h.PenaltyHelpState {
+			case 1:
+				state = "opened"
+			case 2:
+				state = "confirmed"
+			}
+			if h.HelpText != nil && *h.HelpText != "" {
+				fmt.Printf("  #%d [%s]: %s (penalty: %s)\n", h.Number, state, stripHTML(*h.HelpText), formatDuration(h.Penalty))
+			} else {
+				desc := ""
+				if h.PenaltyComment != nil && *h.PenaltyComment != "" {
+					desc = *h.PenaltyComment
+				}
+				if h.RemainSeconds > 0 {
+					fmt.Printf("  #%d [%s]: %s (penalty: %s, opens in %s, pid: %d)\n",
+						h.Number, state, desc, formatDuration(h.Penalty), formatDuration(h.RemainSeconds), h.HelpId)
+				} else {
+					fmt.Printf("  #%d [%s]: %s (penalty: %s, pid: %d)\n",
+						h.Number, state, desc, formatDuration(h.Penalty), h.HelpId)
+				}
+			}
+		}
+	}
+}
+
+func cmdSectors(ctx context.Context, cfg *config, client *encx.Client) {
+	requireGameId(cfg)
+	model, err := client.GetGameModel(ctx, cfg.gameId)
+	if err != nil {
+		fatal("Failed to get game model: %v", err)
+	}
+	if model.Level == nil {
+		fatal("No active level")
+	}
+	l := model.Level
+	if cfg.jsonOutput {
+		outputJSON(l.Sectors)
+		return
+	}
+	if len(l.Sectors) == 0 {
+		fmt.Println("No sectors on this level")
+		return
+	}
+	fmt.Printf("Level %d: %s — Sectors (%d/%d, need %d)\n\n",
+		l.Number, l.Name, l.PassedSectorsCount, l.PassedSectorsCount+l.SectorsLeftToClose, l.RequiredSectorsCount)
+	for _, s := range l.Sectors {
+		status := "[ ]"
+		if s.IsAnswered {
+			status = "[v]"
+		}
+		fmt.Printf("  %s %s", status, s.Name)
+		if s.IsAnswered && s.Answer != "" {
+			fmt.Printf(" — %s", s.Answer)
+		}
+		fmt.Println()
+	}
+}
+
+func cmdLog(ctx context.Context, cfg *config, client *encx.Client) {
+	requireGameId(cfg)
+	model, err := client.GetGameModel(ctx, cfg.gameId)
+	if err != nil {
+		fatal("Failed to get game model: %v", err)
+	}
+	if model.Level == nil {
+		fatal("No active level")
+	}
+	l := model.Level
+	if cfg.jsonOutput {
+		outputJSON(l.MixedActions)
+		return
+	}
+	if len(l.MixedActions) == 0 {
+		fmt.Println("No code submissions yet")
+		return
+	}
+	fmt.Printf("Level %d: %s — Code log (%d entries)\n\n", l.Number, l.Name, len(l.MixedActions))
+	w := tabwriter.NewWriter(os.Stdout, 0, 4, 2, ' ', 0)
+	fmt.Fprintln(w, "Time\tPlayer\tCode\tType\tResult")
+	fmt.Fprintln(w, "----\t------\t----\t----\t------")
+	for _, a := range l.MixedActions {
+		ts := a.LocDateTime
+		kind := "level"
+		if a.Kind == 2 {
+			kind = "bonus"
+		}
+		result := "wrong"
+		if a.IsCorrect {
+			result = "CORRECT"
+		}
+		fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\n", ts, a.Login, a.Answer, kind, result)
+	}
+	w.Flush()
 }
 
 func cmdEnter(ctx context.Context, cfg *config, client *encx.Client) {
@@ -656,14 +924,74 @@ func cmdHint(ctx context.Context, cfg *config, client *encx.Client, args []strin
 	fmt.Println("Penalty hint requested")
 	if model.Level != nil {
 		for _, h := range model.Level.PenaltyHelps {
-			if h.PenaltyHelpId == pid {
-				if h.HelpText != "" {
-					fmt.Printf("Hint #%d: %s\n", h.Number, stripHTML(h.HelpText))
-				} else if h.PenaltyComment != "" {
-					fmt.Printf("Hint #%d: %s\n", h.Number, h.PenaltyComment)
+			if h.HelpId == pid {
+				if h.HelpText != nil && *h.HelpText != "" {
+					fmt.Printf("Hint #%d: %s\n", h.Number, stripHTML(*h.HelpText))
+				} else if h.PenaltyComment != nil && *h.PenaltyComment != "" {
+					fmt.Printf("Hint #%d: %s\n", h.Number, *h.PenaltyComment)
 				}
 			}
 		}
+	}
+}
+
+func cmdGameStats(ctx context.Context, cfg *config, client *encx.Client) {
+	requireGameId(cfg)
+	stats, err := client.GetGameStatistics(ctx, cfg.gameId)
+	if err != nil {
+		fatal("Failed to get game statistics: %v", err)
+	}
+
+	if cfg.jsonOutput {
+		outputJSON(stats)
+		return
+	}
+
+	if stats.Game == nil {
+		fatal("No game data in statistics response")
+	}
+
+	g := stats.Game
+	fmt.Printf("Game:     %s (ID: %d)\n", g.Title, g.GameID)
+	fmt.Printf("Type:     %s / %s\n", gameTypeName(g.GameTypeID), zoneName(g.ZoneId))
+	fmt.Printf("Levels:   %d\n", len(stats.Levels))
+	fmt.Printf("Status:   started=%v finished=%v inProgress=%v\n", g.Started, g.Finished, g.InProgress)
+
+	if len(stats.Levels) > 0 {
+		fmt.Println("\nLevels:")
+		w := tabwriter.NewWriter(os.Stdout, 0, 4, 2, ' ', 0)
+		fmt.Fprintln(w, "#\tName\tDismissed\tPlayers")
+		fmt.Fprintln(w, "-\t----\t---------\t-------")
+		for _, l := range stats.Levels {
+			name := l.LevelName
+			if name == "" {
+				name = "-"
+			}
+			players := 0
+			for _, lp := range stats.LevelPlayers {
+				if lp.LevelNum == l.LevelNumber {
+					players = lp.Count
+					break
+				}
+			}
+			fmt.Fprintf(w, "%d\t%s\t%v\t%d\n", l.LevelNumber, name, l.Dismissed, players)
+		}
+		w.Flush()
+	}
+
+	if len(stats.StatItems) > 0 {
+		fmt.Println("\nResults:")
+		w := tabwriter.NewWriter(os.Stdout, 0, 4, 2, ' ', 0)
+		fmt.Fprintln(w, "Level\tTeam\tPlayer\tTime")
+		fmt.Fprintln(w, "-----\t----\t------\t----")
+		for _, levelItems := range stats.StatItems {
+			for _, item := range levelItems {
+				fmt.Fprintf(w, "%d\t%s\t%s\t%s\n",
+					item.LevelNum, item.TeamName, item.UserName,
+					formatDuration(item.SpentSeconds))
+			}
+		}
+		w.Flush()
 	}
 }
 
