@@ -11,6 +11,28 @@ import (
 	"github.com/skrashevich/encx-cli/encx"
 )
 
+func cmdAdminGames(ctx context.Context, cfg *config, client *encx.Client) {
+	games, err := client.AdminGetGames(ctx)
+	if err != nil {
+		fatal("Failed to get admin games: %v", err)
+	}
+	if cfg.jsonOutput {
+		outputJSON(games)
+		return
+	}
+	if len(games) == 0 {
+		fmt.Println("No games found")
+		return
+	}
+	w := tabwriter.NewWriter(os.Stdout, 0, 4, 2, ' ', 0)
+	fmt.Fprintln(w, "ID\tTitle")
+	fmt.Fprintln(w, "--\t-----")
+	for _, g := range games {
+		fmt.Fprintf(w, "%d\t%s\n", g.ID, g.Title)
+	}
+	w.Flush()
+}
+
 func cmdAdminLevels(ctx context.Context, cfg *config, client *encx.Client) {
 	requireGameId(cfg)
 	levels, err := client.AdminGetLevels(ctx, cfg.gameId)

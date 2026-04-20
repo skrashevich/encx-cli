@@ -53,6 +53,43 @@ func (c *Client) doPost(ctx context.Context, rawURL string, form url.Values) (st
 	return string(body), nil
 }
 
+// AdminGame represents a game in the admin game manager.
+type AdminGame struct {
+	ID     int    `json:"id"`
+	Number int    `json:"number"`
+	Title  string `json:"title"`
+	Status string `json:"status"`
+}
+
+// AdminGetGames fetches the list of games the user has admin access to.
+func (c *Client) AdminGetGames(ctx context.Context) ([]AdminGame, error) {
+	u := fmt.Sprintf("%s/Administration/GamesManager.aspx", c.baseURL())
+	body, err := c.doGet(ctx, u)
+	if err != nil {
+		return nil, fmt.Errorf("encx: admin get games: %w", err)
+	}
+
+	// Match game links: href="/GameDetails.aspx?gid=82033">Title</a>
+	gameRe := regexp.MustCompile(`(?i)<a[^>]*href="/GameDetails\.aspx\?gid=(\d+)"[^>]*>([^<]+)</a>`)
+	matches := gameRe.FindAllStringSubmatch(body, -1)
+
+	seen := map[int]bool{}
+	games := make([]AdminGame, 0, len(matches))
+	for _, m := range matches {
+		id, _ := strconv.Atoi(m[1])
+		if id == 0 || seen[id] {
+			continue
+		}
+		seen[id] = true
+		games = append(games, AdminGame{
+			ID:    id,
+			Title: strings.TrimSpace(m[2]),
+		})
+	}
+
+	return games, nil
+}
+
 // --- Level Management ---
 
 // AdminGetLevels fetches the list of levels for a game from the admin panel.
