@@ -154,6 +154,9 @@ func main() {
 		cmdGameStats(ctx, cfg, client)
 
 	// Admin commands
+	case "admin-games":
+		requireAuth(ctx, cfg, client)
+		cmdAdminGames(ctx, cfg, client)
 	case "admin-levels":
 		requireAuth(ctx, cfg, client)
 		cmdAdminLevels(ctx, cfg, client)
@@ -249,6 +252,7 @@ Commands:
   game-stats  Show game statistics (levels, teams, rankings)
 
 Admin commands (require game editor rights):
+  admin-games              List your authored games
   admin-levels             List levels with IDs (admin)
   admin-create-levels      Create new levels
   admin-delete-level       Delete a level by number
@@ -353,6 +357,9 @@ func printCommandHelp(cmd string) {
 	case "game-stats":
 		fmt.Fprintln(os.Stderr, "Usage: encli game-stats -game-id <id>")
 		fmt.Fprintln(os.Stderr, "  Show game statistics: levels, teams, rankings.")
+	case "admin-games":
+		fmt.Fprintln(os.Stderr, "Usage: encli admin-games")
+		fmt.Fprintln(os.Stderr, "  List games where you are an author or have admin access.")
 	case "admin-levels":
 		fmt.Fprintln(os.Stderr, "Usage: encli admin-levels -game-id <id>")
 		fmt.Fprintln(os.Stderr, "  List all levels with their IDs (admin panel).")

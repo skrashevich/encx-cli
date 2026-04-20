@@ -185,6 +185,9 @@ encli logout
 
 # --- Admin-команды ---
 
+# Список авторских игр
+encli admin-games
+
 # Список уровней с ID
 encli admin-levels -game-id 12345
 
@@ -270,6 +273,7 @@ encli admin-copy-game -game-id 12345 67890
 
 | Команда | Что делает |
 |---|---|
+| `admin-games` | Показывает список авторских игр |
 | `admin-levels` | Показывает все уровни с их ID (админка) |
 | `admin-create-levels` | Создаёт указанное количество новых уровней |
 | `admin-delete-level` | Удаляет уровень по номеру |
