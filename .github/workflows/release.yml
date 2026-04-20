@@ -132,8 +132,6 @@ jobs:
             --team-id "$APPLE_TEAM_ID" \
             --wait
 
-          xcrun stapler staple encli-darwin-${{ matrix.goarch }}
-
       - name: Cleanup keychain
         if: always()
         run: |
@@ -186,6 +184,7 @@ jobs:
             type=semver,pattern={{version}}
             type=semver,pattern={{major}}.{{minor}}
             type=semver,pattern={{major}}
+            type=raw,value=latest,enable={{is_default_branch}}
 
       - uses: docker/build-push-action@v6
         with:
