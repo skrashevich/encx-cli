@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -17,10 +18,11 @@ import (
 
 const (
 	openRouterURL      = "https://openrouter.ai/api/v1/chat/completions"
-	defaultLLMModel    = "openai/gpt-4o-mini"
+	defaultLLMModel    = "openai/gpt-oss-120b:free"
 	maxAgentTurns      = 20
 	maxToolItemsForLLM = 200
 	maxToolTextForLLM  = 240
+	maxFixSteps        = 8
 )
 
 // agentMode controls fatal behavior for nested tool execution: when true,
@@ -92,8 +94,36 @@ type llmToolCallFunction struct {
 	Arguments string `json:"arguments"`
 }
 
-func getTools() []llmTool {
-	return []llmTool{
+type llmSession struct {
+	reviewApprovalMode  bool
+	applyingApprovedFix bool
+	preferRussian       bool
+	pendingFixes        []pendingAdminFix
+}
+
+type pendingAdminFix struct {
+	Title       string           `json:"title"`
+	Summary     string           `json:"summary"`
+	LevelNumber int              `json:"level_number,omitempty"`
+	Steps       []pendingFixStep `json:"steps"`
+}
+
+type pendingFixStep struct {
+	Tool      string         `json:"tool"`
+	Arguments map[string]any `json:"arguments"`
+}
+
+type proposalOutcome struct {
+	Title    string
+	Applied  bool
+	Skipped  bool
+	Stopped  bool
+	Error    string
+	StepRuns int
+}
+
+func getTools(reviewMode bool) []llmTool {
+	tools := []llmTool{
 		{Type: "function", Function: llmFunction{
 			Name:        "login",
 			Description: "Authenticate and save session. Use when user wants to log in.",
@@ -191,8 +221,13 @@ func getTools() []llmTool {
 		}},
 		{Type: "function", Function: llmFunction{
 			Name:        "admin_levels",
-			Description: "List all levels with their IDs (admin panel). Works for any game you author — use this to see/manage levels even if game hasn't started.",
+			Description: "List all levels with their IDs (admin panel). Works for any game you author — use this to find level numbers/IDs, then use admin_level_content to inspect the actual task text, answers, bonuses, and hints.",
 			Parameters:  json.RawMessage(`{"type":"object","properties":{"game_id":{"type":"integer","description":"Game ID"}},"required":["game_id"]}`),
+		}},
+		{Type: "function", Function: llmFunction{
+			Name:        "admin_level_content",
+			Description: "Read one level from the admin panel: task/scenario text, sector answers, bonuses, hints, comment, and settings. Use this when you need to verify that uploaded content matches the task, even if the game is not active and player APIs return no active level.",
+			Parameters:  json.RawMessage(`{"type":"object","properties":{"game_id":{"type":"integer","description":"Game ID"},"level_number":{"type":"integer","description":"Level number from admin_levels"}},"required":["game_id","level_number"]}`),
 		}},
 		{Type: "function", Function: llmFunction{
 			Name:        "admin_create_levels",
@@ -290,6 +325,21 @@ func getTools() []llmTool {
 			Parameters:  json.RawMessage(`{"type":"object","properties":{"source_game_id":{"type":"integer","description":"Source game ID to copy from"},"target_game_id":{"type":"integer","description":"Target game ID to copy to"}},"required":["source_game_id","target_game_id"]}`),
 		}},
 	}
+	if reviewMode {
+		tools = append(tools, llmTool{Type: "function", Function: llmFunction{
+			Name:        "propose_admin_fix",
+			Description: "Queue exactly one proposed fix for user approval during review mode. Use this instead of direct admin mutation tools when you detect a concrete issue. Each proposal must be minimal and target one problem only.",
+			Parameters:  json.RawMessage(`{"type":"object","properties":{"title":{"type":"string","description":"Short human-readable title for this fix"},"summary":{"type":"string","description":"Why this fix is needed and what is wrong right now"},"level_number":{"type":"integer","description":"Affected level number when applicable"},"steps":{"type":"array","description":"Concrete admin mutation calls to execute if the user approves this fix","items":{"type":"object","properties":{"tool":{"type":"string","enum":["admin_set_autopass","admin_set_block","admin_create_bonus","admin_delete_bonus","admin_create_sector","admin_delete_sector","admin_create_hint","admin_delete_hint","admin_create_task","admin_set_comment"]},"arguments":{"type":"object","description":"Arguments for that admin tool call"}},"required":["tool","arguments"]}}},"required":["title","summary","steps"]}`),
+		}})
+		filtered := make([]llmTool, 0, len(tools))
+		for _, tool := range tools {
+			if shouldExposeToolInReview(tool.Function.Name) {
+				filtered = append(filtered, tool)
+			}
+		}
+		return filtered
+	}
+	return tools
 }
 
 func cmdLLM(ctx context.Context, cfg *config, client *encx.Client, prompt string) {
@@ -308,6 +358,10 @@ func cmdLLM(ctx context.Context, cfg *config, client *encx.Client, prompt string
 	// panic and be recovered back into the agent loop.
 	cfg.jsonOutput = true
 	jsonMode = true
+	session := &llmSession{
+		reviewApprovalMode: isReviewApprovalPrompt(prompt),
+		preferRussian:      looksLikeRussian(prompt),
+	}
 
 	systemPrompt := `You are an autonomous agent for the Encounter (en.cx) game engine CLI tool.
 The user gives you a natural language request. Execute it step by step using the available tools.
@@ -325,24 +379,52 @@ Rules:
 - If a tool call fails, try to recover or report the error.
 - For admin_copy_game: source is the first game mentioned, target is the second.
 - Prefer admin_* tools for game management (viewing levels, creating content). Player tools (levels, status, bonuses) are for games IN PROGRESS.
+- For reading level text, answers, hints, and other scenario content from the organizer side, prefer admin_level_content instead of player tools.
 - Starting/launching a game is NOT available via CLI — only through the web interface. Inform the user if they ask.
 - When asked to CREATE a game/levels, make them INTERESTING and DIFFERENT: give unique names, add tasks with creative quest text, add sectors with answers, add hints. Don't just create empty shells.
-- Respond in the same language as the user's request.`
+- SELF-VERIFICATION: After creating or modifying levels, verify your own work by calling admin_level_content for each affected level. Check that: (1) all sector codes/answers are present and correct, (2) timings (autopass, answer block) are set to non-zero values if the level is timed, (3) hints are present if needed and have correct text/delays, (4) task text matches the intended answers. If you discover errors, fix them immediately before reporting success.
+- Respond in the same language as the user's request.` + func() string {
+		if !session.reviewApprovalMode {
+			return ""
+		}
+		return `
+- This request is in review/approval mode. You may inspect and analyze existing content, but you must NOT directly modify the game.
+- If you find an issue that should be fixed, call propose_admin_fix once per issue. One proposal = one user approval decision.
+- Each proposed fix must contain only the minimal admin mutation steps needed to resolve that one issue.
+- After proposing fixes, give a concise audit summary. Do not ask the user for confirmation in normal text; the CLI will handle approval interactively.`
+	}()
 
 	messages := []llmMessage{
 		{Role: "system", Content: systemPrompt},
 		{Role: "user", Content: prompt},
 	}
 
-	tools := getTools()
-	debugf("llm mode initialized: model=%s tools=%d prompt=%q", model, len(tools), summarizeDebugText(prompt, 160))
+	tools := getTools(session.reviewApprovalMode)
+	debugf("llm mode initialized: model=%s review_mode=%v tools=%d prompt=%q", model, session.reviewApprovalMode, len(tools), summarizeDebugText(prompt, 0))
 
 	for turn := 0; turn < maxAgentTurns; turn++ {
 		debugf("llm turn=%d request: messages=%d", turn+1, len(messages))
 		turnStart := time.Now()
-		resp, err := callLLM(ctx, apiKey, model, messages, tools)
-		if err != nil {
-			fatal("LLM API error: %v", err)
+		var resp *llmResponse
+		var lastErr error
+		for attempt := range 3 {
+			if attempt > 0 {
+				delay := time.Duration(attempt) * 5 * time.Second
+				fmt.Fprintf(os.Stderr, "%s %s...\n",
+					session.reviewText("Retrying in", "Повтор через"), delay)
+				time.Sleep(delay)
+			}
+			resp, lastErr = callLLM(ctx, apiKey, model, messages, tools)
+			if lastErr == nil {
+				break
+			}
+			if !isRetryableLLMError(lastErr) {
+				fatal("LLM API error: %v", lastErr)
+			}
+			fmt.Fprintf(os.Stderr, "LLM error (%d/3): %v\n", attempt+1, lastErr)
+		}
+		if lastErr != nil {
+			fatal("LLM API error after 3 attempts: %v", lastErr)
 		}
 
 		if len(resp.Choices) == 0 {
@@ -351,13 +433,16 @@ Rules:
 
 		choice := resp.Choices[0]
 		debugf("llm turn=%d response: finish_reason=%s tool_calls=%d content=%q",
-			turn+1, choice.FinishReason, len(choice.Message.ToolCalls), summarizeDebugText(choice.Message.Content, 160))
+			turn+1, choice.FinishReason, len(choice.Message.ToolCalls), summarizeDebugText(choice.Message.Content, 0))
 		debugf("llm turn=%d completed in %s", turn+1, time.Since(turnStart).Round(time.Millisecond))
 
 		// No tool calls — LLM is done, print final response
 		if len(choice.Message.ToolCalls) == 0 {
 			if choice.Message.Content != "" {
 				fmt.Println(choice.Message.Content)
+			}
+			if len(session.pendingFixes) > 0 {
+				runPendingFixApprovals(ctx, cfg, client, session)
 			}
 			return
 		}
@@ -370,13 +455,13 @@ Rules:
 
 		// Execute each tool call and append results
 		for _, tc := range choice.Message.ToolCalls {
-			fmt.Fprintf(os.Stderr, "[%s] %s\n", tc.Function.Name, tc.Function.Arguments)
+			fmt.Fprintf(os.Stderr, "%s\n", formatToolCallForDisplay(session, tc.Function.Name, tc.Function.Arguments))
 			debugf("llm tool call: id=%s name=%s args=%s", tc.ID, tc.Function.Name, summarizeDebugArgs(tc.Function.Arguments))
 
-			result := executeToolCallSafe(ctx, cfg, client, tc.Function.Name, tc.Function.Arguments)
+			result := executeToolCallSafe(ctx, cfg, client, session, tc.Function.Name, tc.Function.Arguments)
 			llmResult := prepareToolResultForLLM(tc.Function.Name, result)
 			debugf("llm tool result: id=%s name=%s raw_bytes=%d llm_bytes=%d result=%q",
-				tc.ID, tc.Function.Name, len(result), len(llmResult), summarizeDebugText(llmResult, 200))
+				tc.ID, tc.Function.Name, len(result), len(llmResult), summarizeDebugText(llmResult, 0))
 
 			messages = append(messages, llmMessage{
 				Role:       "tool",
@@ -391,7 +476,7 @@ Rules:
 }
 
 func callLLM(ctx context.Context, apiKey, model string, messages []llmMessage, tools []llmTool) (*llmResponse, error) {
-	ctx, cancel := context.WithTimeout(ctx, 60*time.Second)
+	ctx, cancel := context.WithTimeout(ctx, 180*time.Second)
 	defer cancel()
 
 	req := llmRequest{
@@ -441,6 +526,17 @@ func callLLM(ctx context.Context, apiKey, model string, messages []llmMessage, t
 	return &llmResp, nil
 }
 
+func isRetryableLLMError(err error) bool {
+	s := err.Error()
+	return strings.Contains(s, "context deadline exceeded") ||
+		strings.Contains(s, "HTTP 429") ||
+		strings.Contains(s, "HTTP 502") ||
+		strings.Contains(s, "HTTP 503") ||
+		strings.Contains(s, "HTTP 504") ||
+		strings.Contains(s, "connection reset") ||
+		strings.Contains(s, "EOF")
+}
+
 func parseLLMErrorMessage(respBody []byte) string {
 	var apiErr llmErrorEnvelope
 	if err := json.Unmarshal(respBody, &apiErr); err == nil && apiErr.Error != nil && apiErr.Error.Message != "" {
@@ -453,7 +549,7 @@ func parseLLMErrorMessage(respBody []byte) string {
 }
 
 // executeToolCallSafe runs a tool call, capturing stdout and recovering from fatal panics.
-func executeToolCallSafe(ctx context.Context, cfg *config, client *encx.Client, name, argsJSON string) string {
+func executeToolCallSafe(ctx context.Context, cfg *config, client *encx.Client, session *llmSession, name, argsJSON string) string {
 	// Capture stdout
 	oldStdout := os.Stdout
 	r, w, _ := os.Pipe()
@@ -481,7 +577,7 @@ func executeToolCallSafe(ctx context.Context, cfg *config, client *encx.Client, 
 				}
 			}
 		}()
-		executeLLMToolCall(ctx, cfg, client, name, argsJSON)
+		executeLLMToolCall(ctx, cfg, client, session, name, argsJSON)
 	}()
 
 	w.Close()
@@ -496,11 +592,11 @@ func executeToolCallSafe(ctx context.Context, cfg *config, client *encx.Client, 
 		result = `{"success": true}`
 	}
 	debugf("tool execution finish: name=%s duration=%s result=%q",
-		name, time.Since(start).Round(time.Millisecond), summarizeDebugText(result, 200))
+		name, time.Since(start).Round(time.Millisecond), summarizeDebugText(result, 0))
 	return result
 }
 
-func executeLLMToolCall(ctx context.Context, cfg *config, client *encx.Client, name, argsJSON string) {
+func executeLLMToolCall(ctx context.Context, cfg *config, client *encx.Client, session *llmSession, name, argsJSON string) {
 	var args map[string]any
 	if argsJSON != "" {
 		if err := json.Unmarshal([]byte(argsJSON), &args); err != nil {
@@ -554,8 +650,26 @@ func executeLLMToolCall(ctx context.Context, cfg *config, client *encx.Client, n
 		cfg.gameId = gid
 		debugf("tool execution context: set cfg.gameId=%d from tool args", gid)
 	}
+	if session != nil && session.reviewApprovalMode && !session.applyingApprovedFix && isAdminMutationTool(name) {
+		fatal("Direct admin mutations are disabled during review. Use propose_admin_fix instead.")
+	}
 
 	switch name {
+	case "propose_admin_fix":
+		if session == nil || !session.reviewApprovalMode {
+			fatal("propose_admin_fix is only available in review mode")
+		}
+		proposal, err := parsePendingAdminFix(args, cfg.gameId)
+		if err != nil {
+			fatal("Invalid fix proposal: %v", err)
+		}
+		session.pendingFixes = append(session.pendingFixes, proposal)
+		outputJSON(map[string]any{
+			"queued": true,
+			"index":  len(session.pendingFixes),
+			"title":  proposal.Title,
+		})
+
 	case "login":
 		cfg.login = getString("login")
 		cfg.password = getString("password")
@@ -638,6 +752,10 @@ func executeLLMToolCall(ctx context.Context, cfg *config, client *encx.Client, n
 	case "admin_levels":
 		requireAuth(ctx, cfg, client)
 		cmdAdminLevels(ctx, cfg, client)
+
+	case "admin_level_content":
+		requireAuth(ctx, cfg, client)
+		cmdAdminLevelContent(ctx, cfg, client, []string{strconv.Itoa(getInt("level_number"))})
 
 	case "admin_create_levels":
 		requireAuth(ctx, cfg, client)
@@ -783,27 +901,529 @@ func executeLLMToolCall(ctx context.Context, cfg *config, client *encx.Client, n
 	}
 }
 
+func shouldExposeToolInReview(name string) bool {
+	if name == "propose_admin_fix" {
+		return true
+	}
+	return !isAdminMutationTool(name)
+}
+
+func isAdminMutationTool(name string) bool {
+	switch name {
+	case "admin_create_levels",
+		"admin_delete_level",
+		"admin_rename_level",
+		"admin_set_autopass",
+		"admin_set_block",
+		"admin_create_bonus",
+		"admin_delete_bonus",
+		"admin_create_sector",
+		"admin_delete_sector",
+		"admin_create_hint",
+		"admin_delete_hint",
+		"admin_create_task",
+		"admin_set_comment",
+		"admin_add_correction",
+		"admin_delete_correction",
+		"admin_wipe_game",
+		"admin_copy_game":
+		return true
+	default:
+		return false
+	}
+}
+
+func isProposalMutationTool(name string) bool {
+	switch name {
+	case "admin_set_autopass",
+		"admin_set_block",
+		"admin_create_bonus",
+		"admin_delete_bonus",
+		"admin_create_sector",
+		"admin_delete_sector",
+		"admin_create_hint",
+		"admin_delete_hint",
+		"admin_create_task",
+		"admin_set_comment":
+		return true
+	default:
+		return false
+	}
+}
+
+func parsePendingAdminFix(args map[string]any, defaultGameID int) (pendingAdminFix, error) {
+	fix := pendingAdminFix{
+		Title:       strings.TrimSpace(getAnyString(args["title"])),
+		Summary:     strings.TrimSpace(getAnyString(args["summary"])),
+		LevelNumber: getAnyInt(args["level_number"]),
+	}
+	if fix.Title == "" {
+		return pendingAdminFix{}, errors.New("title is required")
+	}
+	if fix.Summary == "" {
+		return pendingAdminFix{}, errors.New("summary is required")
+	}
+	rawSteps, ok := args["steps"].([]any)
+	if !ok || len(rawSteps) == 0 {
+		return pendingAdminFix{}, errors.New("at least one step is required")
+	}
+	if len(rawSteps) > maxFixSteps {
+		return pendingAdminFix{}, fmt.Errorf("too many steps: %d", len(rawSteps))
+	}
+	fix.Steps = make([]pendingFixStep, 0, len(rawSteps))
+	for i, rawStep := range rawSteps {
+		stepMap, ok := rawStep.(map[string]any)
+		if !ok {
+			return pendingAdminFix{}, fmt.Errorf("step %d is not an object", i+1)
+		}
+		toolName := strings.TrimSpace(getAnyString(stepMap["tool"]))
+		if !isProposalMutationTool(toolName) {
+			return pendingAdminFix{}, fmt.Errorf("step %d uses unsupported tool %q", i+1, toolName)
+		}
+		argMap, ok := stepMap["arguments"].(map[string]any)
+		if !ok {
+			return pendingAdminFix{}, fmt.Errorf("step %d must include object arguments", i+1)
+		}
+		copiedArgs := cloneAnyMap(argMap)
+		if gid := getAnyInt(copiedArgs["game_id"]); gid == 0 {
+			if defaultGameID == 0 {
+				return pendingAdminFix{}, fmt.Errorf("step %d is missing game_id", i+1)
+			}
+			copiedArgs["game_id"] = defaultGameID
+		} else if defaultGameID != 0 && gid != defaultGameID {
+			return pendingAdminFix{}, fmt.Errorf("step %d targets game_id %d, expected %d", i+1, gid, defaultGameID)
+		}
+		fix.Steps = append(fix.Steps, pendingFixStep{
+			Tool:      toolName,
+			Arguments: copiedArgs,
+		})
+	}
+	return fix, nil
+}
+
+func runPendingFixApprovals(ctx context.Context, cfg *config, client *encx.Client, session *llmSession) {
+	outcomes := make([]proposalOutcome, 0, len(session.pendingFixes))
+	for i, fix := range session.pendingFixes {
+		printFixProposalForApproval(session, i+1, len(session.pendingFixes), fix)
+		switch promptApprovalDecision(session) {
+		case "yes":
+			outcomes = append(outcomes, applyPendingAdminFix(ctx, cfg, client, session, fix))
+		case "quit":
+			outcomes = append(outcomes, proposalOutcome{Title: fix.Title, Stopped: true})
+			printApprovalMessage(session, session.reviewText(
+				"Stopping approval flow. Remaining proposals were not applied.",
+				"Останавливаю цепочку согласований. Остальные предложения не применялись.",
+			))
+			printApprovalSummary(session, outcomes)
+			return
+		default:
+			outcomes = append(outcomes, proposalOutcome{Title: fix.Title, Skipped: true})
+			printApprovalMessage(session, session.reviewText(
+				"Skipped.",
+				"Пропущено.",
+			))
+		}
+	}
+	printApprovalSummary(session, outcomes)
+}
+
+func applyPendingAdminFix(ctx context.Context, cfg *config, client *encx.Client, session *llmSession, fix pendingAdminFix) proposalOutcome {
+	outcome := proposalOutcome{Title: fix.Title}
+	for i, step := range fix.Steps {
+		// Inject proposal-level fields into step arguments when missing.
+		if fix.LevelNumber != 0 && getAnyInt(step.Arguments["level_number"]) == 0 {
+			step.Arguments["level_number"] = fix.LevelNumber
+		}
+		gameID := getAnyInt(step.Arguments["game_id"])
+		if gameID == 0 {
+			gameID = cfg.gameId
+		}
+		enriched, err := enrichProposalStep(ctx, client, gameID, step)
+		if err != nil {
+			outcome.Error = err.Error()
+			printApprovalMessage(session, session.reviewText(
+				fmt.Sprintf("Failed before execution: %v", err),
+				fmt.Sprintf("Не удалось подготовить применение: %v", err),
+			))
+			return outcome
+		}
+		argsJSON, err := json.Marshal(enriched.Arguments)
+		if err != nil {
+			outcome.Error = err.Error()
+			printApprovalMessage(session, session.reviewText(
+				fmt.Sprintf("Failed to encode step %d: %v", i+1, err),
+				fmt.Sprintf("Не удалось закодировать шаг %d: %v", i+1, err),
+			))
+			return outcome
+		}
+		printApprovalMessage(session, session.reviewText(
+			fmt.Sprintf("Applying step %d/%d: %s", i+1, len(fix.Steps), describeProposalStep(enriched)),
+			fmt.Sprintf("Применяю шаг %d/%d: %s", i+1, len(fix.Steps), describeProposalStep(enriched)),
+		))
+		session.applyingApprovedFix = true
+		result := executeToolCallSafe(ctx, cfg, client, session, enriched.Tool, string(argsJSON))
+		session.applyingApprovedFix = false
+		outcome.StepRuns++
+		if errMsg := extractToolError(result); errMsg != "" {
+			outcome.Error = errMsg
+			printApprovalMessage(session, session.reviewText(
+				fmt.Sprintf("Step failed: %s", errMsg),
+				fmt.Sprintf("Шаг завершился ошибкой: %s", errMsg),
+			))
+			return outcome
+		}
+	}
+	outcome.Applied = true
+	printApprovalMessage(session, session.reviewText(
+		"Applied.",
+		"Применено.",
+	))
+	return outcome
+}
+
+func enrichProposalStep(ctx context.Context, client *encx.Client, gameID int, step pendingFixStep) (pendingFixStep, error) {
+	if step.Tool != "admin_create_bonus" {
+		return step, nil
+	}
+	if getAnyInt(step.Arguments["level_id"]) != 0 {
+		return step, nil
+	}
+	levelNum := getAnyInt(step.Arguments["level_number"])
+	if gameID == 0 || levelNum == 0 {
+		return step, errors.New("admin_create_bonus requires level_number and game_id")
+	}
+	levels, err := client.AdminGetLevels(ctx, gameID)
+	if err != nil {
+		return step, fmt.Errorf("resolve level_id for level %d: %w", levelNum, err)
+	}
+	for _, lvl := range levels {
+		if lvl.Number == levelNum {
+			step.Arguments["level_id"] = lvl.ID
+			return step, nil
+		}
+	}
+	return step, fmt.Errorf("level %d not found while resolving level_id", levelNum)
+}
+
+func describeProposalStep(step pendingFixStep) string {
+	switch step.Tool {
+	case "admin_set_comment":
+		return fmt.Sprintf("set level %d name/comment to %q", getAnyInt(step.Arguments["level_number"]), getAnyString(step.Arguments["name"]))
+	case "admin_set_autopass":
+		return fmt.Sprintf("set autopass on level %d to %s", getAnyInt(step.Arguments["level_number"]), getAnyString(step.Arguments["time"]))
+	case "admin_set_block":
+		return fmt.Sprintf("update answer block on level %d", getAnyInt(step.Arguments["level_number"]))
+	case "admin_create_bonus":
+		return fmt.Sprintf("create bonus %q on level %d", getAnyString(step.Arguments["name"]), getAnyInt(step.Arguments["level_number"]))
+	case "admin_delete_bonus":
+		return fmt.Sprintf("delete bonus %d on level %d", getAnyInt(step.Arguments["bonus_id"]), getAnyInt(step.Arguments["level_number"]))
+	case "admin_create_sector":
+		return fmt.Sprintf("create sector %q on level %d", getAnyString(step.Arguments["name"]), getAnyInt(step.Arguments["level_number"]))
+	case "admin_delete_sector":
+		return fmt.Sprintf("delete sector %d on level %d", getAnyInt(step.Arguments["sector_id"]), getAnyInt(step.Arguments["level_number"]))
+	case "admin_create_hint":
+		return fmt.Sprintf("create hint on level %d with delay %s", getAnyInt(step.Arguments["level_number"]), getAnyString(step.Arguments["delay"]))
+	case "admin_delete_hint":
+		return fmt.Sprintf("delete hint %d on level %d", getAnyInt(step.Arguments["hint_id"]), getAnyInt(step.Arguments["level_number"]))
+	case "admin_create_task":
+		return fmt.Sprintf("create task on level %d", getAnyInt(step.Arguments["level_number"]))
+	default:
+		return step.Tool
+	}
+}
+
+func formatToolCallForDisplay(session *llmSession, name, argsJSON string) string {
+	var args map[string]any
+	json.Unmarshal([]byte(argsJSON), &args)
+
+	lvl := getAnyInt(args["level_number"])
+	itemName := getAnyString(args["name"])
+	rt := session.reviewText
+
+	levelSuffix := ""
+	if lvl > 0 {
+		levelSuffix = rt(fmt.Sprintf(" (level %d)", lvl), fmt.Sprintf(" (уровень %d)", lvl))
+	}
+
+	quoted := ""
+	if itemName != "" {
+		quoted = fmt.Sprintf(" %q", itemName)
+	}
+
+	switch name {
+	case "admin_levels":
+		return "[admin_levels] " + rt("Fetching level list", "Получаю список уровней")
+	case "admin_level_content":
+		return fmt.Sprintf("[admin_level_content] "+rt("Reading level %d content", "Читаю содержимое уровня %d"), lvl)
+	case "admin_games":
+		return "[admin_games] " + rt("Fetching authored games", "Получаю список авторских игр")
+	case "admin_teams":
+		return "[admin_teams] " + rt("Fetching teams", "Получаю список команд") + levelSuffix
+	case "admin_corrections":
+		return "[admin_corrections] " + rt("Fetching corrections", "Получаю коррекции") + levelSuffix
+	case "status":
+		return "[status] " + rt("Checking game status", "Проверяю статус игры")
+	case "levels":
+		return "[levels] " + rt("Fetching levels (player)", "Получаю уровни (player)")
+	case "bonuses":
+		return "[bonuses] " + rt("Fetching bonuses", "Получаю бонусы") + levelSuffix
+	case "enter":
+		return "[enter] " + rt("Entering game", "Вхожу в игру")
+	case "games":
+		return "[games] " + rt("Fetching game list", "Получаю список игр")
+	case "game_list":
+		return "[game_list] " + rt("Fetching game list", "Получаю список игр")
+	case "hints":
+		return "[hints] " + rt("Fetching hints", "Получаю подсказки") + levelSuffix
+	case "sectors":
+		return "[sectors] " + rt("Fetching sectors", "Получаю секторы") + levelSuffix
+	case "messages":
+		return "[messages] " + rt("Fetching messages", "Получаю сообщения")
+	case "send_code":
+		code := getAnyString(args["code"])
+		return "[send_code] " + rt("Sending code", "Отправляю код") + ": " + code
+	case "send_bonus":
+		code := getAnyString(args["code"])
+		return "[send_bonus] " + rt("Sending bonus code", "Отправляю бонусный код") + ": " + code
+	case "hint":
+		return "[hint] " + rt("Requesting hint", "Запрашиваю подсказку") + levelSuffix
+	case "game_stats":
+		return "[game_stats] " + rt("Fetching game stats", "Получаю статистику игры")
+	case "profile":
+		return "[profile] " + rt("Fetching profile", "Получаю профиль")
+	case "admin_create_levels":
+		cnt := getAnyInt(args["count"])
+		return fmt.Sprintf("[admin_create_levels] "+rt("Creating %d levels", "Создаю уровней: %d"), cnt)
+	case "admin_delete_level":
+		return fmt.Sprintf("[admin_delete_level] "+rt("Deleting level %d", "Удаляю уровень %d"), lvl)
+	case "admin_rename_level":
+		return fmt.Sprintf("[admin_rename_level] "+rt("Renaming level %d", "Переименовываю уровень %d"), lvl)
+	case "admin_set_autopass":
+		t := getAnyString(args["time"])
+		return "[admin_set_autopass] " + rt("Setting autopass", "Настраиваю автопереход") + levelSuffix + ": " + t
+	case "admin_set_block":
+		return "[admin_set_block] " + rt("Configuring answer block", "Настраиваю блокировку ответов") + levelSuffix
+	case "admin_set_comment":
+		return "[admin_set_comment] " + rt("Setting name/comment", "Устанавливаю название") + levelSuffix
+	case "admin_create_bonus":
+		return "[admin_create_bonus] " + rt("Creating bonus", "Создаю бонус") + quoted + levelSuffix
+	case "admin_delete_bonus":
+		return "[admin_delete_bonus] " + rt("Deleting bonus", "Удаляю бонус") + levelSuffix
+	case "admin_create_sector":
+		return "[admin_create_sector] " + rt("Creating sector", "Создаю сектор") + quoted + levelSuffix
+	case "admin_delete_sector":
+		return "[admin_delete_sector] " + rt("Deleting sector", "Удаляю сектор") + levelSuffix
+	case "admin_create_hint":
+		return "[admin_create_hint] " + rt("Creating hint", "Создаю подсказку") + levelSuffix
+	case "admin_delete_hint":
+		return "[admin_delete_hint] " + rt("Deleting hint", "Удаляю подсказку") + levelSuffix
+	case "admin_create_task":
+		return "[admin_create_task] " + rt("Creating task", "Создаю задание") + levelSuffix
+	case "admin_add_correction":
+		return "[admin_add_correction] " + rt("Adding correction", "Добавляю коррекцию") + levelSuffix
+	case "admin_delete_correction":
+		return "[admin_delete_correction] " + rt("Deleting correction", "Удаляю коррекцию")
+	case "admin_wipe_game":
+		return "[admin_wipe_game] " + rt("Wiping game", "Очищаю игру")
+	case "admin_copy_game":
+		src := getAnyInt(args["source_game_id"])
+		return fmt.Sprintf("[admin_copy_game] "+rt("Copying game from %d", "Копирую игру из %d"), src)
+	case "propose_admin_fix":
+		title := getAnyString(args["title"])
+		return "[propose_admin_fix] " + title
+	default:
+		return fmt.Sprintf("[%s] %s", name, argsJSON)
+	}
+}
+
+func printFixProposalForApproval(session *llmSession, idx, total int, fix pendingAdminFix) {
+	lines := []string{
+		fmt.Sprintf("[%d/%d] %s", idx, total, fix.Title),
+	}
+	if fix.LevelNumber > 0 {
+		lines = append(lines, session.reviewText(
+			fmt.Sprintf("Level: %d", fix.LevelNumber),
+			fmt.Sprintf("Уровень: %d", fix.LevelNumber),
+		))
+	}
+	lines = append(lines, session.reviewText(
+		"Why: "+fix.Summary,
+		"Почему: "+fix.Summary,
+	))
+	lines = append(lines, session.reviewText("Steps:", "Шаги:"))
+	for _, step := range fix.Steps {
+		lines = append(lines, "  - "+describeProposalStep(step))
+	}
+	printApprovalMessage(session, strings.Join(lines, "\n"))
+}
+
+func promptApprovalDecision(session *llmSession) string {
+	for {
+		answer := strings.ToLower(strings.TrimSpace(prompt(session.reviewText(
+			"Apply this fix? [y/N/q]: ",
+			"Применить это исправление? [y/N/q]: ",
+		))))
+		switch answer {
+		case "y", "yes", "д", "да":
+			return "yes"
+		case "", "n", "no", "н", "нет":
+			return "no"
+		case "q", "quit", "в", "выход":
+			return "quit"
+		}
+		printApprovalMessage(session, session.reviewText(
+			"Please answer y, n, or q.",
+			"Ответьте y, n или q.",
+		))
+	}
+}
+
+func printApprovalSummary(session *llmSession, outcomes []proposalOutcome) {
+	if len(outcomes) == 0 {
+		return
+	}
+	var applied, skipped, stopped, failed int
+	for _, outcome := range outcomes {
+		switch {
+		case outcome.Applied:
+			applied++
+		case outcome.Stopped:
+			stopped++
+		case outcome.Error != "":
+			failed++
+		case outcome.Skipped:
+			skipped++
+		}
+	}
+	lines := []string{
+		session.reviewText("Approval summary:", "Итог согласований:"),
+		session.reviewText(fmt.Sprintf("Applied: %d", applied), fmt.Sprintf("Применено: %d", applied)),
+		session.reviewText(fmt.Sprintf("Skipped: %d", skipped), fmt.Sprintf("Пропущено: %d", skipped)),
+		session.reviewText(fmt.Sprintf("Failed: %d", failed), fmt.Sprintf("С ошибкой: %d", failed)),
+	}
+	if stopped > 0 {
+		lines = append(lines, session.reviewText(
+			fmt.Sprintf("Stopped early: %d", stopped),
+			fmt.Sprintf("Остановлено досрочно: %d", stopped),
+		))
+	}
+	for _, outcome := range outcomes {
+		if outcome.Error == "" {
+			continue
+		}
+		lines = append(lines, fmt.Sprintf("- %s: %s", outcome.Title, outcome.Error))
+	}
+	fmt.Println(strings.Join(lines, "\n"))
+}
+
+func printApprovalMessage(session *llmSession, message string) {
+	fmt.Fprintln(os.Stderr, message)
+}
+
+func extractToolError(result string) string {
+	var payload map[string]any
+	if !decodeJSON(result, &payload) {
+		return ""
+	}
+	errMsg, _ := payload["error"].(string)
+	return strings.TrimSpace(errMsg)
+}
+
+func cloneAnyMap(src map[string]any) map[string]any {
+	out := make(map[string]any, len(src))
+	for k, v := range src {
+		out[k] = v
+	}
+	return out
+}
+
+func getAnyString(v any) string {
+	s, _ := v.(string)
+	return s
+}
+
+func getAnyInt(v any) int {
+	switch val := v.(type) {
+	case float64:
+		return int(val)
+	case int:
+		return val
+	case string:
+		n, _ := strconv.Atoi(val)
+		return n
+	default:
+		return 0
+	}
+}
+
+func isReviewApprovalPrompt(prompt string) bool {
+	prompt = strings.ToLower(prompt)
+	markers := []string{
+		"проверь",
+		"провер",
+		"перепроверь",
+		"убедись",
+		"пройдись",
+		"review",
+		"audit",
+		"verify",
+		"check",
+		"ensure",
+	}
+	for _, marker := range markers {
+		if strings.Contains(prompt, marker) {
+			return true
+		}
+	}
+	return false
+}
+
+func looksLikeRussian(s string) bool {
+	for _, r := range s {
+		if r >= 'А' && r <= 'я' || r == 'ё' || r == 'Ё' {
+			return true
+		}
+	}
+	return false
+}
+
+func (s *llmSession) reviewText(english, russian string) string {
+	if s != nil && s.preferRussian {
+		return russian
+	}
+	return english
+}
+
 func summarizeDebugArgs(argsJSON string) string {
 	if argsJSON == "" {
 		return "{}"
 	}
 	var args map[string]any
 	if err := json.Unmarshal([]byte(argsJSON), &args); err != nil {
-		return summarizeDebugText(argsJSON, 160)
+		return summarizeDebugText(argsJSON, 0)
 	}
 	if _, ok := args["password"]; ok {
 		args["password"] = "<redacted>"
 	}
 	data, err := json.Marshal(args)
 	if err != nil {
-		return summarizeDebugText(argsJSON, 160)
+		return summarizeDebugText(argsJSON, 0)
 	}
-	return summarizeDebugText(string(data), 160)
+	return summarizeDebugText(string(data), 0)
 }
 
 func prepareToolResultForLLM(name, result string) string {
 	if result == "" {
 		return result
+	}
+	if name == "admin_level_content" {
+		if len(result) <= 20000 {
+			return result
+		}
+		if summarized, ok := summarizeGenericJSON(result); ok {
+			return summarized
+		}
+		return summarizeDebugText(result, 20000)
 	}
 	if summarized, ok := summarizeToolResult(name, result); ok {
 		return summarized

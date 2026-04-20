@@ -219,6 +219,9 @@ func main() {
 	case "admin-levels":
 		requireAuth(ctx, cfg, client)
 		cmdAdminLevels(ctx, cfg, client)
+	case "admin-level-content":
+		requireAuth(ctx, cfg, client)
+		cmdAdminLevelContent(ctx, cfg, client, positional)
 	case "admin-create-levels":
 		requireAuth(ctx, cfg, client)
 		cmdAdminCreateLevels(ctx, cfg, client, positional)
@@ -314,6 +317,7 @@ Commands:
 Admin commands (require game editor rights):
   admin-games              List your authored games
   admin-levels             List levels with IDs (admin)
+  admin-level-content      Read full level content from admin panel
   admin-create-levels      Create new levels
   admin-delete-level       Delete a level by number
   admin-rename-level       Rename a level
@@ -355,7 +359,7 @@ Environment variables:
   ENCX_INSECURE        Skip TLS verification (1/true)
   ENCX_DEBUG           Enable debug logging (1/true)
   OPENROUTER_API_KEY   API key for --llm mode (required)
-  OPENROUTER_MODEL     LLM model override (default: openai/gpt-4o-mini)
+  OPENROUTER_MODEL     LLM model override (default: openai/gpt-oss-120b:free)
 
 Examples:
   encli login -login svk -password secret -insecure
@@ -434,6 +438,9 @@ func printCommandHelp(cmd string) {
 	case "admin-levels":
 		fmt.Fprintln(os.Stderr, "Usage: encli admin-levels -game-id <id>")
 		fmt.Fprintln(os.Stderr, "  List all levels with their IDs (admin panel).")
+	case "admin-level-content":
+		fmt.Fprintln(os.Stderr, "Usage: encli admin-level-content -game-id <id> <level-number>")
+		fmt.Fprintln(os.Stderr, "  Read admin-side level content: task text, sector answers, bonuses, hints, comments, settings.")
 	case "admin-create-levels":
 		fmt.Fprintln(os.Stderr, "Usage: encli admin-create-levels -game-id <id> <count>")
 		fmt.Fprintln(os.Stderr, "  Create the specified number of new levels.")

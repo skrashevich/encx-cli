@@ -15,10 +15,10 @@ type AdminLevelSettings struct {
 	AutopassSeconds int `json:"autopass_seconds"`
 
 	// Autopass penalty (timeout penalty)
-	TimeoutPenalty        bool `json:"timeout_penalty"`
-	PenaltyHours          int  `json:"penalty_hours"`
-	PenaltyMinutes        int  `json:"penalty_minutes"`
-	PenaltySeconds        int  `json:"penalty_seconds"`
+	TimeoutPenalty bool `json:"timeout_penalty"`
+	PenaltyHours   int  `json:"penalty_hours"`
+	PenaltyMinutes int  `json:"penalty_minutes"`
+	PenaltySeconds int  `json:"penalty_seconds"`
 
 	// Answer block
 	AttemptsNumber        int `json:"attempts_number"`
@@ -62,6 +62,7 @@ type AdminBonus struct {
 
 // AdminSector holds the data for creating a sector in the admin panel.
 type AdminSector struct {
+	ID          int      `json:"id,omitempty"`
 	Name        string   `json:"name"`
 	Answers     []string `json:"answers"`
 	ForMemberID string   `json:"for_member_id,omitempty"` // 0 = for all
