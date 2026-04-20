@@ -208,6 +208,9 @@ func main() {
 	case "admin-delete-correction":
 		requireAuth(ctx, cfg, client)
 		cmdAdminDeleteCorrection(ctx, cfg, client, positional)
+	case "admin-wipe-game":
+		requireAuth(ctx, cfg, client)
+		cmdAdminWipeGame(ctx, cfg, client)
 	case "admin-copy-game":
 		requireAuth(ctx, cfg, client)
 		cmdAdminCopyGame(ctx, cfg, client, positional)
@@ -264,6 +267,7 @@ Admin commands (require game editor rights):
   admin-corrections        List bonus/penalty time corrections
   admin-add-correction     Add a time correction
   admin-delete-correction  Delete a time correction
+  admin-wipe-game          Completely reset a game (delete all content)
   admin-copy-game          Copy entire game to another game
 
 Global flags:
@@ -403,6 +407,10 @@ func printCommandHelp(cmd string) {
 	case "admin-delete-correction":
 		fmt.Fprintln(os.Stderr, "Usage: encli admin-delete-correction -game-id <id> <correction-id>")
 		fmt.Fprintln(os.Stderr, "  Delete a time correction by its ID.")
+	case "admin-wipe-game":
+		fmt.Fprintln(os.Stderr, "Usage: encli admin-wipe-game -game-id <id>")
+		fmt.Fprintln(os.Stderr, "  Completely reset a game: delete all bonuses, levels, and corrections.")
+		fmt.Fprintln(os.Stderr, "  After wipe the game is an empty shell. Use before admin-copy-game for clean copy.")
 	case "admin-copy-game":
 		fmt.Fprintln(os.Stderr, "Usage: encli admin-copy-game -game-id <source-id> <target-id>")
 		fmt.Fprintln(os.Stderr, "  Copy entire game (levels, settings, bonuses, sectors, hints) to target game.")

@@ -473,6 +473,24 @@ func cmdAdminDeleteCorrection(ctx context.Context, cfg *config, client *encx.Cli
 	fmt.Printf("Correction %s deleted\n", args[0])
 }
 
+func cmdAdminWipeGame(ctx context.Context, cfg *config, client *encx.Client) {
+	requireGameId(cfg)
+
+	progress := func(msg string) {
+		if !cfg.jsonOutput {
+			fmt.Println(msg)
+		}
+	}
+
+	if err := client.AdminWipeGame(ctx, cfg.gameId, progress); err != nil {
+		fatal("Failed to wipe game: %v", err)
+	}
+
+	if cfg.jsonOutput {
+		outputJSON(map[string]any{"success": true, "game_id": cfg.gameId})
+	}
+}
+
 func cmdAdminCopyGame(ctx context.Context, cfg *config, client *encx.Client, args []string) {
 	requireGameId(cfg)
 	if len(args) == 0 {
