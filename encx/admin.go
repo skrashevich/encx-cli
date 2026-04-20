@@ -612,6 +612,126 @@ func (c *Client) AdminDeleteCorrection(ctx context.Context, gameId int, correcti
 	return nil
 }
 
+// AdminGetGameInfo reads the game editor page and returns current game settings.
+func (c *Client) AdminGetGameInfo(ctx context.Context, gameId int) (*AdminGameInfo, error) {
+	u := fmt.Sprintf("%s/Administration/Games/GameEditor.aspx?gid=%d&action=edit", c.baseURL(), gameId)
+	body, err := c.doGet(ctx, u)
+	if err != nil {
+		return nil, fmt.Errorf("encx: admin get game info: %w", err)
+	}
+
+	info := &AdminGameInfo{}
+	inputs := parseEnabledInputs(body)
+
+	info.Title = inputs["GameTitle"]
+	info.Authors = inputs["GameAuthors"]
+	info.Prize = inputs["Prize"]
+	info.FinishDateTime = inputs["FinishDateTime"]
+	info.RequestLastDate = inputs["RequestLastDate"]
+	info.MaxPlayers = inputs["MaxPlayers"]
+	info.MaxTeamPlayers = inputs["MaxTeamPlayers"]
+	info.FirstPlaces = inputs["FirstPlaces"]
+	info.NotFirstPlaces = inputs["NotFirstPlaces"]
+	info.AcceptRateFrom = inputs["txtAcceptRateFrom"]
+
+	// Description from textarea
+	descrRe := regexp.MustCompile(`(?i)<textarea[^>]*name="Descr"[^>]*>([\s\S]*?)</textarea>`)
+	if m := descrRe.FindStringSubmatch(body); m != nil {
+		info.Description = m[1]
+	}
+
+	// Checkboxes
+	checked := parseCheckedInputs(body)
+	info.IsModerated = checked["IsModerated"]
+	info.ShowFinishPlace = checked["chkShowFinishPlace"]
+
+	// Radio/select values from hidden or selected options
+	info.GameStatAvailability = parseSelectedRadioOrValue(body, "GameStatAvailabilityList", inputs)
+	info.GameScenarioAvailability = parseSelectedRadioOrValue(body, "GameScenarioAvailabilityList", inputs)
+	info.ShowFee = parseSelectedRadioOrValue(body, "ShowFeeList", inputs)
+	info.CertificateMode = parseSelectedRadioOrValue(body, "CertificateMode", inputs)
+	info.AcceptRateMode = parseSelectedRadioOrValue(body, "radioAcceptRateMode", inputs)
+	info.AuthorComplexity = parseSelectedRadioOrValue(body, "ddlAuthorsCompexity", inputs)
+
+	return info, nil
+}
+
+// AdminUpdateGameInfo updates game settings via the game editor page.
+func (c *Client) AdminUpdateGameInfo(ctx context.Context, gameId int, info AdminGameInfo) error {
+	u := fmt.Sprintf("%s/Administration/Games/GameEditor.aspx", c.baseURL())
+
+	form := url.Values{}
+	form.Set("gid", strconv.Itoa(gameId))
+	form.Set("action", "update")
+	form.Set("GameTitle", info.Title)
+	form.Set("GameAuthors", info.Authors)
+	form.Set("Descr", info.Description)
+	form.Set("Prize", info.Prize)
+	form.Set("FinishDateTime", info.FinishDateTime)
+	form.Set("RequestLastDate", info.RequestLastDate)
+	form.Set("Tabs1_tabsContent_baseSettings_vp1", "Tabs1_tabsContent_baseSettings_vp1")
+
+	if info.IsModerated {
+		form.Set("IsModerated", "true")
+	} else {
+		form.Set("IsModerated", "false")
+	}
+	if info.ShowFinishPlace {
+		form.Set("chkShowFinishPlace", "true")
+	}
+
+	form.Set("GameStatAvailabilityList", cmpOr(info.GameStatAvailability, "1"))
+	form.Set("GameScenarioAvailabilityList", cmpOr(info.GameScenarioAvailability, "2"))
+	form.Set("MaxPlayers", cmpOr(info.MaxPlayers, "0"))
+	form.Set("MaxTeamPlayers", cmpOr(info.MaxTeamPlayers, "0"))
+	form.Set("ShowFeeList", cmpOr(info.ShowFee, "1"))
+	form.Set("CertificateMode", cmpOr(info.CertificateMode, "1"))
+	form.Set("FirstPlaces", cmpOr(info.FirstPlaces, "3"))
+	form.Set("NotFirstPlaces", cmpOr(info.NotFirstPlaces, "3"))
+	form.Set("radioAcceptRateMode", cmpOr(info.AcceptRateMode, "1"))
+	form.Set("txtAcceptRateFrom", info.AcceptRateFrom)
+	form.Set("ddlAuthorsCompexity", cmpOr(info.AuthorComplexity, "10"))
+	form.Set("btnUpdate.x", "1")
+	form.Set("btnUpdate.y", "1")
+
+	_, err := c.doPost(ctx, u, form)
+	if err != nil {
+		return fmt.Errorf("encx: admin update game info: %w", err)
+	}
+	return nil
+}
+
+// parseSelectedRadioOrValue extracts a value from either an input field or a checked radio button.
+func parseSelectedRadioOrValue(body, name string, inputs map[string]string) string {
+	if v, ok := inputs[name]; ok {
+		return v
+	}
+	// Try to find checked radio
+	re := regexp.MustCompile(`(?i)<input[^>]*name="` + regexp.QuoteMeta(name) + `"[^>]*checked[^>]*value="([^"]*)"`)
+	if m := re.FindStringSubmatch(body); m != nil {
+		return m[1]
+	}
+	// Try value then checked order
+	re2 := regexp.MustCompile(`(?i)<input[^>]*value="([^"]*)"[^>]*name="` + regexp.QuoteMeta(name) + `"[^>]*checked`)
+	if m := re2.FindStringSubmatch(body); m != nil {
+		return m[1]
+	}
+	// Try selected option in a select
+	re3 := regexp.MustCompile(`(?i)<select[^>]*name="` + regexp.QuoteMeta(name) + `"[^>]*>[\s\S]*?<option[^>]*selected[^>]*value="([^"]*)"`)
+	if m := re3.FindStringSubmatch(body); m != nil {
+		return m[1]
+	}
+	return ""
+}
+
+// cmpOr returns val if non-empty, otherwise fallback.
+func cmpOr(val, fallback string) string {
+	if val != "" {
+		return val
+	}
+	return fallback
+}
+
 // --- Helpers ---
 
 // stripTags removes HTML tags from a string.
