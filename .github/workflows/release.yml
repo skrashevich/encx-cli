@@ -24,10 +24,6 @@ jobs:
             goarch: amd64
           - goos: linux
             goarch: arm64
-          - goos: darwin
-            goarch: amd64
-          - goos: darwin
-            goarch: arm64
           - goos: windows
             goarch: amd64
           - goos: windows
@@ -62,8 +58,96 @@ jobs:
           name: encli-${{ matrix.goos }}-${{ matrix.goarch }}
           path: encli-*
 
+  build-macos:
+    runs-on: macos-latest
+    strategy:
+      matrix:
+        include:
+          - goarch: amd64
+          - goarch: arm64
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+
+      - name: Build binary
+        env:
+          GOOS: darwin
+          GOARCH: ${{ matrix.goarch }}
+          CGO_ENABLED: "0"
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          go build -ldflags="-s -w -X main.version=${VERSION}" -o encli-darwin-${{ matrix.goarch }} ./cmd/encli/
+
+      - name: Import Apple certificate
+        env:
+          APPLE_CERTIFICATE_BASE64: ${{ secrets.APPLE_CERTIFICATE_BASE64 }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+        run: |
+          CERTIFICATE_PATH="$RUNNER_TEMP/certificate.p12"
+          KEYCHAIN_PATH="$RUNNER_TEMP/signing.keychain-db"
+          KEYCHAIN_PASSWORD="$(openssl rand -hex 20)"
+
+          echo "$APPLE_CERTIFICATE_BASE64" | base64 --decode > "$CERTIFICATE_PATH"
+
+          security create-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          security set-keychain-settings -lut 21600 "$KEYCHAIN_PATH"
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+
+          security import "$CERTIFICATE_PATH" -P "$APPLE_CERTIFICATE_PASSWORD" \
+            -A -t cert -f pkcs12 -k "$KEYCHAIN_PATH"
+
+          security set-key-partition-list -S apple-tool:,apple:,codesign: -k "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          security list-keychains -d user -s "$KEYCHAIN_PATH" login.keychain-db
+
+      - name: Sign binary
+        run: |
+          IDENTITY=$(security find-identity -v -p codesigning "$RUNNER_TEMP/signing.keychain-db" | grep "Developer ID Application" | head -1 | awk -F'"' '{print $2}')
+          if [ -z "$IDENTITY" ]; then
+            echo "::error::No Developer ID Application certificate found in keychain"
+            exit 1
+          fi
+          echo "Signing with identity: $IDENTITY"
+
+          codesign --force --options runtime \
+            --sign "$IDENTITY" \
+            --timestamp \
+            encli-darwin-${{ matrix.goarch }}
+
+          codesign --verify --verbose encli-darwin-${{ matrix.goarch }}
+
+      - name: Notarize binary
+        env:
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_ID_PASSWORD: ${{ secrets.APPLE_ID_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: |
+          zip encli-darwin-${{ matrix.goarch }}.zip encli-darwin-${{ matrix.goarch }}
+
+          xcrun notarytool submit encli-darwin-${{ matrix.goarch }}.zip \
+            --apple-id "$APPLE_ID" \
+            --password "$APPLE_ID_PASSWORD" \
+            --team-id "$APPLE_TEAM_ID" \
+            --wait
+
+          xcrun stapler staple encli-darwin-${{ matrix.goarch }}
+
+      - name: Cleanup keychain
+        if: always()
+        run: |
+          rm -f "$RUNNER_TEMP/certificate.p12"
+          security list-keychains -d user -s login.keychain-db
+          security delete-keychain "$RUNNER_TEMP/signing.keychain-db" || true
+
+      - uses: actions/upload-artifact@v5
+        with:
+          name: encli-darwin-${{ matrix.goarch }}
+          path: encli-darwin-${{ matrix.goarch }}
+
   release:
-    needs: build-binaries
+    needs: [build-binaries, build-macos]
     runs-on: ubuntu-latest
     if: startsWith(github.ref, 'refs/tags/') || github.event_name == 'workflow_dispatch'
     steps:
