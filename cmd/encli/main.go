@@ -48,6 +48,42 @@ func main() {
 		return
 	}
 
+	// Check for --llm mode: encli [flags] --llm <natural language prompt>
+	for i := 1; i < len(os.Args); i++ {
+		if os.Args[i] == "--llm" {
+			// Collect flags before --llm and prompt after --llm
+			flagArgs := os.Args[1:i]
+			promptParts := os.Args[i+1:]
+			if len(promptParts) == 0 {
+				fatal("Usage: encli [flags] --llm <prompt>")
+			}
+
+			fs := flag.NewFlagSet("encli", flag.ExitOnError)
+			cfg := &config{}
+			fs.StringVar(&cfg.domain, "domain", cmp.Or(os.Getenv("ENCX_DOMAIN"), "tech.en.cx"), "Encounter domain")
+			fs.StringVar(&cfg.login, "login", os.Getenv("ENCX_LOGIN"), "Login username")
+			fs.StringVar(&cfg.password, "password", os.Getenv("ENCX_PASSWORD"), "Login password")
+			fs.IntVar(&cfg.gameId, "game-id", envInt("ENCX_GAME_ID", 0), "Game ID")
+			fs.BoolVar(&cfg.insecure, "insecure", envBool("ENCX_INSECURE"), "Skip TLS verification")
+			fs.BoolVar(&cfg.useHTTP, "http", false, "Use plain HTTP")
+			fs.BoolVar(&cfg.jsonOutput, "json", false, "Output as JSON")
+			fs.Parse(flagArgs)
+
+			var opts []encx.Option
+			if cfg.insecure {
+				opts = append(opts, encx.WithInsecureTLS())
+			}
+			if cfg.useHTTP {
+				opts = append(opts, encx.WithHTTP())
+			}
+
+			client := encx.New(cfg.domain, opts...)
+			loadSession(cfg, client)
+			cmdLLM(context.Background(), cfg, client, strings.Join(promptParts, " "))
+			return
+		}
+	}
+
 	// Find the subcommand: first arg that doesn't start with '-'
 	var cmd string
 	var cmdIdx int
@@ -278,6 +314,10 @@ Admin commands (require game editor rights):
   admin-wipe-game          Completely reset a game (delete all content)
   admin-copy-game          Copy entire game to another game
 
+LLM mode:
+  --llm <prompt>  Natural language command (uses OpenRouter API)
+                  Example: encli --llm "скопируй игру 82033 в 82034"
+
 Global flags:
   -domain      Encounter domain (default: tech.en.cx)
   -login       Login username
@@ -287,11 +327,13 @@ Global flags:
   -http        Use plain HTTP instead of HTTPS
 
 Environment variables:
-  ENCX_DOMAIN     Domain (default: tech.en.cx)
-  ENCX_LOGIN      Login username
-  ENCX_PASSWORD   Login password
-  ENCX_GAME_ID    Game ID
-  ENCX_INSECURE   Skip TLS verification (1/true)
+  ENCX_DOMAIN          Domain (default: tech.en.cx)
+  ENCX_LOGIN           Login username
+  ENCX_PASSWORD        Login password
+  ENCX_GAME_ID         Game ID
+  ENCX_INSECURE        Skip TLS verification (1/true)
+  OPENROUTER_API_KEY   API key for --llm mode (required)
+  OPENROUTER_MODEL     LLM model override (default: openai/gpt-4o-mini)
 
 Examples:
   encli login -login svk -password secret -insecure
