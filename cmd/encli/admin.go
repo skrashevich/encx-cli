@@ -372,7 +372,7 @@ func cmdAdminCreateTask(ctx context.Context, cfg *config, client *encx.Client, a
 
 	task := encx.AdminTask{
 		Text:      text,
-		ReplaceNl: true,
+		ReplaceNl: !strings.Contains(text, "<"),
 	}
 	if err := client.AdminCreateTask(ctx, cfg.gameId, lvlNum, task); err != nil {
 		fatal("Failed to create task: %v", err)
