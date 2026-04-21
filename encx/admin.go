@@ -347,7 +347,25 @@ func (c *Client) AdminDeleteBonus(ctx context.Context, gameId, levelNum, bonusId
 // AdminCreateSector creates a new sector on the specified level.
 func (c *Client) AdminCreateSector(ctx context.Context, gameId, levelNum int, s AdminSector) error {
 	u := fmt.Sprintf("%s/Administration/Games/LevelEditor.aspx?gid=%d&level=%d", c.baseURL(), gameId, levelNum)
+	_, err := c.doPost(ctx, u, adminSectorForm(s))
+	if err != nil {
+		return fmt.Errorf("encx: admin create sector: %w", err)
+	}
+	return nil
+}
 
+// AdminUpdateSector updates an existing sector by its ID.
+func (c *Client) AdminUpdateSector(ctx context.Context, gameId, levelNum, sectorId int, s AdminSector) error {
+	u := fmt.Sprintf("%s/Administration/Games/LevelEditor.aspx?gid=%d&level=%d&swanswers=1&editanswers=%d",
+		c.baseURL(), gameId, levelNum, sectorId)
+	_, err := c.doPost(ctx, u, adminSectorForm(s))
+	if err != nil {
+		return fmt.Errorf("encx: admin update sector: %w", err)
+	}
+	return nil
+}
+
+func adminSectorForm(s AdminSector) url.Values {
 	form := url.Values{}
 	form.Set("txtSectorName", s.Name)
 	form.Set("savesector", " ")
@@ -360,12 +378,7 @@ func (c *Client) AdminCreateSector(ctx context.Context, gameId, levelNum int, s 
 		}
 		form.Set(fmt.Sprintf("ddlAnswerFor_%d", i), memberID)
 	}
-
-	_, err := c.doPost(ctx, u, form)
-	if err != nil {
-		return fmt.Errorf("encx: admin create sector: %w", err)
-	}
-	return nil
+	return form
 }
 
 // AdminDeleteSector deletes a sector by its ID.

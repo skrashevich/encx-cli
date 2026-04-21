@@ -285,6 +285,11 @@ func getTools(reviewMode bool) []llmTool {
 			Parameters:  json.RawMessage(`{"type":"object","properties":{"game_id":{"type":"integer","description":"Game ID"},"level_number":{"type":"integer","description":"Level number"},"sector_id":{"type":"integer","description":"Sector ID"}},"required":["game_id","level_number","sector_id"]}`),
 		}},
 		{Type: "function", Function: llmFunction{
+			Name:        "admin_update_sector",
+			Description: "Update a sector by its ID. Only specified fields are changed; others are preserved.",
+			Parameters:  json.RawMessage(`{"type":"object","properties":{"game_id":{"type":"integer","description":"Game ID"},"level_number":{"type":"integer","description":"Level number"},"sector_id":{"type":"integer","description":"Sector ID"},"name":{"type":"string","description":"Sector name"},"answers":{"type":"array","items":{"type":"string"},"description":"Accepted answers"}},"required":["game_id","level_number","sector_id"]}`),
+		}},
+		{Type: "function", Function: llmFunction{
 			Name:        "admin_create_hint",
 			Description: "Create a hint on a level with a delay before it opens",
 			Parameters:  json.RawMessage(`{"type":"object","properties":{"game_id":{"type":"integer","description":"Game ID"},"level_number":{"type":"integer","description":"Level number"},"delay":{"type":"string","description":"Delay before hint opens in HH:MM:SS format"},"text":{"type":"string","description":"Hint text"}},"required":["game_id","level_number","delay","text"]}`),
@@ -945,6 +950,20 @@ func executeLLMToolCall(ctx context.Context, cfg *config, client *encx.Client, s
 			strconv.Itoa(getInt("sector_id")),
 		})
 
+	case "admin_update_sector":
+		requireAuth(ctx, cfg, client)
+		positional := []string{
+			strconv.Itoa(getInt("level_number")),
+			strconv.Itoa(getInt("sector_id")),
+		}
+		if n := getString("name"); n != "" {
+			positional = append(positional, "name="+n)
+		}
+		if answers := getStringSlice("answers"); len(answers) > 0 {
+			positional = append(positional, "answers="+strings.Join(answers, ","))
+		}
+		cmdAdminUpdateSector(ctx, cfg, client, positional)
+
 	case "admin_create_hint":
 		requireAuth(ctx, cfg, client)
 		cmdAdminCreateHint(ctx, cfg, client, []string{
@@ -1068,6 +1087,7 @@ func isAdminMutationTool(name string) bool {
 		"admin_delete_bonus",
 		"admin_create_sector",
 		"admin_delete_sector",
+		"admin_update_sector",
 		"admin_create_hint",
 		"admin_delete_hint",
 		"admin_create_task",
@@ -1092,6 +1112,7 @@ func isProposalMutationTool(name string) bool {
 		"admin_delete_bonus",
 		"admin_create_sector",
 		"admin_delete_sector",
+		"admin_update_sector",
 		"admin_create_hint",
 		"admin_delete_hint",
 		"admin_create_task",
@@ -1272,6 +1293,8 @@ func describeProposalStep(step pendingFixStep) string {
 		return fmt.Sprintf("create sector %q on level %d", getAnyString(step.Arguments["name"]), getAnyInt(step.Arguments["level_number"]))
 	case "admin_delete_sector":
 		return fmt.Sprintf("delete sector %d on level %d", getAnyInt(step.Arguments["sector_id"]), getAnyInt(step.Arguments["level_number"]))
+	case "admin_update_sector":
+		return fmt.Sprintf("update sector %d on level %d", getAnyInt(step.Arguments["sector_id"]), getAnyInt(step.Arguments["level_number"]))
 	case "admin_create_hint":
 		return fmt.Sprintf("create hint on level %d with delay %s", getAnyInt(step.Arguments["level_number"]), getAnyString(step.Arguments["delay"]))
 	case "admin_delete_hint":
@@ -1391,6 +1414,8 @@ func formatToolCallForDisplay(session *llmSession, name, argsJSON string) string
 		return format(rt("Creating sector", "Создаю сектор"))
 	case "admin_delete_sector":
 		return format(rt("Deleting sector", "Удаляю сектор"))
+	case "admin_update_sector":
+		return format(rt("Updating sector", "Обновляю сектор"))
 	case "admin_create_hint":
 		delay := getAnyString(args["delay"])
 		if delay != "" {
