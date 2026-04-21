@@ -455,7 +455,7 @@ Rules:
 		if session.preferRussian {
 			fmt.Fprintf(&report, "\n--- Отчёт о выполнении ---\n")
 			fmt.Fprintf(&report, "Общее время:      %s\n", totalElapsed.Round(time.Millisecond))
-				fmt.Fprintf(&report, "Модель:           %s\n", model)
+			fmt.Fprintf(&report, "Модель:           %s\n", model)
 			fmt.Fprintf(&report, "  Время LLM:      %s\n", llmDuration.Round(time.Millisecond))
 			fmt.Fprintf(&report, "  Время тулзов:   %s\n", toolDuration.Round(time.Millisecond))
 			fmt.Fprintf(&report, "  Накладные:      %s\n", otherDuration.Round(time.Millisecond))
@@ -466,14 +466,14 @@ Rules:
 					totalPromptTokens+totalCompletionTokens, totalPromptTokens, totalCompletionTokens)
 				if pricing != nil && pricing.isLocal {
 					fmt.Fprintf(&report, "Стоимость:        $0 (локальный прокси)\n")
-				} else if cost := computeLLMCost(pricing, totalPromptTokens, totalCompletionTokens); cost > 0 {
-					fmt.Fprintf(&report, "Стоимость:        $%.4f\n", cost)
+				} else if pricing != nil {
+					fmt.Fprintf(&report, "Стоимость:        $%.4f (OpenRouter pricing)\n", computeLLMCost(pricing, totalPromptTokens, totalCompletionTokens))
 				}
 			}
 		} else {
 			fmt.Fprintf(&report, "\n--- Execution Report ---\n")
 			fmt.Fprintf(&report, "Total time:    %s\n", totalElapsed.Round(time.Millisecond))
-				fmt.Fprintf(&report, "Model:         %s\n", model)
+			fmt.Fprintf(&report, "Model:         %s\n", model)
 			fmt.Fprintf(&report, "  LLM time:    %s\n", llmDuration.Round(time.Millisecond))
 			fmt.Fprintf(&report, "  Tool time:   %s\n", toolDuration.Round(time.Millisecond))
 			fmt.Fprintf(&report, "  Overhead:    %s\n", otherDuration.Round(time.Millisecond))
@@ -484,8 +484,8 @@ Rules:
 					totalPromptTokens+totalCompletionTokens, totalPromptTokens, totalCompletionTokens)
 				if pricing != nil && pricing.isLocal {
 					fmt.Fprintf(&report, "Cost:          $0 (local proxy)\n")
-				} else if cost := computeLLMCost(pricing, totalPromptTokens, totalCompletionTokens); cost > 0 {
-					fmt.Fprintf(&report, "Cost:          $%.4f\n", cost)
+				} else if pricing != nil {
+					fmt.Fprintf(&report, "Cost:          $%.4f (OpenRouter pricing)\n", computeLLMCost(pricing, totalPromptTokens, totalCompletionTokens))
 				}
 			}
 		}
