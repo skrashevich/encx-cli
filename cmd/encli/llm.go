@@ -344,6 +344,11 @@ func getTools(reviewMode bool) []llmTool {
 			Description: "Update game settings (title, description, authors, prize, finish date). Only specified fields are changed; others are preserved.",
 			Parameters:  json.RawMessage(`{"type":"object","properties":{"game_id":{"type":"integer","description":"Game ID"},"title":{"type":"string","description":"Game title"},"authors":{"type":"string","description":"Game authors"},"description":{"type":"string","description":"Game description (HTML)"},"prize":{"type":"string","description":"Prize value"},"finish":{"type":"string","description":"Finish datetime DD.MM.YYYY HH:MM:SS"}},"required":["game_id"]}`),
 		}},
+		{Type: "function", Function: llmFunction{
+			Name:        "admin_not_deliver",
+			Description: "Mark a game as not delivered (несостоявшаяся). This is irreversible.",
+			Parameters:  json.RawMessage(`{"type":"object","properties":{"game_id":{"type":"integer","description":"Game ID"}},"required":["game_id"]}`),
+		}},
 	}
 	if reviewMode {
 		tools = append(tools, llmTool{Type: "function", Function: llmFunction{
@@ -1036,6 +1041,10 @@ func executeLLMToolCall(ctx context.Context, cfg *config, client *encx.Client, s
 		}
 		cmdAdminUpdateGame(ctx, cfg, client, positional)
 
+	case "admin_not_deliver":
+		requireAuth(ctx, cfg, client)
+		cmdAdminNotDeliver(ctx, cfg, client)
+
 	default:
 		fatal("Unknown tool call: %s", name)
 	}
@@ -1067,7 +1076,8 @@ func isAdminMutationTool(name string) bool {
 		"admin_delete_correction",
 		"admin_wipe_game",
 		"admin_copy_game",
-		"admin_update_game":
+		"admin_update_game",
+		"admin_not_deliver":
 		return true
 	default:
 		return false
@@ -1417,6 +1427,8 @@ func formatToolCallForDisplay(session *llmSession, name, argsJSON string) string
 			return format(rt("Updating: ", "Обновляю: ") + strings.Join(fields, ", "))
 		}
 		return format(rt("Updating game settings", "Обновляю настройки игры"))
+	case "admin_not_deliver":
+		return format(rt("Marking as not delivered", "Отмечаю как несостоявшуюся"))
 	case "propose_admin_fix":
 		title := getAnyString(args["title"])
 		return format(title)

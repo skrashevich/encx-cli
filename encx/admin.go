@@ -701,6 +701,16 @@ func (c *Client) AdminUpdateGameInfo(ctx context.Context, gameId int, info Admin
 	return nil
 }
 
+// AdminNotDeliverGame marks a game as "not delivered" (несостоявшаяся).
+func (c *Client) AdminNotDeliverGame(ctx context.Context, gameId int) error {
+	u := fmt.Sprintf("%s/Administration/GamesManager.aspx?gid=%d&action=NotDeliver", c.baseURL(), gameId)
+	_, err := c.doGet(ctx, u)
+	if err != nil {
+		return fmt.Errorf("encx: admin not deliver game: %w", err)
+	}
+	return nil
+}
+
 // parseSelectedRadioOrValue extracts a value from either an input field or a checked radio button.
 func parseSelectedRadioOrValue(body, name string, inputs map[string]string) string {
 	if v, ok := inputs[name]; ok {

@@ -621,6 +621,20 @@ func cmdAdminUpdateGame(ctx context.Context, cfg *config, client *encx.Client, a
 	fmt.Println("Game info updated")
 }
 
+func cmdAdminNotDeliver(ctx context.Context, cfg *config, client *encx.Client) {
+	requireGameId(cfg)
+
+	if err := client.AdminNotDeliverGame(ctx, cfg.gameId); err != nil {
+		fatal("Failed to mark game as not delivered: %v", err)
+	}
+
+	if cfg.jsonOutput {
+		outputJSON(map[string]any{"success": true, "game_id": cfg.gameId})
+	} else {
+		fmt.Printf("Game %d marked as not delivered\n", cfg.gameId)
+	}
+}
+
 // parseHMS parses a time string in format "HH:MM:SS" or "MM:SS" or "SS".
 func parseHMS(s string) (h, m, sec int) {
 	parts := strings.Split(s, ":")
