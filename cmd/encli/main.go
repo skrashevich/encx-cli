@@ -288,6 +288,45 @@ func main() {
 	case "admin-not-deliver":
 		requireAuth(ctx, cfg, client)
 		cmdAdminNotDeliver(ctx, cfg, client)
+	case "admin-deliver":
+		requireAuth(ctx, cfg, client)
+		cmdAdminDeliverGame(ctx, cfg, client)
+	case "admin-award-points":
+		requireAuth(ctx, cfg, client)
+		cmdAdminAwardPoints(ctx, cfg, client)
+	case "admin-end-ratings":
+		requireAuth(ctx, cfg, client)
+		cmdAdminEndRatings(ctx, cfg, client)
+	case "admin-calc-ik":
+		requireAuth(ctx, cfg, client)
+		cmdAdminCalcIK(ctx, cfg, client)
+	case "admin-swap-levels":
+		requireAuth(ctx, cfg, client)
+		cmdAdminSwapLevels(ctx, cfg, client, positional)
+	case "admin-insert-level":
+		requireAuth(ctx, cfg, client)
+		cmdAdminInsertLevel(ctx, cfg, client, positional)
+	case "admin-clone-levels":
+		requireAuth(ctx, cfg, client)
+		cmdAdminCloneLevels(ctx, cfg, client, positional)
+	case "admin-delete-task":
+		requireAuth(ctx, cfg, client)
+		cmdAdminDeleteTask(ctx, cfg, client, positional)
+	case "admin-update-task":
+		requireAuth(ctx, cfg, client)
+		cmdAdminUpdateTask(ctx, cfg, client, positional)
+	case "admin-update-bonus":
+		requireAuth(ctx, cfg, client)
+		cmdAdminUpdateBonus(ctx, cfg, client, positional)
+	case "admin-update-hint":
+		requireAuth(ctx, cfg, client)
+		cmdAdminUpdateHint(ctx, cfg, client, positional)
+	case "admin-action-monitor":
+		requireAuth(ctx, cfg, client)
+		cmdAdminActionMonitor(ctx, cfg, client)
+	case "admin-create-message":
+		requireAuth(ctx, cfg, client)
+		cmdAdminCreateMessage(ctx, cfg, client, positional)
 
 	case "help":
 		printUsage()
@@ -344,6 +383,19 @@ Admin commands (require game editor rights):
   admin-corrections        List bonus/penalty time corrections
   admin-add-correction     Add a time correction
   admin-delete-correction  Delete a time correction
+  admin-swap-levels        Swap two levels by number
+  admin-insert-level       Move a level to a new position
+  admin-clone-levels       Clone levels from an existing level
+  admin-delete-task        Delete a task by ID
+  admin-update-task        Update a task by ID
+  admin-update-bonus       Update a bonus by ID (key=value)
+  admin-update-hint        Update a hint by ID (key=value)
+  admin-action-monitor     Show game action monitor rows
+  admin-create-message     Create a game message
+  admin-deliver            Mark game as delivered
+  admin-award-points       Award points to participants
+  admin-end-ratings        End accepting ratings
+  admin-calc-ik            Calculate game coefficient (IK)
   admin-wipe-game          Completely reset a game (delete all content)
   admin-copy-game          Copy entire game to another game
 
@@ -515,6 +567,45 @@ func printCommandHelp(cmd string) {
 	case "admin-not-deliver":
 		fmt.Fprintln(os.Stderr, "Usage: encli admin-not-deliver -game-id <id>")
 		fmt.Fprintln(os.Stderr, "  Mark game as not delivered (несостоявшаяся).")
+	case "admin-deliver":
+		fmt.Fprintln(os.Stderr, "Usage: encli admin-deliver -game-id <id>")
+		fmt.Fprintln(os.Stderr, "  Mark game as delivered (состоявшаяся).")
+	case "admin-award-points":
+		fmt.Fprintln(os.Stderr, "Usage: encli admin-award-points -game-id <id>")
+		fmt.Fprintln(os.Stderr, "  Award points to game participants.")
+	case "admin-end-ratings":
+		fmt.Fprintln(os.Stderr, "Usage: encli admin-end-ratings -game-id <id>")
+		fmt.Fprintln(os.Stderr, "  End accepting ratings for the game.")
+	case "admin-calc-ik":
+		fmt.Fprintln(os.Stderr, "Usage: encli admin-calc-ik -game-id <id>")
+		fmt.Fprintln(os.Stderr, "  Calculate game coefficient (ИК).")
+	case "admin-swap-levels":
+		fmt.Fprintln(os.Stderr, "Usage: encli admin-swap-levels -game-id <id> <level1> <level2>")
+		fmt.Fprintln(os.Stderr, "  Swap two levels by their numbers.")
+	case "admin-insert-level":
+		fmt.Fprintln(os.Stderr, "Usage: encli admin-insert-level -game-id <id> <source-level> <after-level>")
+		fmt.Fprintln(os.Stderr, "  Move a level to a new position (after specified level, 0 = beginning).")
+	case "admin-clone-levels":
+		fmt.Fprintln(os.Stderr, "Usage: encli admin-clone-levels -game-id <id> <count> <like-level>")
+		fmt.Fprintln(os.Stderr, "  Create N levels cloned from an existing level (with same settings).")
+	case "admin-delete-task":
+		fmt.Fprintln(os.Stderr, "Usage: encli admin-delete-task -game-id <id> <level-number> <task-id>")
+		fmt.Fprintln(os.Stderr, "  Delete a task by its ID.")
+	case "admin-update-task":
+		fmt.Fprintln(os.Stderr, "Usage: encli admin-update-task -game-id <id> <level-number> <task-id> <text>")
+		fmt.Fprintln(os.Stderr, "  Update task text by its ID.")
+	case "admin-update-bonus":
+		fmt.Fprintln(os.Stderr, "Usage: encli admin-update-bonus -game-id <id> <level-num> <bonus-id> <key=value ...>")
+		fmt.Fprintln(os.Stderr, "  Update bonus fields. Supported keys: name, task, hint, answers (comma-separated).")
+	case "admin-update-hint":
+		fmt.Fprintln(os.Stderr, "Usage: encli admin-update-hint -game-id <id> <level-num> <hint-id> <key=value ...>")
+		fmt.Fprintln(os.Stderr, "  Update hint fields. Supported keys: text, delay (HH:MM:SS).")
+	case "admin-action-monitor":
+		fmt.Fprintln(os.Stderr, "Usage: encli admin-action-monitor -game-id <id>")
+		fmt.Fprintln(os.Stderr, "  Show action monitor rows from the admin panel.")
+	case "admin-create-message":
+		fmt.Fprintln(os.Stderr, "Usage: encli admin-create-message -game-id <id> <level-id> <text>")
+		fmt.Fprintln(os.Stderr, "  Create a message via MessageEdit.aspx for the selected level binding.")
 	default:
 		printUsage()
 	}
