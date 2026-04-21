@@ -21,6 +21,8 @@ var (
 	adminBonusIdRe = regexp.MustCompile(`(?i)data-bonusid="(\d+)"`)
 	// Hint link: prid=123
 	adminHintIdRe = regexp.MustCompile(`(?i)prid=(\d+)`)
+	// Message link: mid=123
+	adminMessageIdRe = regexp.MustCompile(`(?i)mid=(\d+)`)
 	// Correction row parsing
 	adminCorrectionRe = regexp.MustCompile(`(?i)<tr\s+class="toWinnerItem"[^>]*>(.*?)</tr>`)
 	adminTdRe         = regexp.MustCompile(`(?i)<td[^>]*>(.*?)</td>`)
@@ -979,27 +981,61 @@ func (c *Client) AdminGetActionMonitor(ctx context.Context, gameId int) ([]Admin
 // AdminCreateMessage creates a message for a game using the MessageEdit form.
 func (c *Client) AdminCreateMessage(ctx context.Context, gameId, levelID int, m AdminGameMessage) error {
 	u := fmt.Sprintf("%s/Administration/Games/MessageEdit.aspx?gid=%d&level=%d&action=add", c.baseURL(), gameId, levelID)
-
-	form := url.Values{}
-	form.Set("txtMessage", m.Text)
-	if m.ReplaceNlToBr {
-		form.Set("chkReplaceNlToBr", "on")
-	}
-	if m.ShowOnLevelsMode == 2 {
-		form.Set("rbShowOnLevels", "2")
-		form.Set(fmt.Sprintf("lvl_%d", levelID), "on")
-	} else {
-		form.Set("rbShowOnLevels", "1")
-	}
-	if m.RequiredPoints != "" {
-		form.Set("txtRequiredPoints", m.RequiredPoints)
-	}
-
+	form := adminMessageForm(levelID, m)
 	_, err := c.doPost(ctx, u, form)
 	if err != nil {
 		return fmt.Errorf("encx: admin create message: %w", err)
 	}
 	return nil
+}
+
+// AdminUpdateMessage updates an existing message by its ID.
+func (c *Client) AdminUpdateMessage(ctx context.Context, gameId, levelNum, messageId int, m AdminGameMessage) error {
+	u := fmt.Sprintf("%s/Administration/Games/MessageEdit.aspx?gid=%d&level=%d&mid=%d", c.baseURL(), gameId, levelNum, messageId)
+	form := adminMessageForm(levelNum, m)
+	_, err := c.doPost(ctx, u, form)
+	if err != nil {
+		return fmt.Errorf("encx: admin update message: %w", err)
+	}
+	return nil
+}
+
+// AdminDeleteMessage deletes a message by its ID.
+func (c *Client) AdminDeleteMessage(ctx context.Context, gameId, levelNum, messageId int) error {
+	u := fmt.Sprintf("%s/Administration/Games/MessageEdit.aspx?gid=%d&level=%d&mid=%d&action=delete", c.baseURL(), gameId, levelNum, messageId)
+	_, err := c.doGet(ctx, u)
+	if err != nil {
+		return fmt.Errorf("encx: admin delete message: %w", err)
+	}
+	return nil
+}
+
+func adminMessageForm(levelID int, m AdminGameMessage) url.Values {
+	form := url.Values{}
+	form.Set("txtMessage", m.Text)
+	if m.ReplaceNlToBr {
+		form.Set("chkReplaceNlToBr", "on")
+	}
+
+	if m.ShowOnLevelsMode == 2 {
+		form.Set("rbShowOnLevels", "2")
+		levelIDs := m.LevelIDs
+		if len(levelIDs) == 0 && levelID > 0 {
+			levelIDs = []int{levelID}
+		}
+		for _, id := range levelIDs {
+			if id > 0 {
+				form.Set(fmt.Sprintf("lvl_%d", id), "on")
+			}
+		}
+	} else {
+		form.Set("rbShowOnLevels", "1")
+	}
+
+	if m.RequiredPoints != "" {
+		form.Set("txtRequiredPoints", m.RequiredPoints)
+	}
+	return form
 }
 
 // parseSelectedRadioOrValue extracts a value from either an input field or a checked radio button.

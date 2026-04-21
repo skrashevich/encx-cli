@@ -327,6 +327,15 @@ func main() {
 	case "admin-create-message":
 		requireAuth(ctx, cfg, client)
 		cmdAdminCreateMessage(ctx, cfg, client, positional)
+	case "admin-messages":
+		requireAuth(ctx, cfg, client)
+		cmdAdminMessages(ctx, cfg, client, positional)
+	case "admin-update-message":
+		requireAuth(ctx, cfg, client)
+		cmdAdminUpdateMessage(ctx, cfg, client, positional)
+	case "admin-delete-message":
+		requireAuth(ctx, cfg, client)
+		cmdAdminDeleteMessage(ctx, cfg, client, positional)
 
 	case "help":
 		printUsage()
@@ -392,6 +401,9 @@ Admin commands (require game editor rights):
   admin-update-hint        Update a hint by ID (key=value)
   admin-action-monitor     Show game action monitor rows
   admin-create-message     Create a game message
+  admin-messages           List level messages
+  admin-update-message     Update a message by ID
+  admin-delete-message     Delete a message by ID
   admin-deliver            Mark game as delivered
   admin-award-points       Award points to participants
   admin-end-ratings        End accepting ratings
@@ -606,6 +618,15 @@ func printCommandHelp(cmd string) {
 	case "admin-create-message":
 		fmt.Fprintln(os.Stderr, "Usage: encli admin-create-message -game-id <id> <level-id> <text>")
 		fmt.Fprintln(os.Stderr, "  Create a message via MessageEdit.aspx for the selected level binding.")
+	case "admin-messages":
+		fmt.Fprintln(os.Stderr, "Usage: encli admin-messages -game-id <id> <level-number>")
+		fmt.Fprintln(os.Stderr, "  List messages on a level with their IDs and bindings.")
+	case "admin-update-message":
+		fmt.Fprintln(os.Stderr, "Usage: encli admin-update-message -game-id <id> <level-number> <message-id> <key=value ...>")
+		fmt.Fprintln(os.Stderr, "  Update message fields. Supported keys: text, required_points, mode, levels.")
+	case "admin-delete-message":
+		fmt.Fprintln(os.Stderr, "Usage: encli admin-delete-message -game-id <id> <level-number> <message-id>")
+		fmt.Fprintln(os.Stderr, "  Delete a message by its ID.")
 	default:
 		printUsage()
 	}

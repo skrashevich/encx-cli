@@ -415,6 +415,67 @@ func (c *Client) AdminGetComment(ctx context.Context, gameId, levelNum int) (nam
 	return name, comment, nil
 }
 
+// AdminGetMessageIds returns message IDs for a level from the admin panel.
+func (c *Client) AdminGetMessageIds(ctx context.Context, gameId, levelNum int) ([]int, error) {
+	u := fmt.Sprintf("%s/Administration/Games/LevelEditor.aspx?level=%d&gid=%d", c.baseURL(), levelNum, gameId)
+	body, err := c.doGet(ctx, u)
+	if err != nil {
+		return nil, fmt.Errorf("encx: admin get message ids: %w", err)
+	}
+
+	matches := adminMessageIdRe.FindAllStringSubmatch(body, -1)
+	seen := map[int]bool{}
+	ids := make([]int, 0, len(matches))
+	for _, m := range matches {
+		id, _ := strconv.Atoi(m[1])
+		if id > 0 && !seen[id] {
+			seen[id] = true
+			ids = append(ids, id)
+		}
+	}
+	return ids, nil
+}
+
+// AdminGetMessage reads message details from the admin panel.
+func (c *Client) AdminGetMessage(ctx context.Context, gameId, levelNum, messageId int) (*AdminGameMessage, error) {
+	u := fmt.Sprintf("%s/Administration/Games/MessageEdit.aspx?gid=%d&level=%d&mid=%d", c.baseURL(), gameId, levelNum, messageId)
+	body, err := c.doGet(ctx, u)
+	if err != nil {
+		return nil, fmt.Errorf("encx: admin get message: %w", err)
+	}
+
+	msg := &AdminGameMessage{ID: messageId}
+	inputs := parseEnabledInputs(body)
+	checked := parseCheckedInputs(body)
+
+	textareas := adminTextareaRe.FindAllStringSubmatch(body, -1)
+	for _, m := range textareas {
+		if m[1] == "txtMessage" {
+			msg.Text = html.UnescapeString(m[2])
+		}
+	}
+
+	if checked["chkReplaceNlToBr"] {
+		msg.ReplaceNlToBr = true
+	}
+	if v := parseSelectedRadioOrValue(body, "rbShowOnLevels", inputs); v != "" {
+		msg.ShowOnLevelsMode, _ = strconv.Atoi(v)
+	}
+	msg.RequiredPoints = inputs["txtRequiredPoints"]
+
+	for key, on := range checked {
+		if !on || !strings.HasPrefix(key, "lvl_") {
+			continue
+		}
+		id, err := strconv.Atoi(strings.TrimPrefix(key, "lvl_"))
+		if err == nil && id > 0 {
+			msg.LevelIDs = append(msg.LevelIDs, id)
+		}
+	}
+
+	return msg, nil
+}
+
 // AdminGetSectorAnswers reads sector answers from the ALoader endpoint.
 func (c *Client) AdminGetSectorAnswers(ctx context.Context, gameId, levelNum int) ([]AdminSector, error) {
 	u := fmt.Sprintf("%s/ALoader/LevelInfo.aspx?gid=%d&level=%d&object=3", c.baseURL(), gameId, levelNum)
