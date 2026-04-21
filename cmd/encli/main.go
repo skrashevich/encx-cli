@@ -285,6 +285,9 @@ func main() {
 	case "admin-update-game":
 		requireAuth(ctx, cfg, client)
 		cmdAdminUpdateGame(ctx, cfg, client, positional)
+	case "admin-not-deliver":
+		requireAuth(ctx, cfg, client)
+		cmdAdminNotDeliver(ctx, cfg, client)
 
 	case "help":
 		printUsage()
@@ -509,6 +512,9 @@ func printCommandHelp(cmd string) {
 		fmt.Fprintln(os.Stderr, "Usage: encli admin-copy-game -game-id <source-id> <target-id>")
 		fmt.Fprintln(os.Stderr, "  Copy entire game (levels, settings, bonuses, sectors, hints) to target game.")
 		fmt.Fprintln(os.Stderr, "  Target game levels are created automatically if needed.")
+	case "admin-not-deliver":
+		fmt.Fprintln(os.Stderr, "Usage: encli admin-not-deliver -game-id <id>")
+		fmt.Fprintln(os.Stderr, "  Mark game as not delivered (несостоявшаяся).")
 	default:
 		printUsage()
 	}
