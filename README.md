@@ -228,22 +228,41 @@ encli admin-set-block -game-id 12345 1 3 0:01:00 player
 encli admin-create-bonus -game-id 12345 1 67890 "Бонус 1" "ответ1" "ответ2"
 
 # Удалить бонус
-encli admin-delete-bonus -game-id 12345 1 111
+# bonus-id берите из admin-level-content
+# там бонусы печатаются как [bonus <id>]
+encli admin-delete-bonus -game-id 12345 1 <bonus-id>
 
 # Создать сектор
 encli admin-create-sector -game-id 12345 1 "Сектор А" "код1" "код2"
 
+# Посмотреть содержимое уровня и найти sector-id
+encli admin-level-content -game-id 12345 1
+
 # Удалить сектор
-encli admin-delete-sector -game-id 12345 1 222
+# sector-id берите из admin-level-content
+# там секторы печатаются как [sector <id>]
+encli admin-delete-sector -game-id 12345 1 <sector-id>
+
+# Обновить сектор
+# sector-id берите из admin-level-content
+# пример: переименовать сектор и заменить список ответов
+encli admin-update-sector -game-id 12345 1 <sector-id> name="Сектор Б" answers="код3,код4"
 
 # Создать подсказку (откроется через 30 минут)
 encli admin-create-hint -game-id 12345 1 0:30:00 "Текст подсказки"
 
 # Удалить подсказку
-encli admin-delete-hint -game-id 12345 1 333
+# hint-id берите из admin-level-content
+# там подсказки печатаются как [hint <id>]
+encli admin-delete-hint -game-id 12345 1 <hint-id>
 
 # Создать задание
 encli admin-create-task -game-id 12345 1 "Текст задания уровня"
+
+# Обновить задание
+# task-id берите из admin-level-content
+# там задания печатаются как [task <id>]
+encli admin-update-task -game-id 12345 1 <task-id> "Новый текст задания"
 
 # Установить имя и комментарий уровня
 encli admin-set-comment -game-id 12345 1 "Название" "Комментарий для орга"
@@ -258,6 +277,22 @@ encli admin-delete-correction -game-id 12345 444
 
 # Чтение содержимого уровня (задание, секторы, бонусы, подсказки, настройки)
 encli admin-level-content -game-id 12345 1
+
+# Сообщения уровня
+# сначала посмотрите список сообщений и их message-id
+encli admin-messages -game-id 12345 1
+
+# создать сообщение
+# здесь 67890 — это level-id, его берите из admin-levels
+encli admin-create-message -game-id 12345 67890 "Текст сообщения"
+
+# обновить сообщение
+# message-id берите из admin-messages
+encli admin-update-message -game-id 12345 1 <message-id> text="Новый текст" mode=chosen levels=67890
+
+# удалить сообщение
+# message-id берите из admin-messages
+encli admin-delete-message -game-id 12345 1 <message-id>
 
 # Информация об игре (название, авторы, описание, дата финиша)
 encli admin-game-info -game-id 12345
@@ -313,17 +348,28 @@ encli admin-copy-game -game-id 12345 67890
 | `admin-delete-bonus` | Удаляет бонус по ID |
 | `admin-create-sector` | Создаёт сектор на уровне |
 | `admin-delete-sector` | Удаляет сектор по ID |
+| `admin-update-sector` | Обновляет сектор по ID |
 | `admin-create-hint` | Создаёт подсказку на уровне |
 | `admin-delete-hint` | Удаляет подсказку по ID |
+| `admin-update-hint` | Обновляет подсказку по ID |
 | `admin-create-task` | Создаёт задание на уровне |
+| `admin-update-task` | Обновляет задание по ID |
 | `admin-set-comment` | Устанавливает название и комментарий уровня |
 | `admin-teams` | Показывает команды в игре |
 | `admin-corrections` | Показывает начисления бонусного/штрафного времени |
 | `admin-add-correction` | Добавляет начисление времени |
 | `admin-delete-correction` | Удаляет начисление по ID |
 | `admin-level-content` | Читает содержимое уровня (задание, секторы, бонусы, подсказки, настройки) |
+| `admin-create-message` | Создаёт игровое сообщение |
+| `admin-messages` | Показывает сообщения уровня |
+| `admin-update-message` | Обновляет сообщение по ID |
+| `admin-delete-message` | Удаляет сообщение по ID |
 | `admin-game-info` | Показывает информацию об игре (название, авторы, описание, дата) |
 | `admin-update-game` | Обновляет настройки игры (название, описание, приз и др.) |
+| `admin-deliver` | Помечает игру как состоявшуюся |
+| `admin-award-points` | Начисляет очки участникам |
+| `admin-end-ratings` | Завершает приём оценок |
+| `admin-calc-ik` | Считает игровой коэффициент |
 | `admin-wipe-game` | Полностью обнуляет игру (удаляет всё содержимое) |
 | `admin-copy-game` | Копирует всю игру (уровни, настройки, бонусы, секторы, подсказки) в другую |
 
