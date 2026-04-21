@@ -163,8 +163,10 @@ type AdminActionMonitorEntry struct {
 
 // AdminGameMessage holds the data for creating/editing a game message in MessageEdit.aspx.
 type AdminGameMessage struct {
+	ID               int   `json:"id,omitempty"`
 	Text             string `json:"text"`
 	ReplaceNlToBr    bool   `json:"replace_nl_to_br"`
 	ShowOnLevelsMode int    `json:"show_on_levels_mode,omitempty"` // 1=all, 2=chosen
 	RequiredPoints   string `json:"required_points,omitempty"`
+	LevelIDs         []int  `json:"level_ids,omitempty"`
 }

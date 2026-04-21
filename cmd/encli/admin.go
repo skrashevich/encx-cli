@@ -955,6 +955,142 @@ func cmdAdminCreateMessage(ctx context.Context, cfg *config, client *encx.Client
 	fmt.Printf("Message created for level %d\n", levelID)
 }
 
+func cmdAdminMessages(ctx context.Context, cfg *config, client *encx.Client, args []string) {
+	requireGameId(cfg)
+	if len(args) < 1 {
+		fatal("Usage: encli admin-messages -game-id <id> <level-number>")
+	}
+	lvlNum, err := strconv.Atoi(args[0])
+	if err != nil || lvlNum <= 0 {
+		fatal("Invalid level number: %s", args[0])
+	}
+	ids, err := client.AdminGetMessageIds(ctx, cfg.gameId, lvlNum)
+	if err != nil {
+		fatal("Failed to get message IDs: %v", err)
+	}
+	messages := make([]encx.AdminGameMessage, 0, len(ids))
+	for _, id := range ids {
+		msg, err := client.AdminGetMessage(ctx, cfg.gameId, lvlNum, id)
+		if err != nil {
+			fatal("Failed to read message %d: %v", id, err)
+		}
+		messages = append(messages, *msg)
+	}
+	if cfg.jsonOutput {
+		outputJSON(messages)
+		return
+	}
+	if len(messages) == 0 {
+		fmt.Println("No messages")
+		return
+	}
+	w := tabwriter.NewWriter(os.Stdout, 0, 4, 2, ' ', 0)
+	fmt.Fprintln(w, "ID\tMode\tRequiredPoints\tText")
+	fmt.Fprintln(w, "--\t----\t--------------\t----")
+	for _, msg := range messages {
+		mode := "all"
+		if msg.ShowOnLevelsMode == 2 {
+			mode = "chosen"
+		}
+		fmt.Fprintf(w, "%d\t%s\t%s\t%s\n", msg.ID, mode, msg.RequiredPoints, strings.ReplaceAll(msg.Text, "\n", "\\n"))
+		if len(msg.LevelIDs) > 0 {
+			fmt.Fprintf(w, "\tlevels\t\t%v\n", msg.LevelIDs)
+		}
+	}
+	w.Flush()
+}
+
+func cmdAdminUpdateMessage(ctx context.Context, cfg *config, client *encx.Client, args []string) {
+	requireGameId(cfg)
+	if len(args) < 3 {
+		fatal("Usage: encli admin-update-message -game-id <id> <level-number> <message-id> <key=value ...>")
+	}
+	lvlNum, err := strconv.Atoi(args[0])
+	if err != nil || lvlNum <= 0 {
+		fatal("Invalid level number: %s", args[0])
+	}
+	messageId, err := strconv.Atoi(args[1])
+	if err != nil || messageId <= 0 {
+		fatal("Invalid message ID: %s", args[1])
+	}
+	msg, err := client.AdminGetMessage(ctx, cfg.gameId, lvlNum, messageId)
+	if err != nil {
+		fatal("Failed to read current message: %v", err)
+	}
+	for _, arg := range args[2:] {
+		key, val, ok := strings.Cut(arg, "=")
+		if !ok {
+			fatal("Arguments must be in key=value format. Got: %s", arg)
+		}
+		switch strings.ToLower(key) {
+		case "text":
+			msg.Text = val
+			msg.ReplaceNlToBr = !strings.Contains(val, "<")
+		case "requiredpoints", "required_points":
+			msg.RequiredPoints = val
+		case "mode":
+			switch strings.ToLower(val) {
+			case "all", "1":
+				msg.ShowOnLevelsMode = 1
+				msg.LevelIDs = nil
+			case "chosen", "2":
+				msg.ShowOnLevelsMode = 2
+			default:
+				fatal("Invalid mode: %s (supported: all, chosen)", val)
+			}
+		case "levels":
+			if val == "" {
+				msg.LevelIDs = nil
+				continue
+			}
+			parts := strings.Split(val, ",")
+			levelIDs := make([]int, 0, len(parts))
+			for _, part := range parts {
+				id, err := strconv.Atoi(strings.TrimSpace(part))
+				if err != nil || id <= 0 {
+					fatal("Invalid level ID in levels=: %s", part)
+				}
+				levelIDs = append(levelIDs, id)
+			}
+			msg.LevelIDs = levelIDs
+			msg.ShowOnLevelsMode = 2
+		default:
+			fatal("Unknown field: %s (supported: text, required_points, mode, levels)", key)
+		}
+	}
+	if err := client.AdminUpdateMessage(ctx, cfg.gameId, lvlNum, messageId, *msg); err != nil {
+		fatal("Failed to update message: %v", err)
+	}
+	if cfg.jsonOutput {
+		outputJSON(map[string]any{"success": true, "message_id": messageId})
+		return
+	}
+	fmt.Printf("Message %d updated\n", messageId)
+}
+
+func cmdAdminDeleteMessage(ctx context.Context, cfg *config, client *encx.Client, args []string) {
+	requireGameId(cfg)
+	if len(args) < 2 {
+		fatal("Usage: encli admin-delete-message -game-id <id> <level-number> <message-id>")
+	}
+	lvlNum, err := strconv.Atoi(args[0])
+	if err != nil || lvlNum <= 0 {
+		fatal("Invalid level number: %s", args[0])
+	}
+	messageId, err := strconv.Atoi(args[1])
+	if err != nil || messageId <= 0 {
+		fatal("Invalid message ID: %s", args[1])
+	}
+	if err := client.AdminDeleteMessage(ctx, cfg.gameId, lvlNum, messageId); err != nil {
+		fatal("Failed to delete message: %v", err)
+	}
+	if cfg.jsonOutput {
+		outputJSON(map[string]any{"success": true, "message_id": messageId})
+		return
+	}
+	fmt.Printf("Message %d deleted\n", messageId)
+}
+
 // parseHMS parses a time string in format "HH:MM:SS" or "MM:SS" or "SS".
 func parseHMS(s string) (h, m, sec int) {
 	parts := strings.Split(s, ":")
