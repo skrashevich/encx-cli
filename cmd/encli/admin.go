@@ -308,6 +308,61 @@ func cmdAdminDeleteSector(ctx context.Context, cfg *config, client *encx.Client,
 	fmt.Printf("Sector %d deleted\n", sectorId)
 }
 
+func cmdAdminUpdateSector(ctx context.Context, cfg *config, client *encx.Client, args []string) {
+	requireGameId(cfg)
+	if len(args) < 3 {
+		fatal("Usage: encli admin-update-sector -game-id <id> <level-number> <sector-id> <key=value ...>")
+	}
+	lvlNum, err := strconv.Atoi(args[0])
+	if err != nil || lvlNum <= 0 {
+		fatal("Invalid level number: %s", args[0])
+	}
+	sectorId, err := strconv.Atoi(args[1])
+	if err != nil {
+		fatal("Invalid sector ID: %s", args[1])
+	}
+
+	sectors, err := client.AdminGetSectorAnswers(ctx, cfg.gameId, lvlNum)
+	if err != nil {
+		fatal("Failed to read sectors: %v", err)
+	}
+
+	var sector *encx.AdminSector
+	for i := range sectors {
+		if sectors[i].ID == sectorId {
+			sector = &sectors[i]
+			break
+		}
+	}
+	if sector == nil {
+		fatal("Sector %d not found on level %d", sectorId, lvlNum)
+	}
+
+	for _, arg := range args[2:] {
+		key, val, ok := strings.Cut(arg, "=")
+		if !ok {
+			fatal("Arguments must be in key=value format. Got: %s", arg)
+		}
+		switch strings.ToLower(key) {
+		case "name":
+			sector.Name = val
+		case "answers":
+			sector.Answers = strings.Split(val, ",")
+		default:
+			fatal("Unknown field: %s (supported: name, answers)", key)
+		}
+	}
+
+	if err := client.AdminUpdateSector(ctx, cfg.gameId, lvlNum, sectorId, *sector); err != nil {
+		fatal("Failed to update sector: %v", err)
+	}
+	if cfg.jsonOutput {
+		outputJSON(map[string]any{"success": true, "sector_id": sectorId})
+		return
+	}
+	fmt.Printf("Sector %d updated\n", sectorId)
+}
+
 func cmdAdminCreateHint(ctx context.Context, cfg *config, client *encx.Client, args []string) {
 	requireGameId(cfg)
 	if len(args) < 3 {

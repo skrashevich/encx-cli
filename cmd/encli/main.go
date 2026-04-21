@@ -249,6 +249,9 @@ func main() {
 	case "admin-delete-sector":
 		requireAuth(ctx, cfg, client)
 		cmdAdminDeleteSector(ctx, cfg, client, positional)
+	case "admin-update-sector":
+		requireAuth(ctx, cfg, client)
+		cmdAdminUpdateSector(ctx, cfg, client, positional)
 	case "admin-create-hint":
 		requireAuth(ctx, cfg, client)
 		cmdAdminCreateHint(ctx, cfg, client, positional)
@@ -384,6 +387,7 @@ Admin commands (require game editor rights):
   admin-delete-bonus       Delete a bonus by ID
   admin-create-sector      Create a sector on a level
   admin-delete-sector      Delete a sector by ID
+  admin-update-sector      Update a sector by ID (key=value)
   admin-create-hint        Create a hint on a level
   admin-delete-hint        Delete a hint by ID
   admin-create-task        Create a task on a level
@@ -544,6 +548,9 @@ func printCommandHelp(cmd string) {
 	case "admin-delete-sector":
 		fmt.Fprintln(os.Stderr, "Usage: encli admin-delete-sector -game-id <id> <level-number> <sector-id>")
 		fmt.Fprintln(os.Stderr, "  Delete a sector by its ID.")
+	case "admin-update-sector":
+		fmt.Fprintln(os.Stderr, "Usage: encli admin-update-sector -game-id <id> <level-number> <sector-id> <key=value ...>")
+		fmt.Fprintln(os.Stderr, "  Update sector fields. Supported keys: name, answers.")
 	case "admin-create-hint":
 		fmt.Fprintln(os.Stderr, "Usage: encli admin-create-hint -game-id <id> <level-number> <delay HH:MM:SS> <text>")
 		fmt.Fprintln(os.Stderr, "  Create a hint with the specified delay before it opens.")
