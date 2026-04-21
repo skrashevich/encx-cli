@@ -150,3 +150,21 @@ type AdminCorrectionAdd struct {
 	Minutes        string `json:"minutes"`
 	Seconds        string `json:"seconds"`
 }
+
+// AdminActionMonitorEntry represents one row from the game action monitor.
+type AdminActionMonitorEntry struct {
+	Number      string `json:"number"`
+	Participant string `json:"participant"`
+	Direction   string `json:"direction,omitempty"`
+	Answer      string `json:"answer"`
+	DateTime    string `json:"datetime"`
+	Sectors     string `json:"sectors,omitempty"`
+}
+
+// AdminGameMessage holds the data for creating/editing a game message in MessageEdit.aspx.
+type AdminGameMessage struct {
+	Text             string `json:"text"`
+	ReplaceNlToBr    bool   `json:"replace_nl_to_br"`
+	ShowOnLevelsMode int    `json:"show_on_levels_mode,omitempty"` // 1=all, 2=chosen
+	RequiredPoints   string `json:"required_points,omitempty"`
+}

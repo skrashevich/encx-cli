@@ -711,6 +711,297 @@ func (c *Client) AdminNotDeliverGame(ctx context.Context, gameId int) error {
 	return nil
 }
 
+// --- Level Reordering ---
+
+// AdminSwapLevels swaps two levels by their numbers.
+func (c *Client) AdminSwapLevels(ctx context.Context, gameId, level1, level2 int) error {
+	u := fmt.Sprintf("%s/Administration/Games/LevelManager.aspx?gid=%d&levels=swap&ddlSwapLevels1=%d&ddlSwapLevels2=%d",
+		c.baseURL(), gameId, level1, level2)
+	_, err := c.doGet(ctx, u)
+	if err != nil {
+		return fmt.Errorf("encx: admin swap levels: %w", err)
+	}
+	return nil
+}
+
+// AdminInsertLevel moves level src to the position after level dst.
+func (c *Client) AdminInsertLevel(ctx context.Context, gameId, src, dst int) error {
+	u := fmt.Sprintf("%s/Administration/Games/LevelManager.aspx?gid=%d&levels=insert&ddlInsertAfterSrc=%d&ddlInsertAfterDst=%d",
+		c.baseURL(), gameId, src, dst)
+	_, err := c.doGet(ctx, u)
+	if err != nil {
+		return fmt.Errorf("encx: admin insert level: %w", err)
+	}
+	return nil
+}
+
+// AdminCloneLevels creates count new levels cloned from the specified level number.
+func (c *Client) AdminCloneLevels(ctx context.Context, gameId, count, likeLevel int) error {
+	u := fmt.Sprintf("%s/Administration/Games/LevelManager.aspx?gid=%d&levels=createlike&ddlCreateLevelsNum=%d&ddlCreateLikeLevel=%d",
+		c.baseURL(), gameId, count, likeLevel)
+	_, err := c.doGet(ctx, u)
+	if err != nil {
+		return fmt.Errorf("encx: admin clone levels: %w", err)
+	}
+	return nil
+}
+
+// --- Task Delete/Update ---
+
+// AdminDeleteTask deletes a task by its ID.
+func (c *Client) AdminDeleteTask(ctx context.Context, gameId, levelNum, taskId int) error {
+	u := fmt.Sprintf("%s/Administration/Games/TaskEdit.aspx?gid=%d&level=%d&tid=%d&action=TaskDelete",
+		c.baseURL(), gameId, levelNum, taskId)
+	_, err := c.doGet(ctx, u)
+	if err != nil {
+		return fmt.Errorf("encx: admin delete task: %w", err)
+	}
+	return nil
+}
+
+// AdminUpdateTask updates an existing task by its ID.
+func (c *Client) AdminUpdateTask(ctx context.Context, gameId, levelNum, taskId int, t AdminTask) error {
+	u := fmt.Sprintf("%s/Administration/Games/TaskEdit.aspx?gid=%d&level=%d&tid=%d&action=TaskEdit",
+		c.baseURL(), gameId, levelNum, taskId)
+
+	form := url.Values{}
+	form.Set("inputTask", t.Text)
+	form.Set("forMemberID", t.ForMemberID)
+
+	if t.ReplaceNl {
+		form.Set("chkReplaceNlToBr", "on")
+	}
+
+	_, err := c.doPost(ctx, u, form)
+	if err != nil {
+		return fmt.Errorf("encx: admin update task: %w", err)
+	}
+	return nil
+}
+
+// --- Bonus Update ---
+
+// AdminUpdateBonus updates an existing bonus by its ID.
+func (c *Client) AdminUpdateBonus(ctx context.Context, gameId, levelNum, bonusId int, b AdminBonus) error {
+	u := fmt.Sprintf("%s/Administration/Games/BonusEdit.aspx?gid=%d&level=%d&bonus=%d&action=save",
+		c.baseURL(), gameId, levelNum, bonusId)
+
+	form := url.Values{}
+	form.Set("txtBonusName", b.Name)
+	form.Set("txtTask", b.Task)
+	form.Set("txtHelp", b.Hint)
+	form.Set("ddlBonusFor", b.BonusFor)
+
+	if b.LevelID == -1 || b.LevelID == 0 {
+		form.Set("rbAllLevels", "1")
+	} else {
+		form.Set("rbAllLevels", "0")
+		form.Set(fmt.Sprintf("level_%d", b.LevelID), "on")
+	}
+
+	for i, ans := range b.Answers {
+		form.Set(fmt.Sprintf("answer_-%d", i+1), ans)
+	}
+
+	form.Set("txtHours", strconv.Itoa(b.AwardHours))
+	form.Set("txtMinutes", strconv.Itoa(b.AwardMinutes))
+	form.Set("txtSeconds", strconv.Itoa(b.AwardSeconds))
+
+	if b.Negative {
+		form.Set("negative", "on")
+	}
+
+	if b.ValidFrom != "" || b.ValidTo != "" {
+		form.Set("chkAbsoluteLimit", "on")
+		form.Set("txtValidFrom", b.ValidFrom)
+		form.Set("txtValidTo", b.ValidTo)
+	}
+
+	if b.DelayHours > 0 || b.DelayMinutes > 0 || b.DelaySeconds > 0 {
+		form.Set("chkDelay", "on")
+		form.Set("txtDelayHours", strconv.Itoa(b.DelayHours))
+		form.Set("txtDelayMinutes", strconv.Itoa(b.DelayMinutes))
+		form.Set("txtDelaySeconds", strconv.Itoa(b.DelaySeconds))
+	}
+
+	if b.WorkHours > 0 || b.WorkMinutes > 0 || b.WorkSeconds > 0 {
+		form.Set("chkRelativeLimit", "on")
+		form.Set("txtValidHours", strconv.Itoa(b.WorkHours))
+		form.Set("txtValidMinutes", strconv.Itoa(b.WorkMinutes))
+		form.Set("txtValidSeconds", strconv.Itoa(b.WorkSeconds))
+	}
+
+	_, err := c.doPost(ctx, u, form)
+	if err != nil {
+		return fmt.Errorf("encx: admin update bonus: %w", err)
+	}
+	return nil
+}
+
+// --- Hint Update ---
+
+// AdminUpdateHint updates an existing hint by its ID.
+func (c *Client) AdminUpdateHint(ctx context.Context, gameId, levelNum, hintId int, h AdminHint) error {
+	var u string
+	if h.IsPenalty || h.RequestConfirm {
+		u = fmt.Sprintf("%s/Administration/Games/PromptEdit.aspx?penalty=1&gid=%d&level=%d&prid=%d",
+			c.baseURL(), gameId, levelNum, hintId)
+	} else {
+		u = fmt.Sprintf("%s/Administration/Games/PromptEdit.aspx?gid=%d&level=%d&prid=%d",
+			c.baseURL(), gameId, levelNum, hintId)
+	}
+
+	form := url.Values{}
+	form.Set("NewPrompt", h.Text)
+	form.Set("NewPromptTimeoutDays", strconv.Itoa(h.Days))
+	form.Set("NewPromptTimeoutHours", strconv.Itoa(h.Hours))
+	form.Set("NewPromptTimeoutMinutes", strconv.Itoa(h.Minutes))
+	form.Set("NewPromptTimeoutSeconds", strconv.Itoa(h.Seconds))
+
+	if h.PenaltyHours > 0 || h.PenaltyMinutes > 0 || h.PenaltySeconds > 0 {
+		form.Set("PenaltyPromptHours", strconv.Itoa(h.PenaltyHours))
+		form.Set("PenaltyPromptMinutes", strconv.Itoa(h.PenaltyMinutes))
+		form.Set("PenaltyPromptSeconds", strconv.Itoa(h.PenaltySeconds))
+	}
+
+	if h.ForMemberID != "" {
+		form.Set("ForMemberID", h.ForMemberID)
+	}
+
+	if h.PenaltyComment != "" {
+		form.Set("txtPenaltyComment", h.PenaltyComment)
+	}
+
+	if h.RequestConfirm {
+		form.Set("chkRequestPenaltyConfirm", "on")
+	}
+
+	_, err := c.doPost(ctx, u, form)
+	if err != nil {
+		return fmt.Errorf("encx: admin update hint: %w", err)
+	}
+	return nil
+}
+
+// --- Game Lifecycle ---
+
+// AdminDeliverGame marks a game as "delivered" (состоявшаяся).
+func (c *Client) AdminDeliverGame(ctx context.Context, gameId int) error {
+	u := fmt.Sprintf("%s/Administration/GamesManager.aspx?gid=%d&action=Deliver", c.baseURL(), gameId)
+	_, err := c.doGet(ctx, u)
+	if err != nil {
+		return fmt.Errorf("encx: admin deliver game: %w", err)
+	}
+	return nil
+}
+
+// AdminAwardPoints awards points to game participants.
+func (c *Client) AdminAwardPoints(ctx context.Context, gameId int) error {
+	u := fmt.Sprintf("%s/Administration/GamesManager.aspx?gid=%d&action=AwardPoints", c.baseURL(), gameId)
+	_, err := c.doGet(ctx, u)
+	if err != nil {
+		return fmt.Errorf("encx: admin award points: %w", err)
+	}
+	return nil
+}
+
+// AdminEndRatings ends accepting ratings for a game.
+func (c *Client) AdminEndRatings(ctx context.Context, gameId int) error {
+	u := fmt.Sprintf("%s/Administration/GamesManager.aspx?gid=%d&action=EndRatings", c.baseURL(), gameId)
+	_, err := c.doGet(ctx, u)
+	if err != nil {
+		return fmt.Errorf("encx: admin end ratings: %w", err)
+	}
+	return nil
+}
+
+// AdminCalculateIK calculates the game coefficient (ИК).
+func (c *Client) AdminCalculateIK(ctx context.Context, gameId int) error {
+	u := fmt.Sprintf("%s/Administration/GamesManager.aspx?gid=%d&action=CalcIK", c.baseURL(), gameId)
+	_, err := c.doGet(ctx, u)
+	if err != nil {
+		return fmt.Errorf("encx: admin calculate IK: %w", err)
+	}
+	return nil
+}
+
+// AdminGetActionMonitor reads the game action monitor rows.
+func (c *Client) AdminGetActionMonitor(ctx context.Context, gameId int) ([]AdminActionMonitorEntry, error) {
+	u := fmt.Sprintf("%s/Administration/Games/ActionMonitor.aspx?gid=%d&type=own", c.baseURL(), gameId)
+	body, err := c.doGet(ctx, u)
+	if err != nil {
+		return nil, fmt.Errorf("encx: admin get action monitor: %w", err)
+	}
+
+	rowRe := regexp.MustCompile(`(?is)<tr[^>]*>(.*?)</tr>`)
+	rows := rowRe.FindAllStringSubmatch(body, -1)
+	entries := make([]AdminActionMonitorEntry, 0, len(rows))
+	for _, row := range rows {
+		tds := adminTdRe.FindAllStringSubmatch(row[1], -1)
+		if len(tds) < 5 {
+			continue
+		}
+		vals := make([]string, 0, len(tds))
+		for _, td := range tds {
+			vals = append(vals, strings.TrimSpace(stripTags(td[1])))
+		}
+		if len(vals) == 0 || vals[0] == "#" || vals[0] == "№" {
+			continue
+		}
+
+		entry := AdminActionMonitorEntry{}
+		switch len(vals) {
+		case 5:
+			entry.Number = vals[0]
+			entry.Participant = vals[1]
+			entry.Answer = vals[2]
+			entry.DateTime = vals[3]
+			entry.Sectors = vals[4]
+		default:
+			entry.Number = vals[0]
+			entry.Participant = vals[1]
+			entry.Direction = vals[2]
+			entry.Answer = vals[3]
+			entry.DateTime = vals[4]
+			entry.Sectors = strings.Join(vals[5:], " | ")
+		}
+		if entry.Answer == "" && entry.DateTime == "" {
+			continue
+		}
+		entries = append(entries, entry)
+	}
+
+	return entries, nil
+}
+
+// --- Game Messages ---
+
+// AdminCreateMessage creates a message for a game using the MessageEdit form.
+func (c *Client) AdminCreateMessage(ctx context.Context, gameId, levelID int, m AdminGameMessage) error {
+	u := fmt.Sprintf("%s/Administration/Games/MessageEdit.aspx?gid=%d&level=%d&action=add", c.baseURL(), gameId, levelID)
+
+	form := url.Values{}
+	form.Set("txtMessage", m.Text)
+	if m.ReplaceNlToBr {
+		form.Set("chkReplaceNlToBr", "on")
+	}
+	if m.ShowOnLevelsMode == 2 {
+		form.Set("rbShowOnLevels", "2")
+		form.Set(fmt.Sprintf("lvl_%d", levelID), "on")
+	} else {
+		form.Set("rbShowOnLevels", "1")
+	}
+	if m.RequiredPoints != "" {
+		form.Set("txtRequiredPoints", m.RequiredPoints)
+	}
+
+	_, err := c.doPost(ctx, u, form)
+	if err != nil {
+		return fmt.Errorf("encx: admin create message: %w", err)
+	}
+	return nil
+}
+
 // parseSelectedRadioOrValue extracts a value from either an input field or a checked radio button.
 func parseSelectedRadioOrValue(body, name string, inputs map[string]string) string {
 	if v, ok := inputs[name]; ok {

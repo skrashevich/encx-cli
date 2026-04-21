@@ -635,6 +635,326 @@ func cmdAdminNotDeliver(ctx context.Context, cfg *config, client *encx.Client) {
 	}
 }
 
+// --- Level Reordering ---
+
+func cmdAdminSwapLevels(ctx context.Context, cfg *config, client *encx.Client, args []string) {
+	requireGameId(cfg)
+	if len(args) < 2 {
+		fatal("Usage: encli admin-swap-levels -game-id <id> <level1> <level2>")
+	}
+	l1, err := strconv.Atoi(args[0])
+	if err != nil || l1 <= 0 {
+		fatal("Invalid level number: %s", args[0])
+	}
+	l2, err := strconv.Atoi(args[1])
+	if err != nil || l2 <= 0 {
+		fatal("Invalid level number: %s", args[1])
+	}
+	if err := client.AdminSwapLevels(ctx, cfg.gameId, l1, l2); err != nil {
+		fatal("Failed to swap levels: %v", err)
+	}
+	if cfg.jsonOutput {
+		outputJSON(map[string]any{"success": true, "level1": l1, "level2": l2})
+		return
+	}
+	fmt.Printf("Levels %d and %d swapped\n", l1, l2)
+}
+
+func cmdAdminInsertLevel(ctx context.Context, cfg *config, client *encx.Client, args []string) {
+	requireGameId(cfg)
+	if len(args) < 2 {
+		fatal("Usage: encli admin-insert-level -game-id <id> <source-level> <after-level>")
+	}
+	src, err := strconv.Atoi(args[0])
+	if err != nil || src <= 0 {
+		fatal("Invalid source level: %s", args[0])
+	}
+	dst, err := strconv.Atoi(args[1])
+	if err != nil || dst < 0 {
+		fatal("Invalid target level: %s", args[1])
+	}
+	if err := client.AdminInsertLevel(ctx, cfg.gameId, src, dst); err != nil {
+		fatal("Failed to insert level: %v", err)
+	}
+	if cfg.jsonOutput {
+		outputJSON(map[string]any{"success": true, "source": src, "after": dst})
+		return
+	}
+	fmt.Printf("Level %d moved after level %d\n", src, dst)
+}
+
+func cmdAdminCloneLevels(ctx context.Context, cfg *config, client *encx.Client, args []string) {
+	requireGameId(cfg)
+	if len(args) < 2 {
+		fatal("Usage: encli admin-clone-levels -game-id <id> <count> <like-level>")
+	}
+	count, err := strconv.Atoi(args[0])
+	if err != nil || count <= 0 {
+		fatal("Invalid count: %s", args[0])
+	}
+	likeLevel, err := strconv.Atoi(args[1])
+	if err != nil || likeLevel <= 0 {
+		fatal("Invalid level number: %s", args[1])
+	}
+	if err := client.AdminCloneLevels(ctx, cfg.gameId, count, likeLevel); err != nil {
+		fatal("Failed to clone levels: %v", err)
+	}
+	if cfg.jsonOutput {
+		outputJSON(map[string]any{"success": true, "count": count, "like_level": likeLevel})
+		return
+	}
+	fmt.Printf("Created %d level(s) cloned from level %d\n", count, likeLevel)
+}
+
+// --- Task Delete/Update ---
+
+func cmdAdminDeleteTask(ctx context.Context, cfg *config, client *encx.Client, args []string) {
+	requireGameId(cfg)
+	if len(args) < 2 {
+		fatal("Usage: encli admin-delete-task -game-id <id> <level-number> <task-id>")
+	}
+	lvlNum, err := strconv.Atoi(args[0])
+	if err != nil || lvlNum <= 0 {
+		fatal("Invalid level number: %s", args[0])
+	}
+	taskId, err := strconv.Atoi(args[1])
+	if err != nil {
+		fatal("Invalid task ID: %s", args[1])
+	}
+	if err := client.AdminDeleteTask(ctx, cfg.gameId, lvlNum, taskId); err != nil {
+		fatal("Failed to delete task: %v", err)
+	}
+	if cfg.jsonOutput {
+		outputJSON(map[string]any{"success": true, "task_id": taskId})
+		return
+	}
+	fmt.Printf("Task %d deleted\n", taskId)
+}
+
+func cmdAdminUpdateTask(ctx context.Context, cfg *config, client *encx.Client, args []string) {
+	requireGameId(cfg)
+	if len(args) < 3 {
+		fatal("Usage: encli admin-update-task -game-id <id> <level-number> <task-id> <text>")
+	}
+	lvlNum, err := strconv.Atoi(args[0])
+	if err != nil || lvlNum <= 0 {
+		fatal("Invalid level number: %s", args[0])
+	}
+	taskId, err := strconv.Atoi(args[1])
+	if err != nil {
+		fatal("Invalid task ID: %s", args[1])
+	}
+	text := strings.Join(args[2:], " ")
+	task := encx.AdminTask{
+		Text:      text,
+		ReplaceNl: !strings.Contains(text, "<"),
+	}
+	if err := client.AdminUpdateTask(ctx, cfg.gameId, lvlNum, taskId, task); err != nil {
+		fatal("Failed to update task: %v", err)
+	}
+	if cfg.jsonOutput {
+		outputJSON(map[string]any{"success": true, "task_id": taskId})
+		return
+	}
+	fmt.Printf("Task %d updated\n", taskId)
+}
+
+// --- Bonus/Hint Update ---
+
+func cmdAdminUpdateBonus(ctx context.Context, cfg *config, client *encx.Client, args []string) {
+	requireGameId(cfg)
+	if len(args) < 3 {
+		fatal("Usage: encli admin-update-bonus -game-id <id> <level-num> <bonus-id> <key=value ...>")
+	}
+	lvlNum, err := strconv.Atoi(args[0])
+	if err != nil || lvlNum <= 0 {
+		fatal("Invalid level number: %s", args[0])
+	}
+	bonusId, err := strconv.Atoi(args[1])
+	if err != nil {
+		fatal("Invalid bonus ID: %s", args[1])
+	}
+
+	// Read current bonus to preserve unchanged fields
+	bonus, err := client.AdminGetBonus(ctx, cfg.gameId, lvlNum, bonusId)
+	if err != nil {
+		fatal("Failed to read current bonus: %v", err)
+	}
+
+	for _, arg := range args[2:] {
+		key, val, ok := strings.Cut(arg, "=")
+		if !ok {
+			fatal("Arguments must be in key=value format. Got: %s", arg)
+		}
+		switch strings.ToLower(key) {
+		case "name":
+			bonus.Name = val
+		case "task":
+			bonus.Task = val
+		case "hint":
+			bonus.Hint = val
+		case "answers":
+			bonus.Answers = strings.Split(val, ",")
+		default:
+			fatal("Unknown field: %s (supported: name, task, hint, answers)", key)
+		}
+	}
+
+	if err := client.AdminUpdateBonus(ctx, cfg.gameId, lvlNum, bonusId, *bonus); err != nil {
+		fatal("Failed to update bonus: %v", err)
+	}
+	if cfg.jsonOutput {
+		outputJSON(map[string]any{"success": true, "bonus_id": bonusId})
+		return
+	}
+	fmt.Printf("Bonus %d updated\n", bonusId)
+}
+
+func cmdAdminUpdateHint(ctx context.Context, cfg *config, client *encx.Client, args []string) {
+	requireGameId(cfg)
+	if len(args) < 3 {
+		fatal("Usage: encli admin-update-hint -game-id <id> <level-num> <hint-id> <key=value ...>")
+	}
+	lvlNum, err := strconv.Atoi(args[0])
+	if err != nil || lvlNum <= 0 {
+		fatal("Invalid level number: %s", args[0])
+	}
+	hintId, err := strconv.Atoi(args[1])
+	if err != nil {
+		fatal("Invalid hint ID: %s", args[1])
+	}
+
+	// Read current hint to preserve unchanged fields
+	hint, err := client.AdminGetHint(ctx, cfg.gameId, lvlNum, hintId)
+	if err != nil {
+		fatal("Failed to read current hint: %v", err)
+	}
+
+	for _, arg := range args[2:] {
+		key, val, ok := strings.Cut(arg, "=")
+		if !ok {
+			fatal("Arguments must be in key=value format. Got: %s", arg)
+		}
+		switch strings.ToLower(key) {
+		case "text":
+			hint.Text = val
+		case "delay":
+			h, m, s := parseHMS(val)
+			hint.Hours = h
+			hint.Minutes = m
+			hint.Seconds = s
+		default:
+			fatal("Unknown field: %s (supported: text, delay)", key)
+		}
+	}
+
+	if err := client.AdminUpdateHint(ctx, cfg.gameId, lvlNum, hintId, *hint); err != nil {
+		fatal("Failed to update hint: %v", err)
+	}
+	if cfg.jsonOutput {
+		outputJSON(map[string]any{"success": true, "hint_id": hintId})
+		return
+	}
+	fmt.Printf("Hint %d updated\n", hintId)
+}
+
+// --- Game Lifecycle ---
+
+func cmdAdminDeliverGame(ctx context.Context, cfg *config, client *encx.Client) {
+	requireGameId(cfg)
+	if err := client.AdminDeliverGame(ctx, cfg.gameId); err != nil {
+		fatal("Failed to mark game as delivered: %v", err)
+	}
+	if cfg.jsonOutput {
+		outputJSON(map[string]any{"success": true, "game_id": cfg.gameId})
+	} else {
+		fmt.Printf("Game %d marked as delivered\n", cfg.gameId)
+	}
+}
+
+func cmdAdminAwardPoints(ctx context.Context, cfg *config, client *encx.Client) {
+	requireGameId(cfg)
+	if err := client.AdminAwardPoints(ctx, cfg.gameId); err != nil {
+		fatal("Failed to award points: %v", err)
+	}
+	if cfg.jsonOutput {
+		outputJSON(map[string]any{"success": true, "game_id": cfg.gameId})
+	} else {
+		fmt.Printf("Points awarded for game %d\n", cfg.gameId)
+	}
+}
+
+func cmdAdminEndRatings(ctx context.Context, cfg *config, client *encx.Client) {
+	requireGameId(cfg)
+	if err := client.AdminEndRatings(ctx, cfg.gameId); err != nil {
+		fatal("Failed to end ratings: %v", err)
+	}
+	if cfg.jsonOutput {
+		outputJSON(map[string]any{"success": true, "game_id": cfg.gameId})
+	} else {
+		fmt.Printf("Ratings ended for game %d\n", cfg.gameId)
+	}
+}
+
+func cmdAdminCalcIK(ctx context.Context, cfg *config, client *encx.Client) {
+	requireGameId(cfg)
+	if err := client.AdminCalculateIK(ctx, cfg.gameId); err != nil {
+		fatal("Failed to calculate IK: %v", err)
+	}
+	if cfg.jsonOutput {
+		outputJSON(map[string]any{"success": true, "game_id": cfg.gameId})
+	} else {
+		fmt.Printf("IK calculated for game %d\n", cfg.gameId)
+	}
+}
+
+func cmdAdminActionMonitor(ctx context.Context, cfg *config, client *encx.Client) {
+	requireGameId(cfg)
+	entries, err := client.AdminGetActionMonitor(ctx, cfg.gameId)
+	if err != nil {
+		fatal("Failed to get action monitor: %v", err)
+	}
+	if cfg.jsonOutput {
+		outputJSON(entries)
+		return
+	}
+	if len(entries) == 0 {
+		fmt.Println("No monitor rows")
+		return
+	}
+	w := tabwriter.NewWriter(os.Stdout, 0, 4, 2, ' ', 0)
+	fmt.Fprintln(w, "#\tParticipant\tDir\tAnswer\tDateTime\tSectors")
+	fmt.Fprintln(w, "-\t-----------\t---\t------\t--------\t-------")
+	for _, e := range entries {
+		fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\n", e.Number, e.Participant, e.Direction, e.Answer, e.DateTime, e.Sectors)
+	}
+	w.Flush()
+}
+
+func cmdAdminCreateMessage(ctx context.Context, cfg *config, client *encx.Client, args []string) {
+	requireGameId(cfg)
+	if len(args) < 2 {
+		fatal("Usage: encli admin-create-message -game-id <id> <level-id> <text>")
+	}
+	levelID, err := strconv.Atoi(args[0])
+	if err != nil || levelID <= 0 {
+		fatal("Invalid level ID: %s", args[0])
+	}
+	text := strings.Join(args[1:], " ")
+	msg := encx.AdminGameMessage{
+		Text:          text,
+		ReplaceNlToBr: !strings.Contains(text, "<"),
+	}
+	if err := client.AdminCreateMessage(ctx, cfg.gameId, levelID, msg); err != nil {
+		fatal("Failed to create message: %v", err)
+	}
+	if cfg.jsonOutput {
+		outputJSON(map[string]any{"success": true, "level_id": levelID})
+		return
+	}
+	fmt.Printf("Message created for level %d\n", levelID)
+}
+
 // parseHMS parses a time string in format "HH:MM:SS" or "MM:SS" or "SS".
 func parseHMS(s string) (h, m, sec int) {
 	parts := strings.Split(s, ":")
