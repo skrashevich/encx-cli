@@ -158,6 +158,27 @@ func formatToolCallForDisplay(session *llmSession, name, argsJSON string) string
 	case "propose_admin_fix":
 		title := getAnyString(args["title"])
 		return format(title)
+	case "read_local_file":
+		p := getAnyString(args["path"])
+		if p != "" {
+			return format(rt("Reading file: ", "Читаю файл: ") + p)
+		}
+		return format(rt("Reading local file", "Читаю локальный файл"))
+	case "list_local_dir":
+		p := getAnyString(args["path"])
+		if p != "" {
+			return format(rt("Listing directory: ", "Содержимое каталога: ") + p)
+		}
+		return format(rt("Listing local directory", "Содержимое локального каталога"))
+	case "search_local_files":
+		pat := getAnyString(args["pattern"])
+		return format(rt("Searching files for: ", "Ищу в файлах: ") + pat)
+	case "wikipedia_search":
+		q := getAnyString(args["query"])
+		return format(rt("Wikipedia search: ", "Поиск в Википедии: ") + q)
+	case "wikipedia_article":
+		t := getAnyString(args["title"])
+		return format(rt("Wikipedia article: ", "Статья Википедии: ") + t)
 	default:
 		return format(fmt.Sprintf("[%s] %s", name, argsJSON))
 	}

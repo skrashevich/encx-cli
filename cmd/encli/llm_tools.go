@@ -224,6 +224,31 @@ func getTools(reviewMode bool) []llmTool {
 			Description: "Mark a game as not delivered (несостоявшаяся). This is irreversible.",
 			Parameters:  json.RawMessage(`{"type":"object","properties":{"game_id":{"type":"integer","description":"Game ID"}},"required":["game_id"]}`),
 		}},
+		{Type: "function", Function: llmFunction{
+			Name:        "read_local_file",
+			Description: "Read a text file from the local filesystem (relative to LLM_FILES_ROOT or current working directory). Use to inspect scripts, notes, or uploaded scenario files.",
+			Parameters:  json.RawMessage(`{"type":"object","properties":{"path":{"type":"string","description":"File path (relative to LLM_FILES_ROOT or absolute within it)"},"max_bytes":{"type":"integer","description":"Max bytes to read (default 65536, max 524288)"},"offset":{"type":"integer","description":"Byte offset to start reading from"}},"required":["path"]}`),
+		}},
+		{Type: "function", Function: llmFunction{
+			Name:        "list_local_dir",
+			Description: "List files and subdirectories in a local directory (relative to LLM_FILES_ROOT or cwd).",
+			Parameters:  json.RawMessage(`{"type":"object","properties":{"path":{"type":"string","description":"Directory path (default: root)"},"recursive":{"type":"boolean","description":"List recursively up to depth 3 (max 500 entries)"}}}`),
+		}},
+		{Type: "function", Function: llmFunction{
+			Name:        "search_local_files",
+			Description: "Search for a substring in local text files under a directory. Returns matching file paths, line numbers, and snippets.",
+			Parameters:  json.RawMessage(`{"type":"object","properties":{"path":{"type":"string","description":"Directory or file to search (default: LLM_FILES_ROOT)"},"pattern":{"type":"string","description":"Case-insensitive substring to find"},"glob":{"type":"string","description":"Optional filename glob, e.g. *.md"},"max_matches":{"type":"integer","description":"Max matches to return (default 50)"}},"required":["pattern"]}`),
+		}},
+		{Type: "function", Function: llmFunction{
+			Name:        "wikipedia_search",
+			Description: "Search Wikipedia for articles matching a query. Use to find facts, dates, places, or verify names before writing game content.",
+			Parameters:  json.RawMessage(`{"type":"object","properties":{"query":{"type":"string","description":"Search query"},"lang":{"type":"string","description":"Wikipedia language code (default: ru)"},"limit":{"type":"integer","description":"Max results (default 5, max 20)"}},"required":["query"]}`),
+		}},
+		{Type: "function", Function: llmFunction{
+			Name:        "wikipedia_article",
+			Description: "Fetch a Wikipedia article summary (plain-text intro extract) by title. Use to verify facts from a known article title.",
+			Parameters:  json.RawMessage(`{"type":"object","properties":{"title":{"type":"string","description":"Article title"},"lang":{"type":"string","description":"Wikipedia language code (default: ru)"}},"required":["title"]}`),
+		}},
 	}
 	if reviewMode {
 		tools = append(tools, llmTool{Type: "function", Function: llmFunction{

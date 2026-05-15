@@ -403,6 +403,35 @@ func executeLLMToolCall(ctx context.Context, cfg *config, client *encx.Client, s
 		requireAuth(ctx, cfg, client)
 		cmdAdminNotDeliver(ctx, cfg, client)
 
+	case "read_local_file":
+		toolReadLocalFile(getString("path"), getInt("max_bytes"), getInt("offset"))
+
+	case "list_local_dir":
+		recursive := false
+		if v, ok := args["recursive"]; ok {
+			if b, ok := v.(bool); ok {
+				recursive = b
+			}
+		}
+		path := getString("path")
+		if path == "" {
+			path = "."
+		}
+		toolListLocalDir(path, recursive)
+
+	case "search_local_files":
+		root := getString("path")
+		if root == "" {
+			root = "."
+		}
+		toolSearchLocalFiles(root, getString("pattern"), getString("glob"), getInt("max_matches"))
+
+	case "wikipedia_search":
+		toolWikipediaSearch(ctx, getString("query"), getString("lang"), getInt("limit"))
+
+	case "wikipedia_article":
+		toolWikipediaArticle(ctx, getString("title"), getString("lang"))
+
 	default:
 		fatal("Unknown tool call: %s", name)
 	}
