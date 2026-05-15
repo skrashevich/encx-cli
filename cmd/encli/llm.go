@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"os"
 	"strings"
-	"time"
 
 	"github.com/skrashevich/encx-cli/encx"
 )
@@ -99,10 +98,14 @@ type llmToolCallFunction struct {
 }
 
 type llmSession struct {
-	reviewApprovalMode  bool
-	applyingApprovedFix bool
-	preferRussian       bool
-	pendingFixes        []pendingAdminFix
+	securityMode           AgentSecurityMode
+	reviewApprovalMode     bool
+	applyingApprovedFix    bool
+	preferRussian          bool
+	pendingFixes           []pendingAdminFix
+	loadedLevelContent     map[int]struct{} // levels read via admin_level_content in this chat
+	enumeratedLevelNumbers []int            // from latest admin_levels in this agent run
+	levelCompletionNudges  int              // auto-nudges when model answers before loading all levels
 }
 
 func cmdLLM(ctx context.Context, cfg *config, client *encx.Client, prompt string) {
@@ -121,194 +124,55 @@ func cmdLLM(ctx context.Context, cfg *config, client *encx.Client, prompt string
 	// panic and be recovered back into the agent loop.
 	cfg.jsonOutput = true
 	jsonMode = true
-	session := &llmSession{
-		reviewApprovalMode: isReviewApprovalPrompt(prompt),
-		preferRussian:      looksLikeRussian(prompt),
+	session := newLLMSessionForPrompt(prompt)
+	if cfg.agentReadonly {
+		session.securityMode = SecurityModeReadonly
 	}
 
-	systemPrompt := `You are an autonomous agent for the Encounter (en.cx) game engine CLI tool.
-The user gives you a natural language request. Execute it step by step using the available tools.
-The current domain is: ` + cfg.domain + `
-` + func() string {
-		if cfg.gameId != 0 {
-			return fmt.Sprintf("The current game ID is: %d\n", cfg.gameId)
-		}
-		return ""
-	}() + `
-Rules:
-- Execute multi-step tasks by calling tools one at a time. You will receive the result of each tool call.
-- Use tool results to inform your next action (e.g., get level IDs before renaming levels).
-- When all steps are complete, respond with a text summary of what was done.
-- If a tool call fails, try to recover or report the error.
-- For admin_copy_game: source is the first game mentioned, target is the second.
-- Prefer admin_* tools for game management (viewing levels, creating content). Player tools (levels, status, bonuses) are for games IN PROGRESS.
-- For reading level text, answers, hints, and other scenario content from the organizer side, prefer admin_level_content instead of player tools.
-- Starting/launching a game is NOT available via CLI — only through the web interface. Inform the user if they ask.
-- When asked to CREATE a game/levels, make them INTERESTING and DIFFERENT: give unique names, add tasks with creative quest text, add sectors with answers, add hints. Don't just create empty shells.
-- ALWAYS COMPLETE THE FULL TASK. If asked to create N levels, create ALL N levels with tasks, sectors (answers), and hints. Never stop partway through and offer to "continue if needed". You have up to 200 tool calls — use them. Do not summarize partial work as if it were complete.
-- SELF-VERIFICATION: After creating or modifying levels, verify your own work by calling admin_level_content for each affected level. Check that: (1) all sector codes/answers are present and correct, (2) timings (autopass, answer block) are set to non-zero values if the level is timed, (3) hints are present if needed and have correct text/delays, (4) task text matches the intended answers. If you discover errors, fix them immediately before reporting success.
-- LOCAL FILES: Use read_local_file, list_local_dir, and search_local_files to read scripts, notes, or scenario files on disk. Paths are relative to LLM_FILES_ROOT (defaults to the current working directory). You cannot read files outside that root.
-- WIKIPEDIA: Use wikipedia_search to find articles and wikipedia_article to read summaries when you need to verify facts, dates, places, or historical details for quest content.
-- Respond in the same language as the user's request.` + func() string {
-		if !session.reviewApprovalMode {
-			return ""
-		}
-		return `
-- This request is in review/approval mode. You may inspect and analyze existing content, but you must NOT directly modify the game.
-- If you find an issue that should be fixed, call propose_admin_fix once per issue. One proposal = one user approval decision.
-- Each proposed fix must contain only the minimal admin mutation steps needed to resolve that one issue.
-- After proposing fixes, give a concise audit summary. Do not ask the user for confirmation in normal text; the CLI will handle approval interactively.`
-	}()
+	systemPrompt := buildSystemPrompt(cfg, session)
 
 	messages := []llmMessage{
 		{Role: "system", Content: systemPrompt},
 		{Role: "user", Content: prompt},
 	}
 
-	tools := getTools(session.reviewApprovalMode)
+	tools := getToolsForSession(session)
 	debugf("llm mode initialized: url=%s model=%s review_mode=%v tools=%d prompt=%q", apiURL, model, session.reviewApprovalMode, len(tools), summarizeDebugText(prompt, 0))
 
-	// Fetch pricing info (OpenRouter → from API, localhost → free).
-	pricing := fetchLLMPricing(ctx, baseURL, apiKey, model)
-
-	// Timing and usage tracking.
-	totalStart := time.Now()
-	var llmDuration time.Duration
-	var toolDuration time.Duration
-	var totalToolCalls int
-	var totalPromptTokens, totalCompletionTokens int
-	turns := 0
-
-	printReport := func() {
-		totalElapsed := time.Since(totalStart)
-		otherDuration := totalElapsed - llmDuration - toolDuration
-		if otherDuration < 0 {
-			otherDuration = 0
-		}
-
-		var report strings.Builder
-		if session.preferRussian {
-			fmt.Fprintf(&report, "\n--- Отчёт о выполнении ---\n")
-			fmt.Fprintf(&report, "Общее время:      %s\n", totalElapsed.Round(time.Millisecond))
-			fmt.Fprintf(&report, "Модель:           %s\n", model)
-			fmt.Fprintf(&report, "  Время LLM:      %s\n", llmDuration.Round(time.Millisecond))
-			fmt.Fprintf(&report, "  Время тулзов:   %s\n", toolDuration.Round(time.Millisecond))
-			fmt.Fprintf(&report, "  Накладные:      %s\n", otherDuration.Round(time.Millisecond))
-			fmt.Fprintf(&report, "Запросов к LLM:   %d\n", turns)
-			fmt.Fprintf(&report, "Вызовов тулзов:   %d\n", totalToolCalls)
-			if totalPromptTokens > 0 || totalCompletionTokens > 0 {
-				fmt.Fprintf(&report, "Токены:           %d (вход: %d, выход: %d)\n",
-					totalPromptTokens+totalCompletionTokens, totalPromptTokens, totalCompletionTokens)
-				if pricing != nil && pricing.isLocal {
-					fmt.Fprintf(&report, "Стоимость:        $0 (локальный прокси)\n")
-				} else if pricing != nil {
-					fmt.Fprintf(&report, "Стоимость:        $%.4f (OpenRouter pricing)\n", computeLLMCost(pricing, totalPromptTokens, totalCompletionTokens))
-				}
-			}
-		} else {
-			fmt.Fprintf(&report, "\n--- Execution Report ---\n")
-			fmt.Fprintf(&report, "Total time:    %s\n", totalElapsed.Round(time.Millisecond))
-			fmt.Fprintf(&report, "Model:         %s\n", model)
-			fmt.Fprintf(&report, "  LLM time:    %s\n", llmDuration.Round(time.Millisecond))
-			fmt.Fprintf(&report, "  Tool time:   %s\n", toolDuration.Round(time.Millisecond))
-			fmt.Fprintf(&report, "  Overhead:    %s\n", otherDuration.Round(time.Millisecond))
-			fmt.Fprintf(&report, "LLM turns:     %d\n", turns)
-			fmt.Fprintf(&report, "Tool calls:    %d\n", totalToolCalls)
-			if totalPromptTokens > 0 || totalCompletionTokens > 0 {
-				fmt.Fprintf(&report, "Tokens:        %d (in: %d, out: %d)\n",
-					totalPromptTokens+totalCompletionTokens, totalPromptTokens, totalCompletionTokens)
-				if pricing != nil && pricing.isLocal {
-					fmt.Fprintf(&report, "Cost:          $0 (local proxy)\n")
-				} else if pricing != nil {
-					fmt.Fprintf(&report, "Cost:          $%.4f (OpenRouter pricing)\n", computeLLMCost(pricing, totalPromptTokens, totalCompletionTokens))
-				}
-			}
-		}
-		fmt.Fprint(os.Stderr, report.String())
+	loopIn := AgentRunInput{
+		Cfg:      cfg,
+		Client:   client,
+		Session:  session,
+		Messages: messages,
+		Tools:    tools,
+	}
+	ac := AgentConfig{
+		APIURL:  apiURL,
+		APIKey:  apiKey,
+		Model:   model,
+		BaseURL: baseURL,
 	}
 
-	for turn := 0; turn < maxAgentTurns; turn++ {
-		debugf("llm turn=%d request: messages=%d", turn+1, len(messages))
-		turnStart := time.Now()
-		var resp *llmResponse
-		var lastErr error
-		for attempt := range 3 {
-			if attempt > 0 {
-				delay := time.Duration(attempt) * 5 * time.Second
-				fmt.Fprintf(os.Stderr, "%s %s...\n",
-					session.reviewText("Retrying in", "Повтор через"), delay)
-				time.Sleep(delay)
+	_, err := runAgentLoop(ctx, ac, &loopIn, AgentCallbacks{
+		OnEvent: func(ev AgentEvent) {
+			switch ev.Type {
+			case agentEventAssistantText:
+				if ev.Text != "" {
+					fmt.Println(formatMarkdownForTerminal(ev.Text))
+				}
+			case agentEventToolStart:
+				fmt.Fprintf(os.Stderr, "%s\n", formatToolCallForDisplay(session, ev.ToolName, ev.ToolArgs))
+			case agentEventReport:
+				fmt.Fprint(os.Stderr, ev.Report)
+			case agentEventWarning:
+				fmt.Fprintln(os.Stderr, ev.Message)
 			}
-			resp, lastErr = callLLM(ctx, apiURL, apiKey, model, messages, tools)
-			if lastErr == nil {
-				break
-			}
-			if !isRetryableLLMError(lastErr) {
-				fatal("LLM API error: %v", lastErr)
-			}
-			fmt.Fprintf(os.Stderr, "LLM error (%d/3): %v\n", attempt+1, lastErr)
-		}
-		if lastErr != nil {
-			fatal("LLM API error after 3 attempts: %v", lastErr)
-		}
-		llmDuration += time.Since(turnStart)
-		turns++
-
-		if resp.Usage != nil {
-			totalPromptTokens += resp.Usage.PromptTokens
-			totalCompletionTokens += resp.Usage.CompletionTokens
-		}
-
-		if len(resp.Choices) == 0 {
-			fatal("LLM returned no choices")
-		}
-
-		choice := resp.Choices[0]
-		debugf("llm turn=%d response: finish_reason=%s tool_calls=%d content=%q",
-			turn+1, choice.FinishReason, len(choice.Message.ToolCalls), summarizeDebugText(choice.Message.Content, 0))
-		debugf("llm turn=%d completed in %s", turn+1, time.Since(turnStart).Round(time.Millisecond))
-
-		// No tool calls — LLM is done, print final response
-		if len(choice.Message.ToolCalls) == 0 {
-			if choice.Message.Content != "" {
-				fmt.Println(choice.Message.Content)
-			}
-			if len(session.pendingFixes) > 0 {
-				runPendingFixApprovals(ctx, cfg, client, session)
-			}
-			printReport()
-			return
-		}
-
-		// Append assistant message with tool calls to conversation
-		messages = append(messages, llmMessage{
-			Role:      "assistant",
-			ToolCalls: choice.Message.ToolCalls,
-		})
-
-		// Execute each tool call and append results
-		for _, tc := range choice.Message.ToolCalls {
-			fmt.Fprintf(os.Stderr, "%s\n", formatToolCallForDisplay(session, tc.Function.Name, tc.Function.Arguments))
-			debugf("llm tool call: id=%s name=%s args=%s", tc.ID, tc.Function.Name, summarizeDebugArgs(tc.Function.Arguments))
-
-			toolStart := time.Now()
-			result := executeToolCallSafe(ctx, cfg, client, session, tc.Function.Name, tc.Function.Arguments)
-			toolDuration += time.Since(toolStart)
-			totalToolCalls++
-
-			llmResult := prepareToolResultForLLM(tc.Function.Name, result)
-			debugf("llm tool result: id=%s name=%s raw_bytes=%d llm_bytes=%d result=%q",
-				tc.ID, tc.Function.Name, len(result), len(llmResult), summarizeDebugText(llmResult, 0))
-
-			messages = append(messages, llmMessage{
-				Role:       "tool",
-				Content:    llmResult,
-				ToolCallID: tc.ID,
-			})
-		}
-		debugf("llm turn=%d tools complete; waiting for next model step", turn+1)
+		},
+		Stderrf: func(format string, args ...any) {
+			fmt.Fprintf(os.Stderr, format, args...)
+		},
+	})
+	if err != nil {
+		fatal("%v", err)
 	}
-
-	fmt.Fprintln(os.Stderr, "Warning: agent reached maximum iterations")
-	printReport()
 }

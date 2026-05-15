@@ -41,6 +41,13 @@ go install github.com/skrashevich/encx-cli/cmd/encli@latest
 ```sh
 docker run --rm ghcr.io/skrashevich/encx-cli -v
 docker run --rm ghcr.io/skrashevich/encx-cli games -domain tech.en.cx
+
+# LLM-режим: передайте ключ и модель через -e
+docker run --rm \
+  -e ENCX_LOGIN=user -e ENCX_PASSWORD=secret -e ENCX_GAME_ID=12345 \
+  -e LLM_API_KEY=sk-or-v1-... \
+  -e LLM_MODEL=anthropic/claude-sonnet-4 \
+  ghcr.io/skrashevich/encx-cli -game-id 12345 --llm "покажи уровни"
 ```
 
 
@@ -182,22 +189,22 @@ encli hint -game-id 12345 42
 # Статистика игры
 encli game-stats -game-id 12345
 
+# Профиль
+encli profile
+
 # Версия
 encli -v
 
-# LLM-режим через OpenRouter
-LLM_API_KEY=... encli -game-id 12345 --llm "создай 3 уровня с бонусами и подсказками"
-LLM_API_KEY=... encli -game-id 12345 --llm "пройдись по уровням, проверь ответы и предложи исправления"
+# LLM-агент (кратко; подробнее — раздел «LLM-агент и OpenRouter» ниже)
+export LLM_API_KEY=sk-or-v1-...          # ключ с https://openrouter.ai/keys
+export LLM_MODEL=anthropic/claude-sonnet-4  # любая модель из каталога OpenRouter
 
-# LLM-режим через локальный OpenAI-совместимый прокси (API-ключ не нужен)
-LLM_BASE_URL=http://127.0.0.1:8317/v1 LLM_MODEL=opus-4.7 encli -game-id 12345 --llm "покажи уровни"
+encli -game-id 12345 --llm "создай 3 уровня с бонусами и подсказками"
+encli -game-id 12345 --llm "пройдись по уровням, проверь ответы и предложи исправления"
+encli -readonly -game-id 12345 --llm "покажи содержимое всех уровней"  # без записи в игру
 
-# Отладка CLI и LLM-потока
-LLM_API_KEY=... encli -debug -game-id 12345 --llm "покажи статус игры"
-
-# Для review-запросов encli не применяет admin-правки сразу:
-# сначала модель формирует предложения по исправлению,
-# затем CLI спрашивает подтверждение по одному и применяет только одобренные.
+# Web UI с тем же ключом и моделью
+encli -web
 
 # Выход
 encli logout
@@ -307,9 +314,136 @@ encli admin-wipe-game -game-id 67890
 # Копирование игры целиком (из 12345 в 67890)
 # Рекомендуется сначала admin-wipe-game на целевой
 encli admin-copy-game -game-id 12345 67890
+
+# Перестановка и клонирование уровней
+encli admin-swap-levels -game-id 12345 2 5
+encli admin-insert-level -game-id 12345 3 0
+encli admin-clone-levels -game-id 12345 2 1
+
+# Обновление бонуса и подсказки
+encli admin-update-bonus -game-id 12345 1 <bonus-id> name="Новое имя" answers="код1,код2"
+encli admin-update-hint -game-id 12345 1 <hint-id> text="Новый текст" delay=0:45:00
+
+# Удаление задания
+encli admin-delete-task -game-id 12345 1 <task-id>
+
+# Жизненный цикл игры
+encli admin-deliver -game-id 12345
+encli admin-not-deliver -game-id 12345
+encli admin-award-points -game-id 12345
+encli admin-end-ratings -game-id 12345
+encli admin-calc-ik -game-id 12345
+encli admin-action-monitor -game-id 12345
 ```
 
-### Команды CLI
+## LLM-агент и OpenRouter
+
+`encli` встраивает агента с tool-calling: он читает состояние игры, вызывает admin-команды, ищет факты в Википедии и читает локальные файлы со сценарием. Агент доступен в CLI (`--llm`), в локальном Web UI (`-web`) и в Docker (через `-e`).
+
+### API-ключ и модель
+
+По умолчанию используется [OpenRouter](https://openrouter.ai/) (`https://openrouter.ai/api/v1`) и бесплатная модель `openai/gpt-oss-120b:free`. Чтобы использовать **свой ключ** и **другую модель**, задайте переменные окружения (или передайте их в `docker run -e ...`):
+
+| Переменная | Алиас | Назначение |
+|---|---|---|
+| `LLM_API_KEY` | `OPENROUTER_API_KEY` | API-ключ OpenRouter ([получить](https://openrouter.ai/keys)) |
+| `LLM_MODEL` | `OPENROUTER_MODEL` | Идентификатор модели в каталоге OpenRouter, например `anthropic/claude-sonnet-4` или `google/gemini-2.5-pro-preview` |
+| `LLM_BASE_URL` | `OPENROUTER_BASE_URL` | Base URL OpenAI-совместимого API (если не OpenRouter) |
+
+Приоритет: сначала `LLM_*`, затем `OPENROUTER_*`. Для localhost (`127.0.0.1` / `localhost` в URL) ключ не обязателен — удобно для локального прокси.
+
+**Примеры:**
+
+```sh
+# Разовый запуск с другой моделью
+LLM_API_KEY=sk-or-v1-XXXX LLM_MODEL=anthropic/claude-sonnet-4 \
+  encli -game-id 12345 --llm "создай уровень с бонусом"
+
+# Постоянная настройка в shell
+export LLM_API_KEY=sk-or-v1-XXXX
+export LLM_MODEL=google/gemini-2.5-flash-preview
+encli -game-id 12345 --llm "проверь ответы на уровне 3"
+
+# Старые имена переменных (обратная совместимость)
+export OPENROUTER_API_KEY=sk-or-v1-XXXX
+export OPENROUTER_MODEL=openai/gpt-4o
+encli -game-id 12345 --llm "покажи статус"
+
+# Локальный OpenAI-совместимый сервер (Ollama, LiteLLM, Cursor proxy и т.п.)
+export LLM_BASE_URL=http://127.0.0.1:8317/v1
+export LLM_MODEL=my-local-model
+encli -game-id 12345 --llm "покажи уровни"
+```
+
+Список моделей и цены: [openrouter.ai/models](https://openrouter.ai/models). В конце сессии агент печатает **отчёт**: модель, число запросов к LLM, токены и ориентировочная стоимость (для OpenRouter — по прайсу из `/models`).
+
+### Режим `--llm`
+
+```sh
+encli -game-id 12345 --llm "скопируй игру 82033 в 82034"
+encli -debug -game-id 12345 --llm "покажи статус игры"   # подробный лог в stderr
+encli -readonly -game-id 12345 --llm "аудит всех уровней" # без изменений в игре
+```
+
+Для review-запросов (`проверь ответы`, `найди ошибки`) агент **не применяет** правки сразу: сначала предлагает исправления, затем CLI (или Web UI) спрашивает подтверждение по каждому пункту.
+
+Поведение агента:
+
+- Вызовы инструментов выводятся в читаемом виде (например, `[admin_level_content] Читаю содержимое уровня 3`).
+- Большие ответы tool-call'ов сжимаются перед отправкой обратно в модель.
+- При 429 и 502–504 — до 3 повторов с нарастающей задержкой.
+- После создания или изменения уровней агент проверяет результат (коды, тайминги, подсказки, задания).
+
+### Web UI (`-web`)
+
+Локальный чат с тем же агентом, историей диалогов и переключателем режима безопасности (только чтение / с подтверждением / полный доступ):
+
+```sh
+export LLM_API_KEY=sk-or-v1-...
+export LLM_MODEL=anthropic/claude-sonnet-4
+encli -web
+# по умолчанию http://127.0.0.1:8787 — откроется в браузере
+
+encli -web -web-addr 0.0.0.0:8787   # слушать на всех интерфейсах
+# или: ENCLI_WEB_ADDR=0.0.0.0:8787 encli -web
+```
+
+В шапке UI отображается текущая модель (из `LLM_MODEL` / `OPENROUTER_MODEL`). Сессии Encounter логинятся через UI; чаты сохраняются в `~/.config/encli/web/chats/`.
+
+#### Скриншоты
+
+Общий вид: боковая панель с историей чатов, выбор домена и игры, авторизация, поле ввода и режим агента (только чтение / с согласованием / полный доступ). В левом верхнем углу — текущая LLM-модель.
+
+![Общий вид Web UI encli](docs/screenshots/web-ui-overview.png)
+
+Чат с агентом: запрос на естественном языке и пошаговые вызовы инструментов (admin API, чтение уровней и т.д.).
+
+![Чат с агентом и логом инструментов](docs/screenshots/web-ui-chat.png)
+
+Тёмная тема (переключатель ◐ в верхней панели).
+
+![Web UI encli в тёмной теме](docs/screenshots/web-ui-dark.png)
+
+### Локальные файлы и Википедия
+
+Агент может читать сценарии с диска и сверять факты:
+
+| Инструмент | Назначение |
+|---|---|
+| `read_local_file` | Прочитать текстовый файл |
+| `list_local_dir` | Список файлов в каталоге |
+| `search_local_files` | Поиск по содержимому / glob |
+| `wikipedia_search` | Поиск статей |
+| `wikipedia_article` | Краткое содержание статьи |
+
+Корень для локальных путей — `LLM_FILES_ROOT` (по умолчанию текущая рабочая директория); файлы вне этого каталога недоступны.
+
+```sh
+export LLM_FILES_ROOT=~/quests/my-scenario
+encli -game-id 12345 --llm "прочитай levels.md и создай уровни по сценарию"
+```
+
+## Команды CLI
 
 | Команда | Что делает |
 |---|---|
@@ -331,7 +465,9 @@ encli admin-copy-game -game-id 12345 67890
 | `hint` | Запрашивает штрафную подсказку |
 | `game-stats` | Показывает статистику игры (уровни, команды, результаты) |
 | `profile` | Показывает профиль текущего пользователя (ранг, очки, домен) |
-| `--llm <prompt>` | Выполняет естественно-языковую команду через OpenRouter |
+| `--llm <prompt>` | Естественно-языковая команда через LLM-агента (OpenRouter или совместимый API) |
+| `-web` | Локальный Web UI для агента (чат, история, режимы безопасности) |
+| `-readonly` | Запретить агенту инструменты, изменяющие игру (для `--llm` и `-web`) |
 | `-v` | Показывает версию |
 
 **Admin-команды (требуют прав редактора игры):**
@@ -373,6 +509,14 @@ encli admin-copy-game -game-id 12345 67890
 | `admin-calc-ik` | Считает игровой коэффициент |
 | `admin-wipe-game` | Полностью обнуляет игру (удаляет всё содержимое) |
 | `admin-copy-game` | Копирует всю игру (уровни, настройки, бонусы, секторы, подсказки) в другую |
+| `admin-swap-levels` | Меняет местами два уровня по номеру |
+| `admin-insert-level` | Перемещает уровень на новую позицию |
+| `admin-clone-levels` | Клонирует N уровней с настроек существующего |
+| `admin-delete-task` | Удаляет задание по ID |
+| `admin-update-bonus` | Обновляет бонус по ID (`key=value`) |
+| `admin-update-hint` | Обновляет подсказку по ID (`key=value`) |
+| `admin-action-monitor` | Показывает монитор действий в игре |
+| `admin-not-deliver` | Помечает игру как несостоявшуюся |
 
 ### Флаги и переменные окружения
 
@@ -388,11 +532,15 @@ encli admin-copy-game -game-id 12345 67890
 | `-http` | — | Использовать HTTP вместо HTTPS |
 | `-json` | — | Выводить результат в формате JSON |
 | `-debug` | `ENCX_DEBUG` | Включить отладочный вывод в `stderr` |
+| `-web-addr` | `ENCLI_WEB_ADDR` | Адрес Web UI (по умолчанию: `127.0.0.1:8787`) |
+| `-readonly` | — | Блокировать у агента инструменты записи (см. также режим в Web UI) |
 | — | `LLM_BASE_URL` | Base URL OpenAI-совместимого API (по умолчанию: `https://openrouter.ai/api/v1`) |
-| — | `LLM_API_KEY` | API-ключ для `--llm` (не нужен для localhost) |
-| — | `LLM_MODEL` | Модель для `--llm` (по умолчанию: `openai/gpt-oss-120b:free`) |
-| — | `OPENROUTER_API_KEY` | Алиас для `LLM_API_KEY` (обратная совместимость) |
-| — | `OPENROUTER_MODEL` | Алиас для `LLM_MODEL` (обратная совместимость) |
+| — | `OPENROUTER_BASE_URL` | Алиас для `LLM_BASE_URL` |
+| — | `LLM_API_KEY` | API-ключ для `--llm` и `-web` (не нужен для localhost) |
+| — | `LLM_MODEL` | Модель для агента (по умолчанию: `openai/gpt-oss-120b:free`) |
+| — | `LLM_FILES_ROOT` | Корень каталога для `read_local_file` / `search_local_files` (по умолчанию: cwd) |
+| — | `OPENROUTER_API_KEY` | Алиас для `LLM_API_KEY` |
+| — | `OPENROUTER_MODEL` | Алиас для `LLM_MODEL` |
 
 Пример:
 
@@ -403,19 +551,19 @@ export ENCX_PASSWORD=my_password
 export ENCX_GAME_ID=12345
 export ENCX_DEBUG=1
 
+# LLM (OpenRouter)
+export LLM_API_KEY=sk-or-v1-...
+export LLM_MODEL=anthropic/claude-sonnet-4
+
 encli login -insecure
 encli status
 encli -debug status
+encli -game-id 12345 --llm "покажи уровни"
 ```
 
 В `-debug` режиме `encli` пишет в `stderr` полный разбор аргументов, шаги LLM-агента, запуск и завершение tool-call'ов, а также HTTP-запросы `encx` с таймингами. Вывод не обрезается — данные показываются целиком для полноценной диагностики.
 
-В `--llm` режиме:
-- Вызовы инструментов выводятся в читаемом виде (например, `[admin_level_content] Читаю содержимое уровня 3` вместо сырого JSON).
-- Большие результаты tool-call'ов автоматически ужимаются перед отправкой обратно в модель.
-- При таймауте или временных ошибках API (429, 502–504) выполняется до 3 повторных попыток с нарастающей задержкой.
-- После создания или изменения уровней агент автоматически проверяет результат: коды, тайминги, подсказки, задания.
-- В review-режиме (`--llm "проверь ответы"`) агент предлагает исправления через интерактивное согласование, а не применяет их сразу.
+Подробнее про агента, смену модели и Web UI — в разделе [LLM-агент и OpenRouter](#llm-агент-и-openrouter).
 
 ### Сборка из исходников
 

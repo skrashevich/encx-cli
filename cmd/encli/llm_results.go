@@ -69,6 +69,7 @@ func summarizeToolResult(name, result string) (string, bool) {
 		return marshalToolSummary(map[string]any{
 			"count":  len(levels),
 			"levels": limitAdminLevels(levels, maxToolItemsForLLM),
+			"note":   "Names and IDs only — not task/scenario text. Use admin_level_content on each level before summarizing content.",
 		}), true
 	case "levels":
 		var levels []encx.LevelSummary

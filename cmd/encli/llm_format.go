@@ -183,3 +183,189 @@ func formatToolCallForDisplay(session *llmSession, name, argsJSON string) string
 		return format(fmt.Sprintf("[%s] %s", name, argsJSON))
 	}
 }
+
+// formatToolApprovalAction is a short headline for approval UI (no timestamp).
+func formatToolApprovalAction(session *llmSession, name, argsJSON string) string {
+	line := formatToolCallForDisplay(session, name, argsJSON)
+	if idx := strings.Index(line, " — "); idx >= 0 {
+		return strings.TrimSpace(line[idx+3:])
+	}
+	if idx := strings.Index(line, " - "); idx >= 0 {
+		return strings.TrimSpace(line[idx+3:])
+	}
+	return strings.TrimSpace(line)
+}
+
+// formatToolApprovalDetails returns human-readable bullets of what a tool call will do.
+func formatToolApprovalDetails(session *llmSession, name, argsJSON string) []string {
+	var args map[string]any
+	_ = json.Unmarshal([]byte(argsJSON), &args)
+	ru := session != nil && session.preferRussian
+	var lines []string
+	add := func(en, ruText string) {
+		if ru {
+			lines = append(lines, ruText)
+		} else {
+			lines = append(lines, en)
+		}
+	}
+
+	gid := getAnyInt(args["game_id"])
+	if gid == 0 {
+		gid = getAnyInt(args["source_game_id"])
+	}
+	if gid > 0 {
+		add(fmt.Sprintf("Game #%d", gid), fmt.Sprintf("Игра #%d", gid))
+	}
+	lvl := getAnyInt(args["level_number"])
+	if lvl == 0 {
+		lvl = getAnyInt(args["level_id"])
+	}
+	if lvl > 0 {
+		add(fmt.Sprintf("Level %d", lvl), fmt.Sprintf("Уровень %d", lvl))
+	}
+
+	switch name {
+	case "admin_create_levels":
+		cnt := getAnyInt(args["count"])
+		if cnt <= 0 {
+			cnt = 1
+		}
+		add(fmt.Sprintf("Create %d new level(s)", cnt), fmt.Sprintf("Создать новых уровней: %d", cnt))
+	case "admin_delete_level":
+		add("Delete this level permanently", "Удалить уровень без восстановления")
+	case "admin_rename_level":
+		if n := getAnyString(args["name"]); n != "" {
+			add("New name: "+n, "Новое название: "+n)
+		}
+	case "admin_create_task":
+		if txt := truncateDisplay(stripHTML(getAnyString(args["text"])), 220); txt != "" {
+			add("Task text: "+txt, "Текст задания: "+txt)
+		}
+	case "admin_create_sector", "admin_create_bonus":
+		if n := getAnyString(args["name"]); n != "" {
+			add("Name: "+n, "Название: "+n)
+		}
+		if ans := getAnyStringSlice(args["answers"]); len(ans) > 0 {
+			add("Answers: "+strings.Join(ans, ", "), "Ответы: "+strings.Join(ans, ", "))
+		}
+	case "admin_update_sector":
+		if n := getAnyString(args["name"]); n != "" {
+			add("Update name: "+n, "Новое имя: "+n)
+		}
+		if ans := getAnyStringSlice(args["answers"]); len(ans) > 0 {
+			add("Update answers: "+strings.Join(ans, ", "), "Новые ответы: "+strings.Join(ans, ", "))
+		}
+	case "admin_delete_sector", "admin_delete_bonus", "admin_delete_hint":
+		idKey := "sector_id"
+		label := "sector"
+		if strings.Contains(name, "bonus") {
+			idKey, label = "bonus_id", "bonus"
+		}
+		if strings.Contains(name, "hint") {
+			idKey, label = "hint_id", "hint"
+		}
+		if id := getAnyInt(args[idKey]); id > 0 {
+			add(fmt.Sprintf("Delete %s #%d", label, id), fmt.Sprintf("Удалить %s #%d", label, id))
+		}
+	case "admin_create_hint":
+		if d := getAnyString(args["delay"]); d != "" {
+			add("Opens after: "+d, "Откроется через: "+d)
+		}
+		if txt := truncateDisplay(stripHTML(getAnyString(args["text"])), 180); txt != "" {
+			add("Hint: "+txt, "Подсказка: "+txt)
+		}
+	case "admin_set_autopass":
+		if t := getAnyString(args["time"]); t != "" {
+			add("Autopass: "+t, "Автопереход: "+t)
+		}
+	case "admin_set_block":
+		att := getAnyInt(args["attempts"])
+		per := getAnyString(args["period"])
+		add(fmt.Sprintf("Block: %d attempts / %s", att, per),
+			fmt.Sprintf("Блокировка: %d попыток / %s", att, per))
+	case "admin_set_comment":
+		if n := getAnyString(args["name"]); n != "" {
+			add("Level name: "+n, "Название уровня: "+n)
+		}
+		if c := truncateDisplay(getAnyString(args["comment"]), 120); c != "" {
+			add("Comment: "+c, "Комментарий: "+c)
+		}
+	case "admin_wipe_game":
+		add("Full game reset (irreversible)", "Полная очистка игры (необратимо)")
+	case "admin_copy_game":
+		if dst := getAnyInt(args["target_game_id"]); dst > 0 {
+			add(fmt.Sprintf("Copy all content to game #%d", dst), fmt.Sprintf("Скопировать всё в игру #%d", dst))
+		}
+	case "admin_update_game":
+		for _, pair := range []struct{ key, labelEn, labelRu string }{
+			{"title", "Title", "Название"},
+			{"authors", "Authors", "Авторы"},
+			{"description", "Description", "Описание"},
+			{"prize", "Prize", "Приз"},
+			{"finish", "Finish date", "Дата финиша"},
+		} {
+			if v := truncateDisplay(stripHTML(getAnyString(args[pair.key])), 100); v != "" {
+				add(pair.labelEn+": "+v, pair.labelRu+": "+v)
+			}
+		}
+	case "admin_not_deliver":
+		add("Mark game as not delivered", "Отметить игру как несостоявшуюся")
+	case "admin_add_correction":
+		add(fmt.Sprintf("Team %s: %s %s", getAnyString(args["team"]), getAnyString(args["type"]), getAnyString(args["time"])),
+			fmt.Sprintf("Команда %s: %s %s", getAnyString(args["team"]), getAnyString(args["type"]), getAnyString(args["time"])))
+	case "admin_delete_correction":
+		if id := getAnyString(args["correction_id"]); id != "" {
+			add("Correction ID: "+id, "Коррекция ID: "+id)
+		}
+	case "send_code", "send_bonus":
+		if c := getAnyString(args["code"]); c != "" {
+			add("Code: "+c, "Код: "+c)
+		}
+	case "enter":
+		add("Submit application to join the game", "Подать заявку на участие в игре")
+	case "login":
+		if l := getAnyString(args["login"]); l != "" {
+			add("Login as: "+l, "Войти как: "+l)
+		}
+	case "logout":
+		add("Clear saved session", "Очистить сохранённую сессию")
+	case "hint":
+		if id := getAnyInt(args["hint_id"]); id > 0 {
+			add(fmt.Sprintf("Request penalty hint #%d", id), fmt.Sprintf("Запросить штрафную подсказку #%d", id))
+		}
+	}
+
+	if len(lines) == 0 {
+		if argsJSON != "" && argsJSON != "{}" {
+			add("Arguments: "+truncateDisplay(argsJSON, 200), "Аргументы: "+truncateDisplay(argsJSON, 200))
+		}
+	}
+	return lines
+}
+
+func getAnyStringSlice(v any) []string {
+	arr, ok := v.([]any)
+	if !ok {
+		return nil
+	}
+	out := make([]string, 0, len(arr))
+	for _, item := range arr {
+		if s, ok := item.(string); ok && s != "" {
+			out = append(out, decodeBareUnicodeEscapes(s))
+		}
+	}
+	return out
+}
+
+func truncateDisplay(s string, max int) string {
+	s = strings.TrimSpace(s)
+	if s == "" || max <= 0 {
+		return s
+	}
+	runes := []rune(s)
+	if len(runes) <= max {
+		return s
+	}
+	return string(runes[:max]) + "…"
+}

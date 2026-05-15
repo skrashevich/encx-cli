@@ -115,6 +115,9 @@ func executeLLMToolCall(ctx context.Context, cfg *config, client *encx.Client, s
 		cfg.gameId = gid
 		debugf("tool execution context: set cfg.gameId=%d from tool args", gid)
 	}
+	if securityBlocksMutation(session, name) {
+		fatal("Tool %q is blocked in read-only mode", name)
+	}
 	if session != nil && session.reviewApprovalMode && !session.applyingApprovedFix && isAdminMutationTool(name) {
 		fatal("Direct admin mutations are disabled during review. Use propose_admin_fix instead.")
 	}
