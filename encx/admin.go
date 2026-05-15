@@ -9,6 +9,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"unicode"
 )
 
 // Regex patterns for parsing admin HTML responses.
@@ -53,6 +54,25 @@ func (c *Client) doPost(ctx context.Context, rawURL string, form url.Values) (st
 	return string(body), nil
 }
 
+// IsPlausibleEncounterLogin reports whether s looks like an Encounter username.
+func IsPlausibleEncounterLogin(s string) bool {
+	s = strings.TrimSpace(s)
+	if len(s) < 2 || len(s) > 48 {
+		return false
+	}
+	switch s {
+	case "-", "—", "–", ".", "…", "...", "&nbsp;":
+		return false
+	}
+	for _, r := range s {
+		if unicode.IsLetter(r) || unicode.IsDigit(r) || r == '_' || r == '.' {
+			continue
+		}
+		return false
+	}
+	return true
+}
+
 // Profile represents user profile data parsed from the profile page.
 type Profile struct {
 	ID       int    `json:"id"`
@@ -84,14 +104,22 @@ func (c *Client) GetProfile(ctx context.Context) (*Profile, error) {
 
 	// Login from header link: <a ... href="/UserDetails.aspx">login</a>
 	loginRe := regexp.MustCompile(`(?i)<a[^>]*href="/UserDetails\.aspx"[^>]*>([^<]+)</a>`)
-	if m := loginRe.FindStringSubmatch(body); m != nil {
-		p.Login = strings.TrimSpace(m[1])
+	nameMatches := loginRe.FindAllStringSubmatch(body, 8)
+	for _, m := range nameMatches {
+		candidate := strings.TrimSpace(m[1])
+		if IsPlausibleEncounterLogin(candidate) {
+			p.Login = candidate
+			break
+		}
 	}
 
-	// Full name (second UserDetails link usually has full name)
-	nameMatches := loginRe.FindAllStringSubmatch(body, 3)
-	if len(nameMatches) >= 2 {
-		p.Name = strings.TrimSpace(nameMatches[1][1])
+	// Full name (usually the first non-login UserDetails link with spaces).
+	for _, m := range nameMatches {
+		candidate := strings.TrimSpace(m[1])
+		if candidate != p.Login && strings.Contains(candidate, " ") {
+			p.Name = candidate
+			break
+		}
 	}
 
 	// Rank - appears as a span near the points, pattern: "points / <span>Rank</span>"

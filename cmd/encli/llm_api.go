@@ -12,7 +12,7 @@ import (
 	"time"
 )
 
-func callLLM(ctx context.Context, apiURL, apiKey, model string, messages []llmMessage, tools []llmTool) (*llmResponse, error) {
+func callLLM(ctx context.Context, apiURL, apiKey, model string, messages []llmMessage, tools []llmTool, onWait func(time.Duration)) (*llmResponse, error) {
 	ctx, cancel := context.WithTimeout(ctx, 600*time.Second)
 	defer cancel()
 
@@ -47,7 +47,12 @@ func callLLM(ctx context.Context, apiURL, apiKey, model string, messages []llmMe
 		for {
 			select {
 			case <-ticker.C:
-				fmt.Fprintf(os.Stderr, "[llm] ожидание ответа... %s\n", time.Since(start).Round(time.Second))
+				elapsed := time.Since(start).Round(time.Second)
+				if onWait != nil {
+					onWait(elapsed)
+				} else {
+					fmt.Fprintf(os.Stderr, "[llm] ожидание ответа... %s\n", elapsed)
+				}
 			case <-waitDone:
 				return
 			}

@@ -1,0 +1,111 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>encli — чат агента</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Geologica:wght@300;400;500;600;700&family=PT+Mono&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <div class="grain" aria-hidden="true"></div>
+  <div class="app">
+    <aside class="sidebar">
+      <header class="sidebar-brand">
+        <span class="brand-mark" aria-hidden="true">◇</span>
+        <div class="brand-text">
+          <span class="brand-name">encli</span>
+          <span class="brand-tag">агент en.cx</span>
+          <span class="brand-model" id="brand-model" title="Модель LLM">—</span>
+        </div>
+      </header>
+      <button type="button" class="btn btn-primary btn-block" id="btn-new-chat">
+        <span class="btn-label">Новый чат</span>
+      </button>
+      <label class="search-wrap">
+        <span class="visually-hidden">Поиск чатов</span>
+        <input type="search" class="search-input" id="chat-search" placeholder="Поиск…" aria-label="Поиск чатов" />
+      </label>
+      <ul class="chat-list" id="chat-list" aria-label="Чаты"></ul>
+    </aside>
+
+    <div class="main">
+      <header class="top-bar">
+        <section class="chat-context" id="chat-context" aria-label="Контекст чата">
+          <div class="context-group">
+            <div class="field-inline">
+              <label for="field-domain">Домен</label>
+              <select id="field-domain" name="domain" aria-label="Домен"></select>
+            </div>
+            <div class="field-inline field-game">
+              <label for="field-game-id">Игра</label>
+              <select id="field-game-id" name="game-id" aria-label="Игра"></select>
+            </div>
+          </div>
+          <div class="context-actions">
+            <button type="button" class="btn btn-secondary" id="btn-patch-chat" disabled>Сохранить</button>
+            <button type="button" class="btn btn-ghost btn-icon" id="btn-export" disabled title="Экспорт чата">↗</button>
+            <button type="button" class="btn btn-ghost btn-icon" id="btn-cancel" disabled title="Отменить ответ агента">✕</button>
+            <button type="button" class="btn btn-ghost btn-icon" id="btn-theme" title="Светлая/тёмная тема">◐</button>
+            <span class="running-pill" id="running-pill" hidden>
+              <span class="running-dot" aria-hidden="true"></span>
+              <span id="running-pill-label">Агент</span>
+            </span>
+          </div>
+        </section>
+
+        <aside class="auth-panel" id="auth-panel" aria-label="Авторизация">
+          <form class="login-form" id="login-form" autocomplete="on">
+            <input type="text" name="domain" placeholder="домен" aria-label="Домен" required />
+            <input type="text" name="login" placeholder="логин" autocomplete="username" aria-label="Логин" required />
+            <input type="password" name="password" placeholder="пароль" autocomplete="current-password" aria-label="Пароль" required />
+            <button type="submit" class="btn btn-accent btn-auth">Войти</button>
+          </form>
+          <button type="button" class="btn btn-ghost btn-auth" id="btn-logout" hidden>Выйти</button>
+          <ul class="auth-sessions" id="auth-status" aria-live="polite"></ul>
+        </aside>
+      </header>
+
+      <div class="messages-wrap">
+        <div class="agent-status-bar" id="agent-status-bar" hidden role="status" aria-live="polite">
+          <span class="agent-status-dot" aria-hidden="true"></span>
+          <span class="agent-status-text" id="agent-status-text"></span>
+        </div>
+        <div class="messages" id="messages" aria-live="polite"></div>
+        <div class="tool-chips" id="tool-chips" aria-label="Инструменты"></div>
+        <div id="approval-bar" class="approval-bar" hidden role="region" aria-label="Согласование действия">
+          <div class="approval-body" id="approval-body"></div>
+          <div class="approval-actions">
+            <button type="button" class="btn btn-primary btn-sm" id="btn-approval-yes">Применить</button>
+            <button type="button" class="btn btn-secondary btn-sm" id="btn-approval-no">Пропустить</button>
+            <button type="button" class="btn btn-ghost btn-sm" id="btn-approval-quit">Стоп</button>
+          </div>
+        </div>
+      </div>
+
+      <footer class="composer" aria-label="Ввод сообщения">
+        <div class="composer-mode field-inline field-security" id="composer-mode">
+          <label for="field-security-mode">Режим агента</label>
+          <select id="field-security-mode" name="security-mode" aria-label="Режим безопасности агента" disabled>
+            <option value="readonly">Только чтение</option>
+            <option value="approve" selected>С согласованием</option>
+            <option value="full">Полный доступ</option>
+          </select>
+        </div>
+        <label class="composer-field">
+          <span class="visually-hidden">Сообщение</span>
+          <textarea id="message-input" rows="2" placeholder="Напишите задачу агенту…" aria-label="Сообщение" disabled></textarea>
+        </label>
+        <button type="button" class="btn btn-primary btn-send" id="btn-send" disabled>
+          <span>Отправить</span>
+        </button>
+      </footer>
+    </div>
+  </div>
+  <div id="tool-chip-tooltip" class="tool-chip-tooltip" hidden role="tooltip"></div>
+  <div class="toast" id="toast" role="status" aria-live="assertive"></div>
+  <script src="app.js" defer></script>
+</body>
+</html>

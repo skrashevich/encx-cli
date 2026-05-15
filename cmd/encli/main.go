@@ -29,14 +29,16 @@ var (
 
 // Config holds parsed CLI configuration.
 type config struct {
-	domain     string
-	login      string
-	password   string
-	gameId     int
-	insecure   bool
-	useHTTP    bool
-	jsonOutput bool
-	debug      bool
+	domain         string
+	login          string
+	password       string
+	gameId         int
+	insecure       bool
+	useHTTP        bool
+	jsonOutput     bool
+	debug          bool
+	agentReadonly  bool
+	agentSecurity  AgentSecurityMode // default for new web chats
 }
 
 func main() {
@@ -48,6 +50,40 @@ func main() {
 	if os.Args[1] == "-v" || os.Args[1] == "--version" || os.Args[1] == "version" {
 		fmt.Println("encli", version)
 		return
+	}
+
+	// Web UI mode: encli [flags] -web
+	for i := 1; i < len(os.Args); i++ {
+		if os.Args[i] == "-web" || os.Args[i] == "--web" {
+			flagArgs := append([]string(nil), os.Args[1:i]...)
+			flagArgs = append(flagArgs, os.Args[i+1:]...)
+			fs := flag.NewFlagSet("encli", flag.ExitOnError)
+			cfg := &config{}
+			webAddr := defaultWebAddr
+			fs.StringVar(&cfg.domain, "domain", cmp.Or(os.Getenv("ENCX_DOMAIN"), "tech.en.cx"), "Default Encounter domain for new chats")
+			fs.StringVar(&cfg.login, "login", os.Getenv("ENCX_LOGIN"), "Login username")
+			fs.StringVar(&cfg.password, "password", os.Getenv("ENCX_PASSWORD"), "Login password")
+			fs.IntVar(&cfg.gameId, "game-id", envInt("ENCX_GAME_ID", 0), "Default game ID for new chats")
+			fs.BoolVar(&cfg.insecure, "insecure", envBool("ENCX_INSECURE"), "Skip TLS verification")
+			fs.BoolVar(&cfg.useHTTP, "http", false, "Use plain HTTP")
+			fs.BoolVar(&cfg.debug, "debug", envBool("ENCX_DEBUG"), "Enable debug logging")
+			fs.BoolVar(&cfg.agentReadonly, "readonly", false, "Agent: block tools that modify or delete data")
+			fs.StringVar(&webAddr, "web-addr", cmp.Or(os.Getenv("ENCLI_WEB_ADDR"), defaultWebAddr), "Web UI listen address")
+			if cfg.agentReadonly {
+				cfg.agentSecurity = SecurityModeReadonly
+			}
+			fs.Parse(flagArgs)
+			if cfg.agentSecurity == "" && !cfg.agentReadonly {
+				cfg.agentSecurity = SecurityModeApprove
+			}
+			debugMode = cfg.debug
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			if err := cmdWeb(ctx, cfg, webAddr); err != nil && err != context.Canceled {
+				fatal("%v", err)
+			}
+			return
+		}
 	}
 
 	// Check for --llm mode: encli [flags] --llm <natural language prompt>
@@ -71,6 +107,7 @@ func main() {
 			fs.BoolVar(&cfg.useHTTP, "http", false, "Use plain HTTP")
 			fs.BoolVar(&cfg.jsonOutput, "json", false, "Output as JSON")
 			fs.BoolVar(&cfg.debug, "debug", envBool("ENCX_DEBUG"), "Enable debug logging")
+			fs.BoolVar(&cfg.agentReadonly, "readonly", false, "Block agent tools that modify or delete data")
 			fs.Parse(flagArgs)
 			debugMode = cfg.debug
 			debugf("starting llm mode: domain=%s game_id=%d insecure=%v http=%v json=%v login_set=%v password_set=%v prompt_len=%d",
@@ -418,6 +455,12 @@ Admin commands (require game editor rights):
 LLM mode:
   --llm <prompt>  Natural language command (uses OpenRouter API)
                   Example: encli --llm "скопируй игру 82033 в 82034"
+  --readonly      Block agent tools that modify or delete data (LLM and -web)
+
+Web UI:
+  -web            Start local chat UI for the built-in agent (opens browser)
+  -web-addr       Listen address (default: 127.0.0.1:8787, env: ENCLI_WEB_ADDR)
+                  Per-chat security mode: readonly / approve / full (UI switcher)
 
 Global flags:
   -domain      Encounter domain (default: tech.en.cx)
@@ -438,6 +481,7 @@ Environment variables:
   LLM_BASE_URL         OpenAI-compatible API base URL (default: https://openrouter.ai/api/v1)
   LLM_API_KEY          API key for --llm mode (not required for localhost)
   LLM_MODEL            LLM model override (default: openai/gpt-oss-120b:free)
+  ENCLI_WEB_ADDR       Web UI listen address for -web mode
   OPENROUTER_API_KEY   Alias for LLM_API_KEY (backward compat)
   OPENROUTER_MODEL     Alias for LLM_MODEL (backward compat)
 
@@ -652,6 +696,60 @@ func sessionFile(cfg *config) string {
 	return filepath.Join(sessionDir(), safe+".json")
 }
 
+func sessionMetaFile(cfg *config) string {
+	safe := strings.ReplaceAll(cfg.domain, "/", "_")
+	safe = strings.ReplaceAll(safe, ":", "_")
+	return filepath.Join(sessionDir(), safe+".meta.json")
+}
+
+type sessionMeta struct {
+	Login string `json:"login"`
+}
+
+func saveSessionMeta(cfg *config) {
+	if cfg == nil || cfg.domain == "" || cfg.login == "" {
+		return
+	}
+	path := sessionMetaFile(cfg)
+	data, err := json.Marshal(sessionMeta{Login: cfg.login})
+	if err != nil {
+		debugf("save session meta skipped: %v", err)
+		return
+	}
+	os.MkdirAll(sessionDir(), 0700)
+	if err := os.WriteFile(path, data, 0600); err != nil {
+		debugf("save session meta failed: %s: %v", path, err)
+	}
+}
+
+func loadSessionLogin(domain string) string {
+	if domain == "" {
+		return ""
+	}
+	path := sessionMetaFile(&config{domain: domain})
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return ""
+	}
+	var meta sessionMeta
+	if err := json.Unmarshal(data, &meta); err != nil {
+		return ""
+	}
+	login := strings.TrimSpace(meta.Login)
+	if !encx.IsPlausibleEncounterLogin(login) {
+		_ = os.Remove(path)
+		return ""
+	}
+	return login
+}
+
+func removeSessionMeta(cfg *config) {
+	if cfg == nil || cfg.domain == "" {
+		return
+	}
+	_ = os.Remove(sessionMetaFile(cfg))
+}
+
 func saveSession(cfg *config, client *encx.Client) {
 	data, err := client.ExportCookies()
 	if err != nil {
@@ -662,6 +760,9 @@ func saveSession(cfg *config, client *encx.Client) {
 	debugf("saving session to %s (%d bytes)", path, len(data))
 	os.MkdirAll(sessionDir(), 0700)
 	os.WriteFile(path, data, 0600)
+	if cfg.login != "" {
+		saveSessionMeta(cfg)
+	}
 }
 
 func loadSession(cfg *config, client *encx.Client) bool {
@@ -730,6 +831,7 @@ func cmdLogout(cfg *config) {
 	path := sessionFile(cfg)
 	debugf("cmd logout: removing session file %s", path)
 	os.Remove(path)
+	removeSessionMeta(cfg)
 	if cfg.jsonOutput {
 		outputJSON(map[string]any{"success": true})
 		return
@@ -1522,7 +1624,7 @@ func debugf(format string, args ...any) {
 
 func isBoolFlag(arg string) bool {
 	switch arg {
-	case "-insecure", "-http", "-json", "-debug":
+	case "-insecure", "-http", "-json", "-debug", "-web", "--web", "-readonly", "--readonly":
 		return true
 	default:
 		return false
@@ -1531,7 +1633,7 @@ func isBoolFlag(arg string) bool {
 
 func isValueFlag(arg string) bool {
 	switch arg {
-	case "-domain", "-login", "-password", "-game-id":
+	case "-domain", "-login", "-password", "-game-id", "-web-addr":
 		return true
 	default:
 		return false
