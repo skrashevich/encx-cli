@@ -1,0 +1,137 @@
+---
+title: Установка CLI
+description: Подробные инструкции по установке encli для macOS, Linux и Windows
+---
+
+## Способы установки
+
+### Готовые бинарники (рекомендуется)
+
+Подписанные бинарники для macOS, Linux и Windows доступны на странице [Releases](https://github.com/skrashevich/encx-cli/releases).
+
+<Tabs>
+  <Tab title="macOS">
+    macOS-бинарники подписаны сертификатом Developer ID и прошли нотаризацию Apple. Gatekeeper не покажет предупреждение о недоверенном разработчике.
+
+    ```sh
+    # Скачайте нужный архив со страницы Releases, например:
+    curl -L https://github.com/skrashevich/encx-cli/releases/latest/download/encli_darwin_amd64.tar.gz | tar xz
+    chmod +x encli
+    sudo mv encli /usr/local/bin/
+    ```
+
+    Для Apple Silicon (M1/M2/M3) используйте архив `darwin_arm64`.
+
+    Проверьте установку:
+    ```sh
+    encli -v
+    ```
+  </Tab>
+  <Tab title="Linux">
+    ```sh
+    # Скачайте архив для вашей архитектуры (amd64 или arm64)
+    curl -L https://github.com/skrashevich/encx-cli/releases/latest/download/encli_linux_amd64.tar.gz | tar xz
+    chmod +x encli
+    sudo mv encli /usr/local/bin/
+    ```
+
+    Проверьте установку:
+    ```sh
+    encli -v
+    ```
+  </Tab>
+  <Tab title="Windows">
+    Скачайте архив `encli_windows_amd64.zip` со страницы [Releases](https://github.com/skrashevich/encx-cli/releases), распакуйте и добавьте папку с `encli.exe` в переменную окружения `PATH`.
+
+    Проверьте установку в PowerShell:
+    ```powershell
+    encli -v
+    ```
+  </Tab>
+</Tabs>
+
+### go install
+
+Требуется Go 1.21 или новее.
+
+```sh
+go install github.com/skrashevich/encx-cli/cmd/encli@latest
+```
+
+Бинарник появится в `$GOPATH/bin/encli` (обычно `~/go/bin/encli`). Убедитесь, что этот путь добавлен в `PATH`:
+
+```sh
+export PATH="$PATH:$(go env GOPATH)/bin"
+```
+
+### Docker
+
+Образ доступен на GitHub Container Registry:
+
+```sh
+# Проверить версию
+docker run --rm ghcr.io/skrashevich/encx-cli -v
+
+# Список игр
+docker run --rm ghcr.io/skrashevich/encx-cli games -domain tech.en.cx
+
+# С авторизацией через переменные окружения
+docker run --rm \
+  -e ENCX_DOMAIN=tech.en.cx \
+  -e ENCX_LOGIN=mylogin \
+  -e ENCX_PASSWORD=mypassword \
+  ghcr.io/skrashevich/encx-cli status -game-id 12345
+```
+
+<Note>
+  При использовании Docker сессия не сохраняется между запусками контейнера. Передавайте логин и пароль через переменные окружения `ENCX_LOGIN` и `ENCX_PASSWORD`.
+</Note>
+
+Для LLM-режима передайте ключ и модель:
+
+```sh
+docker run --rm \
+  -e ENCX_LOGIN=user \
+  -e ENCX_PASSWORD=secret \
+  -e ENCX_GAME_ID=12345 \
+  -e LLM_API_KEY=sk-or-v1-... \
+  -e LLM_MODEL=anthropic/claude-sonnet-4 \
+  ghcr.io/skrashevich/encx-cli -game-id 12345 --llm "покажи уровни"
+```
+
+### Сборка из исходников
+
+```sh
+git clone https://github.com/skrashevich/encx-cli.git
+cd encx-cli
+go build -o encli ./cmd/encli/
+```
+
+## Проверка установки
+
+```sh
+encli -v
+# encli dev  (или конкретная версия)
+
+encli help
+```
+
+## Хранение сессии
+
+После успешного логина сессия сохраняется в:
+
+```
+~/.config/encli/<domain>.json
+```
+
+Например, для домена `tech.en.cx`:
+
+```
+~/.config/encli/tech.en.cx.json
+```
+
+Файл содержит cookies и имеет права `0600` (доступен только владельцу). Для удаления сессии используйте `encli logout` или удалите файл вручную.
+
+## Следующие шаги
+
+После установки перейдите к разделу [Быстрый старт](/docs/quickstart) или сразу к [справочнику команд](/docs/cli-usage).
