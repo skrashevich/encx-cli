@@ -9,35 +9,35 @@
     {
       "group": "Начало работы",
       "pages": [
-        "introduction",
-        "quickstart"
+        "docs/introduction",
+        "docs/quickstart"
       ]
     },
     {
       "group": "Справочник CLI",
       "pages": [
-        "cli-installation",
-        "cli-usage",
-        "cli-admin"
+        "docs/cli-installation",
+        "docs/cli-usage",
+        "docs/cli-admin"
       ]
     },
     {
       "group": "Библиотека",
       "pages": [
-        "library"
+        "docs/library"
       ]
     },
     {
       "group": "AI-функции",
       "pages": [
-        "llm-agent",
-        "web-ui"
+        "docs/llm-agent",
+        "docs/web-ui"
       ]
     },
     {
       "group": "Справочник",
       "pages": [
-        "configuration"
+        "docs/configuration"
       ]
     }
   ]
