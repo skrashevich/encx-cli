@@ -1,62 +1,44 @@
 {
   "name": "encx-cli",
-  "logo": {
-    "light": "/logo/light.svg",
-    "dark": "/logo/dark.svg"
-  },
-  "favicon": "/favicon.svg",
   "colors": {
     "primary": "#2563EB",
     "light": "#60A5FA",
     "dark": "#1D4ED8"
   },
-  "topbarLinks": [
-    {
-      "name": "GitHub",
-      "url": "https://github.com/skrashevich/encx-cli"
-    }
-  ],
-  "topbarCtaButton": {
-    "name": "Releases",
-    "url": "https://github.com/skrashevich/encx-cli/releases"
-  },
   "navigation": [
     {
       "group": "Начало работы",
       "pages": [
-        "docs/introduction",
-        "docs/quickstart"
+        "introduction",
+        "quickstart"
       ]
     },
     {
       "group": "Справочник CLI",
       "pages": [
-        "docs/cli-installation",
-        "docs/cli-usage",
-        "docs/cli-admin"
+        "cli-installation",
+        "cli-usage",
+        "cli-admin"
       ]
     },
     {
       "group": "Библиотека",
       "pages": [
-        "docs/library"
+        "library"
       ]
     },
     {
       "group": "AI-функции",
       "pages": [
-        "docs/llm-agent",
-        "docs/web-ui"
+        "llm-agent",
+        "web-ui"
       ]
     },
     {
       "group": "Справочник",
       "pages": [
-        "docs/configuration"
+        "configuration"
       ]
     }
-  ],
-  "footerSocials": {
-    "github": "https://github.com/skrashevich/encx-cli"
-  }
+  ]
 }
