@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"io"
 	"maps"
 	"net/http"
 	"net/url"
@@ -43,9 +42,9 @@ func (c *Client) GetGameModel(ctx context.Context, gameId int, formValues ...url
 	}
 	defer resp.Body.Close()
 
-	body, err := io.ReadAll(resp.Body)
+	body, err := c.readResponseBody(resp)
 	if err != nil {
-		return nil, fmt.Errorf("encx: read game response: %w", err)
+		return nil, err
 	}
 
 	if len(body) > 0 && body[0] == '<' {
@@ -105,9 +104,9 @@ func (c *Client) GetPenaltyHint(ctx context.Context, gameId, penaltyId int) (*Ga
 	}
 	defer resp.Body.Close()
 
-	body, err := io.ReadAll(resp.Body)
+	body, err := c.readResponseBody(resp)
 	if err != nil {
-		return nil, fmt.Errorf("encx: read hint response: %w", err)
+		return nil, err
 	}
 
 	if len(body) > 0 && body[0] == '<' {

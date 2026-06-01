@@ -4,7 +4,6 @@ import (
 	"context"
 	"crypto/tls"
 	"fmt"
-	"io"
 	"net/http"
 	"net/http/cookiejar"
 	"time"
@@ -177,9 +176,9 @@ func (c *Client) doGet(ctx context.Context, rawURL string) (string, error) {
 	}
 	defer resp.Body.Close()
 
-	body, err := io.ReadAll(resp.Body)
+	body, err := c.readResponseBody(resp)
 	if err != nil {
-		return "", fmt.Errorf("encx: read response: %w", err)
+		return "", err
 	}
 
 	return string(body), nil

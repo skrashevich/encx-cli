@@ -792,7 +792,7 @@ func requireAuth(ctx context.Context, cfg *config, client *encx.Client) {
 	debugf("require auth: logging in with explicit credentials for %s", cfg.login)
 	resp, err := client.Login(ctx, cfg.login, cfg.password)
 	if err != nil {
-		fatal("Login failed: %v", err)
+		fatalEncx("Login failed", err)
 	}
 	if resp.Error != 0 {
 		fatal("Login error %d: %s", resp.Error, encx.LoginErrorText(resp.Error))
@@ -813,7 +813,7 @@ func cmdLogin(ctx context.Context, cfg *config, client *encx.Client) {
 	debugf("cmd login: attempting login for %s", cfg.login)
 	resp, err := client.Login(ctx, cfg.login, cfg.password)
 	if err != nil {
-		fatal("Login failed: %v", err)
+		fatalEncx("Login failed", err)
 	}
 	if resp.Error != 0 {
 		fatal("Login error %d: %s", resp.Error, encx.LoginErrorText(resp.Error))
@@ -842,7 +842,7 @@ func cmdLogout(cfg *config) {
 func cmdGames(ctx context.Context, cfg *config, client *encx.Client) {
 	games, err := client.GetDomainGames(ctx)
 	if err != nil {
-		fatal("Failed to get games: %v", err)
+		fatalEncx("Failed to get games", err)
 	}
 	if cfg.jsonOutput {
 		outputJSON(games)
@@ -864,7 +864,7 @@ func cmdGames(ctx context.Context, cfg *config, client *encx.Client) {
 func cmdGameList(ctx context.Context, cfg *config, client *encx.Client) {
 	list, err := client.GetGameList(ctx)
 	if err != nil {
-		fatal("Failed to get game list: %v", err)
+		fatalEncx("Failed to get game list", err)
 	}
 	if cfg.jsonOutput {
 		outputJSON(list)
@@ -1613,6 +1613,13 @@ func fatal(format string, args ...any) {
 	}
 	fmt.Fprintln(os.Stderr, msg)
 	os.Exit(1)
+}
+
+func fatalEncx(context string, err error) {
+	if msg := encx.AntiSpamUserMessage(err); msg != "" {
+		fatal("%s: %s", context, msg)
+	}
+	fatal("%s: %v", context, err)
 }
 
 func debugf(format string, args ...any) {

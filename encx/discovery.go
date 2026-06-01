@@ -2,9 +2,7 @@ package encx
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
-	"io"
 	"net/http"
 	"net/url"
 	"regexp"
@@ -54,9 +52,9 @@ func (c *Client) fetchGames(ctx context.Context, u string, re *regexp.Regexp) ([
 	}
 	defer resp.Body.Close()
 
-	body, err := io.ReadAll(resp.Body)
+	body, err := c.readResponseBody(resp)
 	if err != nil {
-		return nil, fmt.Errorf("encx: read domain games body: %w", err)
+		return nil, err
 	}
 
 	matches := re.FindAllSubmatch(body, -1)
@@ -109,9 +107,14 @@ func (c *Client) GetGameList(ctx context.Context, page ...int) (*GameListRespons
 	}
 	defer resp.Body.Close()
 
+	body, err := c.readResponseBody(resp)
+	if err != nil {
+		return nil, err
+	}
+
 	var result GameListResponse
-	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
-		return nil, fmt.Errorf("encx: decode game list: %w", err)
+	if err := c.decodeJSON(body, &result, "game list"); err != nil {
+		return nil, err
 	}
 
 	return &result, nil
@@ -141,9 +144,9 @@ func (c *Client) GetTimeoutToGame(ctx context.Context, gameId int) (*int, error)
 	}
 	defer resp.Body.Close()
 
-	body, err := io.ReadAll(resp.Body)
+	body, err := c.readResponseBody(resp)
 	if err != nil {
-		return nil, fmt.Errorf("encx: read timeout body: %w", err)
+		return nil, err
 	}
 
 	match := startCounterRe.FindSubmatch(body)

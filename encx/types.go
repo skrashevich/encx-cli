@@ -120,8 +120,8 @@ type Sector struct {
 	SectorId   int    `json:"SectorId"`
 	Order      int    `json:"Order"`
 	Name       string `json:"Name"`
-	IsAnswered bool   `json:"IsAnswered"`
-	Answer     string `json:"Answer"`
+	IsAnswered bool       `json:"IsAnswered"`
+	Answer     FlexString `json:"Answer"`
 }
 
 // Bonus represents a bonus task within a level.
@@ -131,9 +131,9 @@ type Bonus struct {
 	Number         int    `json:"Number"`
 	Task           string `json:"Task"`
 	Help           string `json:"Help"`
-	IsAnswered     bool   `json:"IsAnswered"`
-	Answer         string `json:"Answer"`
-	Expired        bool   `json:"Expired"`
+	IsAnswered     bool       `json:"IsAnswered"`
+	Answer         FlexString `json:"Answer"`
+	Expired        bool       `json:"Expired"`
 	SecondsToStart int    `json:"SecondsToStart"`
 	SecondsLeft    int    `json:"SecondsLeft"`
 	AwardTime      int    `json:"AwardTime"`

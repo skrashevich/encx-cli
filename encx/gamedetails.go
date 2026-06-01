@@ -3,7 +3,6 @@ package encx
 import (
 	"context"
 	"fmt"
-	"io"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -46,9 +45,9 @@ func (c *Client) EnterGame(ctx context.Context, gameId int) (string, error) {
 		return "", fmt.Errorf("encx: enter game failed with HTTP %d", resp.StatusCode)
 	}
 
-	body, err := io.ReadAll(resp.Body)
+	body, err := c.readResponseBody(resp)
 	if err != nil {
-		return "", fmt.Errorf("encx: read enter game body: %w", err)
+		return "", err
 	}
 
 	return string(body), nil
