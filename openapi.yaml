@@ -314,7 +314,6 @@ paths:
         Поддерживает пагинацию через параметр `page`.
       parameters:
         - $ref: '#/components/parameters/JsonParam'
-        - $ref: '#/components/parameters/LangParam'
         - name: page
           in: query
           description: Номер страницы для пагинации (1-based)
@@ -371,6 +370,12 @@ components:
           type: string
           description: Пароль пользователя
           format: password
+        ddlNetwork:
+          type: integer
+          description: Сеть авторизации (1=Encounter, 2=QuestUa)
+        MagicNumbers:
+          type: string
+          description: CAPTCHA цифры (используется при Error=1)
 
     LoginResponse:
       type: object
@@ -394,6 +399,18 @@ components:
         Message:
           type: string
           description: Текстовое описание ошибки
+        IpUnblockUrl:
+          type: [string, "null"]
+        BruteForceUnblockUrl:
+          type: [string, "null"]
+        ConfirmEmailUrl:
+          type: [string, "null"]
+        CaptchaUrl:
+          type: [string, "null"]
+        AdminWhoCanActivate:
+          type: array
+          items:
+            type: string
 
     GameActionRequest:
       type: object
@@ -419,19 +436,44 @@ components:
       description: Полная модель текущего состояния игры
       properties:
         Event:
-          type: integer
           description: |
+            Тип поля динамический (в коде `any`): обычно integer, но может приходить
+            в других JSON-типах при ошибках/спец-состояниях.
             Код события:
             - 0: Нормальное состояние (данные актуальны)
             - 16, 18, 19, 20, 21, 22: Требуется повторный запрос
             - Другие числа: Специальные события (показ LoadingView)
             - Нечисловое: Ошибка авторизации (сессия истекла)
+          oneOf:
+            - type: integer
+            - type: string
+            - type: object
+            - type: boolean
+            - type: "null"
         GameId:
           type: integer
           description: ID игры
+        GameNumber:
+          type: integer
+        GameTitle:
+          type: string
+        GameTypeId:
+          type: integer
+        GameZoneId:
+          type: integer
         UserId:
           type: integer
           description: ID авторизованного пользователя
+        TeamId:
+          type: integer
+        Login:
+          type: string
+        TeamName:
+          type: string
+        IsCaptain:
+          type: boolean
+        GameDateTimeStart:
+          type: string
         LevelSequence:
           type: integer
           description: |
@@ -453,10 +495,18 @@ components:
       properties:
         LevelId:
           type: integer
-        Number:
+        LevelNumber:
           type: integer
-        Name:
+        LevelName:
           type: string
+        Dismissed:
+          type: boolean
+        IsPassed:
+          type: boolean
+        Task:
+          $ref: '#/components/schemas/LevelTask'
+        LevelAction:
+          $ref: '#/components/schemas/ActionResult'
 
     Level:
       type: object
@@ -480,17 +530,53 @@ components:
         TimeoutAward:
           type: integer
           description: Штраф/бонус за таймаут в секундах (отрицательное = штраф)
+        IsPassed:
+          type: boolean
+        Dismissed:
+          type: boolean
+        StartTime:
+          anyOf:
+            - $ref: '#/components/schemas/DateTime'
+            - type: "null"
+        HasAnswerBlockRule:
+          type: boolean
+        BlockDuration:
+          type: integer
+        BlockTargetId:
+          type: integer
+        AttemtsNumber:
+          type: integer
+        AttemtsPeriod:
+          type: integer
         SectorsLeftToClose:
           type: integer
           description: Количество секторов, которые осталось закрыть
         RequiredSectorsCount:
           type: integer
           description: Необходимое количество секторов для прохождения уровня
+        PassedSectorsCount:
+          type: integer
+        PassedBonusesCount:
+          type: integer
+        Tasks:
+          type: array
+          items:
+            $ref: '#/components/schemas/LevelTask'
+        Task:
+          $ref: '#/components/schemas/LevelTask'
+        Messages:
+          type: array
+          items:
+            $ref: '#/components/schemas/AdminMessage'
         Sectors:
           type: array
           description: Список секторов
           items:
             $ref: '#/components/schemas/Sector'
+        Helps:
+          type: array
+          items:
+            $ref: '#/components/schemas/Help'
         Bonuses:
           type: array
           description: Список бонусов
@@ -500,17 +586,45 @@ components:
           type: array
           description: Список штрафных подсказок
           items:
-            $ref: '#/components/schemas/PenaltyHelp'
+            $ref: '#/components/schemas/Help'
         MixedActions:
           type: array
           description: Лог введённых кодов (всех игроков команды)
           items:
             $ref: '#/components/schemas/CodeAction'
 
+    LevelTask:
+      type: object
+      properties:
+        TaskText:
+          type: string
+        TaskTextFormatted:
+          type: string
+        ReplaceNlToBr:
+          type: boolean
+
+    AdminMessage:
+      type: object
+      properties:
+        OwnerId:
+          type: integer
+        OwnerLogin:
+          type: string
+        MessageId:
+          type: integer
+        MessageText:
+          type: string
+        WrappedText:
+          type: string
+        ReplaceNl2Br:
+          type: boolean
+
     Sector:
       type: object
       properties:
         SectorId:
+          type: integer
+        Order:
           type: integer
         Name:
           type: string
@@ -519,7 +633,7 @@ components:
           type: boolean
           description: Закрыт ли сектор
         Answer:
-          type: string
+          $ref: '#/components/schemas/FlexString'
           description: Код сектора (виден только после закрытия)
 
     Bonus:
@@ -530,28 +644,61 @@ components:
         Name:
           type: string
           description: Название бонуса
+        Number:
+          type: integer
+        Task:
+          type: string
+        Help:
+          type: string
         IsAnswered:
           type: boolean
           description: Взят ли бонус
+        Answer:
+          $ref: '#/components/schemas/FlexString'
+        Expired:
+          type: boolean
+        SecondsToStart:
+          type: integer
+        SecondsLeft:
+          type: integer
+        AwardTime:
+          type: integer
+        Negative:
+          type: boolean
 
-    PenaltyHelp:
+    Help:
       type: object
       properties:
-        PenaltyHelpId:
+        HelpId:
           type: integer
-          description: ID подсказки (используется как `pid` при запросе)
         Number:
           type: integer
-          description: Порядковый номер подсказки
+        HelpText:
+          type: [string, "null"]
+        IsPenalty:
+          type: boolean
         RemainSeconds:
           type: integer
-          description: Секунды до автоматического открытия
         PenaltyComment:
-          type: string
-          description: Текст подсказки (пустой до открытия)
+          type: [string, "null"]
         Penalty:
           type: integer
-          description: Штрафные секунды за досрочное использование
+        RequestConfirm:
+          type: boolean
+        PenaltyHelpState:
+          type: integer
+        PenaltyMessage:
+          type: [string, "null"]
+
+    FlexString:
+      description: Строка, которая в JSON может приходить как string/number/bool/object/null.
+      oneOf:
+        - type: string
+        - type: number
+        - type: integer
+        - type: boolean
+        - type: object
+        - type: "null"
 
     CodeAction:
       type: object
@@ -560,6 +707,10 @@ components:
         ActionId:
           type: integer
           description: Уникальный ID действия
+        LevelId:
+          type: integer
+        LevelNumber:
+          type: integer
         UserId:
           type: integer
           description: ID пользователя, отправившего код
@@ -569,6 +720,12 @@ components:
         Answer:
           type: string
           description: Введённый код
+        AnswForm:
+          type: [string, "null"]
+        EnterDateTime:
+          anyOf:
+            - $ref: '#/components/schemas/DateTime'
+            - type: "null"
         LocDateTime:
           type: string
           description: Время ввода кода (формат "YYYY-MM-DD HH:mm:ss")
@@ -579,29 +736,54 @@ components:
         Kind:
           type: integer
           description: Тип действия
+        Award:
+          anyOf:
+            - $ref: '#/components/schemas/Duration'
+            - type: "null"
+        LocAward:
+          type: [string, "null"]
+        Penalty:
+          type: integer
+        Negative:
+          type: boolean
 
     EngineAction:
       type: object
       description: Результат последнего игрового действия
       properties:
+        LevelNumber:
+          type: integer
         LevelAction:
-          type: object
-          properties:
-            IsCorrectAnswer:
-              type: ["boolean", "null"]
-              description: |
-                - true: последний код уровня верный
-                - false: последний код уровня неверный
-                - null: код не отправлялся
+          $ref: '#/components/schemas/ActionResult'
         BonusAction:
-          type: object
-          properties:
-            IsCorrectAnswer:
-              type: ["boolean", "null"]
-              description: |
-                - true: последний бонусный код верный
-                - false: последний бонусный код неверный
-                - null: бонусный код не отправлялся
+          $ref: '#/components/schemas/ActionResult'
+        PenaltyAction:
+          $ref: '#/components/schemas/PenaltyActionResult'
+        GameId:
+          type: integer
+        LevelId:
+          type: integer
+
+    ActionResult:
+      type: object
+      properties:
+        Answer:
+          type: [string, "null"]
+        IsCorrectAnswer:
+          type: [boolean, "null"]
+          description: |
+            - true: последний отправленный код верный
+            - false: последний отправленный код неверный
+            - null: код не отправлялся
+
+    PenaltyActionResult:
+      type: object
+      properties:
+        PenaltyId:
+          type: integer
+        ActionType:
+          type: integer
+          description: 0=none, 1=request
 
     GameListResponse:
       type: object
@@ -628,15 +810,23 @@ components:
           type: integer
         SiteID:
           type: integer
+        LangID:
+          type: integer
+        CompetitionID:
+          type: integer
         OwnerID:
           type: integer
           description: ID создателя игры
         LevelNumber:
           type: integer
           description: Количество уровней
+        CreateDateTime:
+          $ref: '#/components/schemas/DateTime'
         Title:
           type: string
         Descr:
+          type: string
+        DescrWrapped:
           type: string
         GameTypeID:
           type: integer
@@ -644,6 +834,24 @@ components:
         ZoneId:
           type: integer
           description: "0=quest, 1=brainstorm, 2=photohunt и т.д."
+        LevelsSequence:
+          type: integer
+        ScenarioAvailability:
+          type: integer
+        MaxPlayers:
+          type: integer
+        MaxTeamMembers:
+          type: integer
+        ShowInCalendar:
+          type: boolean
+        FeeType:
+          type: integer
+        FeeCurrencyId:
+          type: integer
+        FeeName:
+          type: string
+        ShowFee:
+          type: integer
         StartDateTime:
           $ref: '#/components/schemas/DateTime'
         FinishDateTime:
@@ -652,21 +860,49 @@ components:
           $ref: '#/components/schemas/Money'
         Prize:
           $ref: '#/components/schemas/Money'
+        PrizeType:
+          type: integer
+        PrizeTypeSymbol:
+          type: string
+        TSRemain:
+          $ref: '#/components/schemas/Duration'
         Started:
           type: boolean
         Finished:
           type: boolean
         InProgress:
           type: boolean
+        IsSectorsSupported:
+          type: boolean
         IsOnlineStatAvailable:
+          type: boolean
+        IsComplexitySupported:
+          type: boolean
+        IsModerated:
           type: boolean
         ComplexityFactor:
           type: integer
+        ComplexityMembersFactor:
+          type: integer
         QualityRate:
           type: integer
+        QualityRateFormatted:
+          type: string
         TopicId:
           type: integer
           description: ID темы на форуме
+        AcceptRateFromDateTime:
+          $ref: '#/components/schemas/DateTime'
+        RequestLastDate:
+          $ref: '#/components/schemas/DateTime'
+        HideLevelsNames:
+          type: boolean
+        AlwaysAvailable:
+          type: boolean
+        PublicAccess:
+          type: boolean
+        DisplayMonitoring:
+          type: integer
 
     GameStatisticsResponse:
       type: object
@@ -725,9 +961,13 @@ components:
           description: Время прохождения уровня в секундах
         LevelOrder:
           type: integer
+        SpentLevelTime:
+          $ref: '#/components/schemas/Duration'
         PassType:
           type: integer
           description: Тип прохождения (0 = нормальное)
+        Corrections:
+          $ref: '#/components/schemas/Duration'
         Scores:
           type: integer
 
@@ -764,14 +1004,24 @@ components:
           type: string
         FirstName:
           type: string
+        PatronymicName:
+          type: string
         LastName:
           type: string
         Email:
           type: string
+        EmailChecked:
+          type: boolean
         GenderID:
           type: integer
           description: "1=мужской, 2=женский"
+        BirthDate:
+          $ref: '#/components/schemas/DateTime'
         TeamID:
+          type: integer
+        ParentID:
+          type: integer
+        SiteId:
           type: integer
         Points:
           type: number
@@ -779,9 +1029,15 @@ components:
           type: number
         RankID:
           type: integer
+        StatusId:
+          type: integer
+        Network:
+          type: integer
         CityId:
           type: integer
         CountryId:
+          type: integer
+        ProvinceId:
           type: integer
         IsActive:
           type: boolean
@@ -789,6 +1045,18 @@ components:
           $ref: '#/components/schemas/DateTime'
         LastVisitTime:
           $ref: '#/components/schemas/DateTime'
+        VkId:
+          type: [string, "null"]
+        FbId:
+          type: [string, "null"]
+        TgId:
+          type: [string, "null"]
+        GooId:
+          type: [string, "null"]
+        IsSuperAdmin:
+          type: boolean
+        BlockByIP:
+          type: boolean
 
     DateTime:
       type: object
@@ -811,6 +1079,36 @@ components:
           type: string
         FormatedFull:
           type: string
+        DefaultCultureFormated:
+          type: string
+        DefaultCultureShortFormated:
+          type: string
+
+    Duration:
+      type: object
+      properties:
+        Ticks:
+          type: integer
+        Days:
+          type: integer
+        Hours:
+          type: integer
+        Milliseconds:
+          type: integer
+        Minutes:
+          type: integer
+        Seconds:
+          type: integer
+        TotalDays:
+          type: number
+        TotalHours:
+          type: number
+        TotalMilliseconds:
+          type: number
+        TotalMinutes:
+          type: number
+        TotalSeconds:
+          type: number
 
   securitySchemes:
     cookieAuth:
