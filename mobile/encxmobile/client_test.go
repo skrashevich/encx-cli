@@ -3,6 +3,7 @@ package encxmobile
 import (
 	"encoding/json"
 	"testing"
+	"time"
 )
 
 func TestNewClient(t *testing.T) {
@@ -64,5 +65,24 @@ func TestNewClientWithOptions(t *testing.T) {
 	c := NewClientWithOptions("tech.en.cx", true, false, 30, "en")
 	if c.Domain() != "tech.en.cx" {
 		t.Fatalf("domain = %q", c.Domain())
+	}
+}
+
+func TestCodeSendTimeoutDefault(t *testing.T) {
+	c := NewClient("tech.en.cx", true)
+	if c.codeSendTimeout != defaultCodeSendTimeout {
+		t.Fatalf("codeSendTimeout = %v, want %v", c.codeSendTimeout, defaultCodeSendTimeout)
+	}
+}
+
+func TestSetCodeSendTimeoutSeconds(t *testing.T) {
+	c := NewClient("tech.en.cx", true)
+	c.SetCodeSendTimeoutSeconds(3)
+	if c.codeSendTimeout != 3*time.Second {
+		t.Fatalf("codeSendTimeout = %v, want 3s", c.codeSendTimeout)
+	}
+	c.SetCodeSendTimeoutSeconds(0)
+	if c.codeSendTimeout != defaultCodeSendTimeout {
+		t.Fatalf("reset codeSendTimeout = %v, want default", c.codeSendTimeout)
 	}
 }
