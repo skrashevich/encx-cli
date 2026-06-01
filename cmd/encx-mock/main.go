@@ -596,12 +596,25 @@ func buildGameInfoForState(st *sessionState, now time.Time) encx.GameInfo {
 }
 
 func (s *server) requireSessionJSON(w http.ResponseWriter, r *http.Request) (*sessionState, bool) {
-	st := s.sessionOrGuest(w, r)
+	st, err := s.sessionFromRequest(r)
+	if err != nil {
+		writeJSON(w, http.StatusUnauthorized, map[string]any{
+			"Error":   3,
+			"Message": "Unauthorized, call /login/signin first",
+		})
+		return nil, false
+	}
 	return st, true
 }
 
 func (s *server) requireSessionHTML(w http.ResponseWriter, r *http.Request) (*sessionState, bool) {
-	st := s.sessionOrGuest(w, r)
+	st, err := s.sessionFromRequest(r)
+	if err != nil {
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		w.WriteHeader(http.StatusUnauthorized)
+		_, _ = w.Write([]byte("<html><body>Unauthorized</body></html>"))
+		return nil, false
+	}
 	return st, true
 }
 
@@ -617,28 +630,6 @@ func (s *server) sessionFromRequest(r *http.Request) (*sessionState, error) {
 		return nil, errors.New("unknown session")
 	}
 	return st, nil
-}
-
-func (s *server) sessionOrGuest(w http.ResponseWriter, r *http.Request) *sessionState {
-	if st, err := s.sessionFromRequest(r); err == nil {
-		return st
-	}
-	st := &sessionState{
-		Login:      "guest",
-		CurrentIdx: 0,
-		Passed:     make([]bool, len(levelAnswers)),
-		Actions:    []encx.CodeAction{},
-		UpdatedAt:  time.Now(),
-	}
-	sid := s.newSession(st)
-	http.SetCookie(w, &http.Cookie{
-		Name:     "SESSION_ID",
-		Value:    sid,
-		Path:     "/",
-		HttpOnly: true,
-		SameSite: http.SameSiteLaxMode,
-	})
-	return st
 }
 
 func (s *server) newSession(st *sessionState) string {
