@@ -66,6 +66,7 @@ func main() {
 	mux.HandleFunc("GET /home/", s.handleGameList)
 	mux.HandleFunc("GET /", s.handleDomainRoot)
 	mux.HandleFunc("POST /gameengines/encounter/makefee/Login.aspx", s.handleEnterGame)
+	mux.HandleFunc("GET /MakeGameFee.aspx", s.handleMakeGameFee)
 	mux.HandleFunc("GET /GameDetails.aspx", s.handleGameDetails)
 	mux.HandleFunc("GET /Teams/TeamDetails.aspx", s.handleTeamDetails)
 	mux.HandleFunc("GET /gamestatistics/full/", s.handleGameStatistics)
@@ -195,6 +196,25 @@ func (s *server) handleEnterGame(w http.ResponseWriter, r *http.Request) {
 	gid, _ := strconv.Atoi(r.Form.Get("gid"))
 	if gid != mockGameID {
 		http.NotFound(w, r)
+		return
+	}
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	_, _ = w.Write([]byte(`<html><body>Team already accepted to the game.</body></html>`))
+}
+
+func (s *server) handleMakeGameFee(w http.ResponseWriter, r *http.Request) {
+	_, ok := s.requireSessionHTML(w, r)
+	if !ok {
+		return
+	}
+	gid, _ := strconv.Atoi(r.URL.Query().Get("gid"))
+	if gid != mockGameID {
+		http.NotFound(w, r)
+		return
+	}
+	if r.URL.Query().Get("confirm") != "yes" {
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		_, _ = w.Write([]byte(`<html><body><a href="?confirm=yes&gid=` + strconv.Itoa(mockGameID) + `">Confirm</a></body></html>`))
 		return
 	}
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")

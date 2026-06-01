@@ -668,7 +668,7 @@ go build -o encli ./cmd/encli/
 | `GetDomainGames` | `GET m.{domain}/` | Список игр (HTML) |
 | `GetGameStatistics` | `GET /gamestatistics/full/{id}?json=1` | Полная статистика игры |
 | `GetTimeoutToGame` | `GET m.{domain}/gameengines/encounter/play/{id}` | Таймер до начала |
-| `EnterGame` | `POST /gameengines/encounter/makefee/Login.aspx` | Вступить в игру |
+| `EnterGame` | `GET /MakeGameFee.aspx?confirm=yes&gid={id}` (fallback: `POST …/makefee/Login.aspx`) | Подать заявку / вступить в игру |
 | `GetGameDetails` | `GET /GameDetails.aspx?gid={id}` | Детали игры (HTML) |
 | `GetTeamDetails` | `GET /Teams/TeamDetails.aspx?tid={id}` | Информация о команде |
 | `AcceptTeamInvitation` | `GET /Teams/TeamDetails.aspx?action=accept_invitation&tid={id}` | Принять приглашение |
