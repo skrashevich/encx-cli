@@ -203,13 +203,45 @@ paths:
               schema:
                 type: string
 
-  /gameengines/encounter/makefee/Login.aspx:
-    post:
+  /MakeGameFee.aspx:
+    get:
       operationId: enterGame
       tags: [game]
-      summary: Войти в игру (оплата/подтверждение)
+      summary: Подать заявку / подтвердить участие в игре
       description: |
-        Регистрирует участника в игре. На некоторых доменах вход может быть платным.
+        Основной способ регистрации в игре на современных доменах (*.en.cx).
+        Используйте `confirm=yes` и `gid` (ID игры). Ответ — HTML (сообщение о принятии заявки и т.п.).
+        Требуется активная сессия; при отсутствии авторизации сервер перенаправляет на Login.aspx.
+      parameters:
+        - name: gid
+          in: query
+          required: true
+          schema:
+            type: integer
+        - name: confirm
+          in: query
+          schema:
+            type: string
+            enum: [yes]
+        - $ref: '#/components/parameters/LangParam'
+      responses:
+        '200':
+          description: Результат подачи заявки
+          content:
+            text/html:
+              schema:
+                type: string
+        '302':
+          description: Перенаправление (в т.ч. на Login.aspx без сессии)
+
+  /gameengines/encounter/makefee/Login.aspx:
+    post:
+      operationId: enterGameLegacy
+      tags: [game]
+      summary: Войти в игру (legacy makefee)
+      description: |
+        Устаревший endpoint; на большинстве доменов возвращает HTTP 404.
+        Клиент encx использует `/MakeGameFee.aspx` и обращается сюда только как fallback.
         Обнаружен в EN+ v1.2.0.
       parameters:
         - $ref: '#/components/parameters/JsonParam'
