@@ -25,9 +25,10 @@ const (
 var levelAnswers = []string{"CODE-1", "CODE-2", "CODE-3"}
 
 type server struct {
-	mu       sync.Mutex
-	sessions map[string]*sessionState
-	nextSID  uint64
+	mu         sync.Mutex
+	sessions   map[string]*sessionState
+	authStates map[string]*sessionState
+	nextSID    uint64
 }
 
 type sessionState struct {
@@ -47,7 +48,8 @@ func main() {
 	}
 
 	s := &server{
-		sessions: make(map[string]*sessionState),
+		sessions:   make(map[string]*sessionState),
+		authStates: make(map[string]*sessionState),
 	}
 
 	mux := http.NewServeMux()
@@ -106,13 +108,20 @@ func (s *server) handleLogin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	state := &sessionState{
-		Login:      req.Login,
-		CurrentIdx: 0,
-		Passed:     make([]bool, len(levelAnswers)),
-		Actions:    []encx.CodeAction{},
-		UpdatedAt:  time.Now(),
+	authKey := credentialsKey(req.Login, req.Password)
+	s.mu.Lock()
+	state := s.authStates[authKey]
+	if state == nil {
+		state = &sessionState{
+			Login:      req.Login,
+			CurrentIdx: 0,
+			Passed:     make([]bool, len(levelAnswers)),
+			Actions:    []encx.CodeAction{},
+			UpdatedAt:  time.Now(),
+		}
+		s.authStates[authKey] = state
 	}
+	s.mu.Unlock()
 	sid := s.newSession(state)
 	http.SetCookie(w, &http.Cookie{
 		Name:     "SESSION_ID",
@@ -717,4 +726,8 @@ func dur(d time.Duration) *encx.Duration {
 
 func ptr[T any](v T) *T {
 	return &v
+}
+
+func credentialsKey(login, password string) string {
+	return login + "\x00" + password
 }
