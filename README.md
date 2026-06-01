@@ -59,6 +59,9 @@ go install github.com/skrashevich/encx-cli/cmd/encx-mock@latest
 # запустить mock-сервер на 127.0.0.1:18080
 ENCX_MOCK_ADDR=127.0.0.1:18080 encx-mock
 
+# или через Docker
+docker run --rm -p 18080:18080 -e ENCX_MOCK_ADDR=0.0.0.0:18080 ghcr.io/skrashevich/encx-mock
+
 # подключиться к нему через encli
 encli login -domain 127.0.0.1:18080 -http -login demo -password demo
 encli game-list -domain 127.0.0.1:18080 -http
@@ -78,6 +81,7 @@ encli send-code -domain 127.0.0.1:18080 -http -game-id 424242 "CODE-1"
 ```sh
 docker run --rm ghcr.io/skrashevich/encx-cli -v
 docker run --rm ghcr.io/skrashevich/encx-cli games -domain tech.en.cx
+docker run --rm -p 18080:18080 -e ENCX_MOCK_ADDR=0.0.0.0:18080 ghcr.io/skrashevich/encx-mock
 
 # LLM-режим: передайте ключ и модель через -e
 docker run --rm \
