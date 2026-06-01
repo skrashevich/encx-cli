@@ -197,10 +197,6 @@ func executeLLMToolCall(ctx context.Context, cfg *config, client *encx.Client, s
 		requireAuth(ctx, cfg, client)
 		cmdSendCode(ctx, cfg, client, []string{getString("code")})
 
-	case "send_bonus":
-		requireAuth(ctx, cfg, client)
-		cmdSendBonus(ctx, cfg, client, []string{getString("code")})
-
 	case "hint":
 		requireAuth(ctx, cfg, client)
 		cmdHint(ctx, cfg, client, []string{strconv.Itoa(getInt("hint_id"))})

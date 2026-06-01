@@ -71,13 +71,8 @@ func getTools(reviewMode bool) []llmTool {
 		}},
 		{Type: "function", Function: llmFunction{
 			Name:        "send_code",
-			Description: "Send a level code answer",
+			Description: "Send a code answer (level, sector, or bonus)",
 			Parameters:  json.RawMessage(`{"type":"object","properties":{"game_id":{"type":"integer","description":"Game ID"},"code":{"type":"string","description":"The code to submit"}},"required":["game_id","code"]}`),
-		}},
-		{Type: "function", Function: llmFunction{
-			Name:        "send_bonus",
-			Description: "Send a bonus code answer",
-			Parameters:  json.RawMessage(`{"type":"object","properties":{"game_id":{"type":"integer","description":"Game ID"},"code":{"type":"string","description":"The bonus code to submit"}},"required":["game_id","code"]}`),
 		}},
 		{Type: "function", Function: llmFunction{
 			Name:        "hint",

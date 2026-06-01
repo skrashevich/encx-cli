@@ -236,9 +236,6 @@ func main() {
 	case "send-code":
 		requireAuth(ctx, cfg, client)
 		cmdSendCode(ctx, cfg, client, positional)
-	case "send-bonus":
-		requireAuth(ctx, cfg, client)
-		cmdSendBonus(ctx, cfg, client, positional)
 	case "hint":
 		requireAuth(ctx, cfg, client)
 		cmdHint(ctx, cfg, client, positional)
@@ -406,7 +403,6 @@ Commands:
   messages    Show messages from organizers
   enter       Enter a game (submit application)
   send-code   Send a level code
-  send-bonus  Send a bonus code
   hint        Request a penalty hint
   game-stats  Show game statistics (levels, teams, rankings)
   profile     Show your profile
@@ -494,7 +490,6 @@ Examples:
   encli messages -game-id 27053
   encli enter -game-id 27053
   encli send-code -game-id 27053 "CODE123"
-  encli send-bonus -game-id 27053 "BONUS1"
   encli hint -game-id 27053 42
   encli logout
 `)
@@ -543,10 +538,7 @@ func printCommandHelp(cmd string) {
 		fmt.Fprintln(os.Stderr, "  Submit application to enter a game.")
 	case "send-code":
 		fmt.Fprintln(os.Stderr, "Usage: encli send-code -game-id <id> <code>")
-		fmt.Fprintln(os.Stderr, "  Send a level code answer.")
-	case "send-bonus":
-		fmt.Fprintln(os.Stderr, "Usage: encli send-bonus -game-id <id> <code>")
-		fmt.Fprintln(os.Stderr, "  Send a bonus code answer.")
+		fmt.Fprintln(os.Stderr, "  Send a code answer (level, sector, or bonus).")
 	case "hint":
 		fmt.Fprintln(os.Stderr, "Usage: encli hint -game-id <id> <hint-id>")
 		fmt.Fprintln(os.Stderr, "  Request a penalty hint by its ID.")
@@ -1361,32 +1353,6 @@ func cmdSendCode(ctx context.Context, cfg *config, client *encx.Client, args []s
 		return
 	}
 	printActionResult(result, "Level")
-}
-
-func cmdSendBonus(ctx context.Context, cfg *config, client *encx.Client, args []string) {
-	requireGameId(cfg)
-	if len(args) == 0 {
-		fatal("Usage: encli send-bonus -game-id <id> <code>")
-	}
-	code := args[0]
-
-	model, err := client.GetGameModel(ctx, cfg.gameId)
-	if err != nil {
-		fatal("Failed to get game model: %v", err)
-	}
-	if model.Level == nil {
-		fatal("No active level")
-	}
-
-	result, err := client.SendBonusCode(ctx, cfg.gameId, model.Level.LevelId, model.Level.Number, code)
-	if err != nil {
-		fatal("Failed to send bonus code: %v", err)
-	}
-	if cfg.jsonOutput {
-		outputJSON(result.EngineAction)
-		return
-	}
-	printActionResult(result, "Bonus")
 }
 
 func cmdHint(ctx context.Context, cfg *config, client *encx.Client, args []string) {

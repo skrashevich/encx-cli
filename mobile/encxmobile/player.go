@@ -42,22 +42,11 @@ func (c *EncClient) PingGame(gameID int64) (string, error) {
 	return marshalJSON(model)
 }
 
-// SendCode submits a level code answer. Returns updated GameModel JSON.
+// SendCode submits an answer via LevelAction.Answer. Returns updated GameModel JSON.
 func (c *EncClient) SendCode(gameID, levelID, levelNumber int64, code string) (string, error) {
 	ctx, cancel := c.codeSendCtx()
 	defer cancel()
 	model, err := c.client.SendCode(ctx, int(gameID), int(levelID), int(levelNumber), code)
-	if err != nil {
-		return "", err
-	}
-	return marshalJSON(model)
-}
-
-// SendBonusCode submits a bonus code answer. Returns updated GameModel JSON.
-func (c *EncClient) SendBonusCode(gameID, levelID, levelNumber int64, code string) (string, error) {
-	ctx, cancel := c.codeSendCtx()
-	defer cancel()
-	model, err := c.client.SendBonusCode(ctx, int(gameID), int(levelID), int(levelNumber), code)
 	if err != nil {
 		return "", err
 	}
