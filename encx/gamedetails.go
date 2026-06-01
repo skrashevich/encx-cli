@@ -40,6 +40,9 @@ func (c *Client) EnterGame(ctx context.Context, gameId int) (string, error) {
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
+		if resp.StatusCode == http.StatusNotFound {
+			return "", fmt.Errorf("encx: enter game failed with HTTP 404 (endpoint missing on %s; active games use play/{id} instead)", c.domain)
+		}
 		return "", fmt.Errorf("encx: enter game failed with HTTP %d", resp.StatusCode)
 	}
 

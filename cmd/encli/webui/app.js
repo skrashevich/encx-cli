@@ -1126,6 +1126,7 @@ async function selectChat(chatId) {
   renderChatList();
   disconnectES();
   clearToolChips();
+  hideApprovalBar();
   state.streamBuf = '';
   if (!chatId) {
     state.detail = null;

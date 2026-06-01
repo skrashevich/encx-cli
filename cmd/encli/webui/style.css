@@ -482,7 +482,11 @@ body::before {
   animation: pulse 1s ease-in-out infinite;
 }
 
-.agent-status-bar {
+.agent-status-bar[hidden] {
+  display: none !important;
+}
+
+.agent-status-bar:not([hidden]) {
   display: flex;
   align-items: center;
   gap: 10px;
@@ -687,7 +691,12 @@ body::before {
 }
 
 /* Approval — compact strip above composer */
-.approval-bar {
+.approval-bar[hidden] {
+  display: none !important;
+  animation: none;
+}
+
+.approval-bar:not([hidden]) {
   flex-shrink: 0;
   z-index: 4;
   display: flex;
