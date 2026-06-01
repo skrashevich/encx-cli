@@ -2,6 +2,7 @@ package encxmobile
 
 import (
 	"context"
+	"strings"
 	"time"
 
 	"github.com/skrashevich/encx-cli/encx"
@@ -16,11 +17,19 @@ type EncClient struct {
 	codeSendTimeout time.Duration
 }
 
+func normalizeDomain(domain string) string {
+	return strings.ToLower(strings.TrimSpace(domain))
+}
+
+func isDemoDomain(domain string) bool {
+	return normalizeDomain(domain) == "demo.en.cx"
+}
+
 // NewClient creates an Encounter API client for the given domain.
 // Set insecureTLS to true to skip TLS certificate verification (e.g. for tech.en.cx).
 func NewClient(domain string, insecureTLS bool) *EncClient {
 	opts := []encx.Option{}
-	if insecureTLS {
+	if insecureTLS || isDemoDomain(domain) {
 		opts = append(opts, encx.WithInsecureTLS())
 	}
 	return &EncClient{
@@ -34,7 +43,7 @@ func NewClient(domain string, insecureTLS bool) *EncClient {
 // timeoutSeconds: HTTP client timeout (0 = default 15s). lang: API language (empty = "ru").
 func NewClientWithOptions(domain string, insecureTLS, useHTTP bool, timeoutSeconds int64, lang string) *EncClient {
 	opts := []encx.Option{}
-	if insecureTLS {
+	if insecureTLS || isDemoDomain(domain) {
 		opts = append(opts, encx.WithInsecureTLS())
 	}
 	if useHTTP {
