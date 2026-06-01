@@ -152,6 +152,9 @@ func (c *Client) decodeJSON(body []byte, v any, context string) error {
 	if err := c.ensureJSONBody(body); err != nil {
 		return err
 	}
+	if len(body) == 0 {
+		return fmt.Errorf("encx: empty response (%s)", context)
+	}
 	if err := json.Unmarshal(body, v); err != nil {
 		return fmt.Errorf("encx: decode %s: %w", context, err)
 	}
