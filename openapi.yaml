@@ -118,8 +118,7 @@ paths:
       description: |
         Основной endpoint для всех игровых действий:
         - Получение текущего состояния игры (пустое тело)
-        - Отправка кода уровня (LevelAction.Answer)
-        - Отправка бонусного кода (BonusAction.Answer)
+        - Отправка кода (LevelAction.Answer) — уровень, секторы и бонусы
 
         Данные в теле запроса кодируются через `qs.stringify`
         (application/x-www-form-urlencoded).
@@ -141,15 +140,10 @@ paths:
                 summary: Polling (получение текущего состояния)
                 value: {}
               send_code:
-                summary: Отправка кода уровня
+                summary: Отправка кода
                 value:
                   LevelId: 100
                   LevelAction.Answer: "КОД123"
-              send_bonus:
-                summary: Отправка бонусного кода
-                value:
-                  LevelId: 100
-                  BonusAction.Answer: "БОНУС456"
       responses:
         '200':
           description: Модель игры
@@ -1242,10 +1236,7 @@ components:
           description: Номер текущего уровня (отправляется при polling)
         LevelAction.Answer:
           type: string
-          description: Код (ответ) для прохождения уровня
-        BonusAction.Answer:
-          type: string
-          description: Код (ответ) для бонуса
+          description: Код (ответ) — уровень, секторы и бонусы
 
     GameModel:
       type: object

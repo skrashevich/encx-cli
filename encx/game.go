@@ -64,21 +64,12 @@ func decodeGameModelJSON(body []byte, context string) (*GameModel, error) {
 	return &model, nil
 }
 
-// SendCode submits a level code answer.
+// SendCode submits an answer via LevelAction.Answer (level, sectors, bonuses).
 func (c *Client) SendCode(ctx context.Context, gameId, levelId, levelNumber int, code string) (*GameModel, error) {
 	form := url.Values{}
 	form.Set("LevelId", strconv.Itoa(levelId))
 	form.Set("LevelNumber", strconv.Itoa(levelNumber))
 	form.Set("LevelAction.Answer", code)
-	return c.GetGameModel(ctx, gameId, form)
-}
-
-// SendBonusCode submits a bonus code answer.
-func (c *Client) SendBonusCode(ctx context.Context, gameId, levelId, levelNumber int, code string) (*GameModel, error) {
-	form := url.Values{}
-	form.Set("LevelId", strconv.Itoa(levelId))
-	form.Set("LevelNumber", strconv.Itoa(levelNumber))
-	form.Set("BonusAction.Answer", code)
 	return c.GetGameModel(ctx, gameId, form)
 }
 

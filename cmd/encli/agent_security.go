@@ -31,7 +31,7 @@ func isMutationTool(name string) bool {
 		return true
 	}
 	switch name {
-	case "login", "logout", "enter", "send_code", "send_bonus", "hint", "propose_admin_fix":
+	case "login", "logout", "enter", "send_code", "hint", "propose_admin_fix":
 		return true
 	default:
 		return false

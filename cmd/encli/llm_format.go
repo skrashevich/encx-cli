@@ -70,9 +70,6 @@ func formatToolCallForDisplay(session *llmSession, name, argsJSON string) string
 	case "send_code":
 		code := getAnyString(args["code"])
 		return format(rt("Sending code: ", "Отправляю код: ") + code)
-	case "send_bonus":
-		code := getAnyString(args["code"])
-		return format(rt("Sending bonus: ", "Отправляю бонус: ") + code)
 	case "hint":
 		return format(rt("Requesting penalty hint", "Запрашиваю штрафную подсказку"))
 	case "game_stats":
@@ -318,7 +315,7 @@ func formatToolApprovalDetails(session *llmSession, name, argsJSON string) []str
 		if id := getAnyString(args["correction_id"]); id != "" {
 			add("Correction ID: "+id, "Коррекция ID: "+id)
 		}
-	case "send_code", "send_bonus":
+	case "send_code":
 		if c := getAnyString(args["code"]); c != "" {
 			add("Code: "+c, "Код: "+c)
 		}
