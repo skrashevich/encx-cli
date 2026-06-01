@@ -28,6 +28,8 @@ const (
 	networkDropHangMax = 2 * time.Second
 )
 
+var version = "dev"
+
 var levelAnswers = []string{"CODE-1", "CODE-2", "CODE-3"}
 
 type server struct {
@@ -50,6 +52,14 @@ type sessionState struct {
 }
 
 func main() {
+	if len(os.Args) > 1 {
+		switch os.Args[1] {
+		case "-v", "--version", "version":
+			fmt.Println("encx-mock", version)
+			return
+		}
+	}
+
 	addr := strings.TrimSpace(os.Getenv("ENCX_MOCK_ADDR"))
 	if addr == "" {
 		addr = defaultAddr

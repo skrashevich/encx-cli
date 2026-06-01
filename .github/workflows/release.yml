@@ -44,19 +44,26 @@ jobs:
           ext=""
           if [ "${{ matrix.goos }}" = "windows" ]; then ext=".exe"; fi
           VERSION="${GITHUB_REF_NAME#v}"
-          go build -ldflags="-s -w -X main.version=${VERSION}" -o encli-${{ matrix.goos }}-${{ matrix.goarch }}${ext} ./cmd/encli/
+          for target in encli encx-mock; do
+            go build -ldflags="-s -w -X main.version=${VERSION}" \
+              -o "${target}-${{ matrix.goos }}-${{ matrix.goarch }}${ext}" "./cmd/${target}/"
+          done
 
       - name: Compress with UPX
         if: (matrix.goos == 'linux' || matrix.goos == 'windows') && !(matrix.goos == 'windows' && matrix.goarch == 'arm64')
         uses: crazy-max/ghaction-upx@v4
         with:
-          files: encli-${{ matrix.goos }}-${{ matrix.goarch }}*
+          files: |
+            encli-${{ matrix.goos }}-${{ matrix.goarch }}*
+            encx-mock-${{ matrix.goos }}-${{ matrix.goarch }}*
           args: --best --lzma
 
       - uses: actions/upload-artifact@v7
         with:
-          name: encli-${{ matrix.goos }}-${{ matrix.goarch }}
-          path: encli-*
+          name: binaries-${{ matrix.goos }}-${{ matrix.goarch }}
+          path: |
+            encli-${{ matrix.goos }}-${{ matrix.goarch }}*
+            encx-mock-${{ matrix.goos }}-${{ matrix.goarch }}*
 
   build-macos:
     runs-on: macos-latest
@@ -79,7 +86,10 @@ jobs:
           CGO_ENABLED: "0"
         run: |
           VERSION="${GITHUB_REF_NAME#v}"
-          go build -ldflags="-s -w -X main.version=${VERSION}" -o encli-darwin-${{ matrix.goarch }} ./cmd/encli/
+          for target in encli encx-mock; do
+            go build -ldflags="-s -w -X main.version=${VERSION}" \
+              -o "${target}-darwin-${{ matrix.goarch }}" "./cmd/${target}/"
+          done
 
       - name: Import Apple certificate
         env:
@@ -111,12 +121,14 @@ jobs:
           fi
           echo "Signing with identity: $IDENTITY"
 
-          codesign --force --options runtime \
-            --sign "$IDENTITY" \
-            --timestamp \
-            encli-darwin-${{ matrix.goarch }}
+          for target in encli encx-mock; do
+            codesign --force --options runtime \
+              --sign "$IDENTITY" \
+              --timestamp \
+              "${target}-darwin-${{ matrix.goarch }}"
 
-          codesign --verify --verbose encli-darwin-${{ matrix.goarch }}
+            codesign --verify --verbose "${target}-darwin-${{ matrix.goarch }}"
+          done
 
       - name: Notarize binary
         env:
@@ -124,13 +136,15 @@ jobs:
           APPLE_ID_PASSWORD: ${{ secrets.APPLE_ID_PASSWORD }}
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
         run: |
-          zip encli-darwin-${{ matrix.goarch }}.zip encli-darwin-${{ matrix.goarch }}
+          for target in encli encx-mock; do
+            zip "${target}-darwin-${{ matrix.goarch }}.zip" "${target}-darwin-${{ matrix.goarch }}"
 
-          xcrun notarytool submit encli-darwin-${{ matrix.goarch }}.zip \
-            --apple-id "$APPLE_ID" \
-            --password "$APPLE_ID_PASSWORD" \
-            --team-id "$APPLE_TEAM_ID" \
-            --wait
+            xcrun notarytool submit "${target}-darwin-${{ matrix.goarch }}.zip" \
+              --apple-id "$APPLE_ID" \
+              --password "$APPLE_ID_PASSWORD" \
+              --team-id "$APPLE_TEAM_ID" \
+              --wait
+          done
 
       - name: Cleanup keychain
         if: always()
@@ -141,8 +155,10 @@ jobs:
 
       - uses: actions/upload-artifact@v7
         with:
-          name: encli-darwin-${{ matrix.goarch }}
-          path: encli-darwin-${{ matrix.goarch }}
+          name: binaries-darwin-${{ matrix.goarch }}
+          path: |
+            encli-darwin-${{ matrix.goarch }}
+            encx-mock-darwin-${{ matrix.goarch }}
 
   release:
     needs: [build-binaries, build-macos]
