@@ -13,8 +13,24 @@ info:
     url: https://en.cx
 
 servers:
+  - url: https://{domain}
+    description: Encounter game server (default transport in client)
+    variables:
+      domain:
+        default: quest.en.cx
+        description: |
+          Домен сервера Encounter. Допустимые паттерны:
+          - *.en.cx (напр. quest.en.cx, tech.en.cx, nef.en.cx)
+          - *.encounter.cx
+          - *.encounter.ru
+          - quest.ua (deprecated, мигрирован в {city}questua.en.cx;
+            напр. kharkov.quest.ua -> kharkovquestua.en.cx)
+        enum:
+          - quest.en.cx
+          - tech.en.cx
+          - questua.en.cx
   - url: http://{domain}
-    description: Encounter game server
+    description: Encounter game server (legacy/plain HTTP)
     variables:
       domain:
         default: quest.en.cx
@@ -39,6 +55,10 @@ tags:
     description: Обнаружение игр на домене
   - name: teams
     description: Управление командами
+  - name: admin
+    description: Административные операции (редактор игр)
+  - name: anti-spam
+    description: Антиспам/челлендж страницы Encounter
 
 paths:
   /login/signin:
@@ -149,8 +169,18 @@ paths:
         Параметры действия передаются через query string.
       parameters:
         - $ref: '#/components/parameters/GameIdPath'
-        - $ref: '#/components/parameters/JsonParam'
-        - $ref: '#/components/parameters/LangParam'
+        - name: json
+          in: query
+          description: JSON-режим (используется для API-вызовов модели игры)
+          schema:
+            type: integer
+            const: 1
+        - name: lang
+          in: query
+          description: Язык ответа
+          schema:
+            type: string
+            default: ru
         - name: pid
           in: query
           description: ID штрафной подсказки
@@ -164,11 +194,14 @@ paths:
             enum: [1]
       responses:
         '200':
-          description: Модель игры
+          description: Модель игры (JSON) или HTML-страница ожидания старта
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/GameModel'
+            text/html:
+              schema:
+                type: string
 
   /gameengines/encounter/makefee/Login.aspx:
     post:
@@ -280,16 +313,28 @@ paths:
       tags: [discovery]
       summary: Получить список игр домена
       description: |
-        Загружает главную страницу мобильной версии домена и парсит HTML
-        для извлечения списка доступных игр.
+        Загружает главную страницу домена и парсит HTML для извлечения списка игр.
+        Клиент сначала пробует `m.{domain}`, затем fallback на основной домен `{domain}`.
 
-        **URL:** `http://m.{domain}/` (с префиксом `m.`)
+        **URL:** `https://m.{domain}/` (основной) и `https://{domain}/` (fallback)
 
         Из HTML извлекаются элементы `h1.gametitle a`:
         - `title` — текст ссылки (название игры)
         - `gameId` — число из атрибута href по паттерну `/details/(\d+)/`
       servers:
+        - url: https://m.{domain}
+          variables:
+            domain:
+              default: quest.en.cx
+        - url: https://{domain}
+          variables:
+            domain:
+              default: quest.en.cx
         - url: http://m.{domain}
+          variables:
+            domain:
+              default: quest.en.cx
+        - url: http://{domain}
           variables:
             domain:
               default: quest.en.cx
@@ -327,6 +372,744 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/GameListResponse'
+
+  /NotHumanRequest.aspx:
+    get:
+      operationId: getAntiSpamChallengePage
+      tags: [anti-spam]
+      summary: Страница антиспам-проверки
+      description: |
+        HTML-страница верификации пользователя (anti-spam challenge).
+        Клиент может быть редиректнут сюда при подозрении на автоматизированные запросы.
+      parameters:
+        - name: return
+          in: query
+          description: Путь возврата после прохождения проверки
+          schema:
+            type: string
+      responses:
+        '200':
+          description: HTML-страница проверки
+          content:
+            text/html:
+              schema:
+                type: string
+
+  /UserDetails.aspx:
+    get:
+      operationId: getUserProfileHtml
+      tags: [admin]
+      summary: Профиль пользователя (HTML)
+      description: Возвращает HTML-страницу профиля текущего пользователя.
+      responses:
+        '200':
+          description: HTML профиля
+          content:
+            text/html:
+              schema:
+                type: string
+
+  /Administration/GamesManager.aspx:
+    get:
+      operationId: adminGamesManager
+      tags: [admin]
+      summary: Менеджер игр (список/управляющие действия)
+      parameters:
+        - name: gid
+          in: query
+          description: ID игры (для action-запросов)
+          schema:
+            type: integer
+        - name: action
+          in: query
+          description: Действие менеджера
+          schema:
+            type: string
+            enum: [NotDeliver, Deliver, AwardPoints, EndRatings, CalcIK]
+      responses:
+        '200':
+          description: HTML менеджера игр
+          content:
+            text/html:
+              schema:
+                type: string
+
+  /Administration/Games/LevelManager.aspx:
+    get:
+      operationId: adminLevelManagerGet
+      tags: [admin]
+      summary: Управление уровнями (GET-действия)
+      parameters:
+        - name: gid
+          in: query
+          required: true
+          schema:
+            type: integer
+        - name: levels
+          in: query
+          schema:
+            type: string
+            enum: [create, delete, swap, insert, createlike]
+        - name: ddlCreateLevelsNum
+          in: query
+          schema:
+            type: integer
+        - name: ddlDeleteLevels
+          in: query
+          schema:
+            type: integer
+        - name: ddlSwapLevels1
+          in: query
+          schema:
+            type: integer
+        - name: ddlSwapLevels2
+          in: query
+          schema:
+            type: integer
+        - name: ddlInsertAfterSrc
+          in: query
+          schema:
+            type: integer
+        - name: ddlInsertAfterDst
+          in: query
+          schema:
+            type: integer
+        - name: ddlCreateLikeLevel
+          in: query
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: HTML страницы управления уровнями
+          content:
+            text/html:
+              schema:
+                type: string
+    post:
+      operationId: adminLevelManagerPost
+      tags: [admin]
+      summary: Переименование уровней
+      parameters:
+        - name: gid
+          in: query
+          required: true
+          schema:
+            type: integer
+        - name: level_names
+          in: query
+          required: true
+          schema:
+            type: string
+            const: update
+      requestBody:
+        required: true
+        content:
+          application/x-www-form-urlencoded:
+            schema:
+              type: object
+              additionalProperties:
+                type: string
+      responses:
+        '200':
+          description: HTML/redirect после сохранения
+          content:
+            text/html:
+              schema:
+                type: string
+
+  /Administration/Games/LevelEditor.aspx:
+    get:
+      operationId: adminLevelEditorGet
+      tags: [admin]
+      summary: Чтение/операции с уровнем
+      parameters:
+        - name: gid
+          in: query
+          required: true
+          schema:
+            type: integer
+        - name: level
+          in: query
+          required: true
+          schema:
+            type: integer
+        - name: swanswers
+          in: query
+          schema:
+            type: integer
+            enum: [1]
+        - name: editanswers
+          in: query
+          schema:
+            oneOf:
+              - type: integer
+              - type: string
+        - name: delsector
+          in: query
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: HTML редактора уровня
+          content:
+            text/html:
+              schema:
+                type: string
+    post:
+      operationId: adminLevelEditorPost
+      tags: [admin]
+      summary: Обновление настроек/секторов уровня
+      parameters:
+        - name: gid
+          in: query
+          required: true
+          schema:
+            type: integer
+        - name: level
+          in: query
+          required: true
+          schema:
+            type: integer
+        - name: swanswers
+          in: query
+          schema:
+            type: integer
+            enum: [1]
+        - name: editanswers
+          in: query
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/x-www-form-urlencoded:
+            schema:
+              type: object
+              additionalProperties:
+                type: string
+      responses:
+        '200':
+          description: HTML/redirect после сохранения
+          content:
+            text/html:
+              schema:
+                type: string
+
+  /Administration/Games/BonusEdit.aspx:
+    get:
+      operationId: adminBonusEditGet
+      tags: [admin]
+      summary: Чтение/удаление бонуса
+      parameters:
+        - name: gid
+          in: query
+          required: true
+          schema:
+            type: integer
+        - name: level
+          in: query
+          required: true
+          schema:
+            type: integer
+        - name: bonus
+          in: query
+          required: true
+          schema:
+            type: integer
+        - name: action
+          in: query
+          schema:
+            type: string
+            enum: [edit, delete]
+      responses:
+        '200':
+          description: HTML формы бонуса
+          content:
+            text/html:
+              schema:
+                type: string
+    post:
+      operationId: adminBonusEditPost
+      tags: [admin]
+      summary: Создание/обновление бонуса
+      parameters:
+        - name: gid
+          in: query
+          required: true
+          schema:
+            type: integer
+        - name: level
+          in: query
+          required: true
+          schema:
+            type: integer
+        - name: bonus
+          in: query
+          required: true
+          schema:
+            type: integer
+        - name: action
+          in: query
+          required: true
+          schema:
+            type: string
+            const: save
+      requestBody:
+        required: true
+        content:
+          application/x-www-form-urlencoded:
+            schema:
+              type: object
+              additionalProperties:
+                type: string
+      responses:
+        '200':
+          description: HTML/redirect после сохранения
+          content:
+            text/html:
+              schema:
+                type: string
+
+  /Administration/Games/PromptEdit.aspx:
+    get:
+      operationId: adminPromptEditGet
+      tags: [admin]
+      summary: Чтение/удаление подсказки
+      parameters:
+        - name: gid
+          in: query
+          required: true
+          schema:
+            type: integer
+        - name: level
+          in: query
+          required: true
+          schema:
+            type: integer
+        - name: prid
+          in: query
+          schema:
+            type: integer
+        - name: penalty
+          in: query
+          schema:
+            type: integer
+            enum: [1]
+        - name: action
+          in: query
+          schema:
+            type: string
+            enum: [PromptEdit, PromptDelete]
+      responses:
+        '200':
+          description: HTML формы подсказки
+          content:
+            text/html:
+              schema:
+                type: string
+    post:
+      operationId: adminPromptEditPost
+      tags: [admin]
+      summary: Создание/обновление подсказки
+      parameters:
+        - name: gid
+          in: query
+          required: true
+          schema:
+            type: integer
+        - name: level
+          in: query
+          required: true
+          schema:
+            type: integer
+        - name: prid
+          in: query
+          schema:
+            type: integer
+        - name: penalty
+          in: query
+          schema:
+            type: integer
+            enum: [1]
+      requestBody:
+        required: true
+        content:
+          application/x-www-form-urlencoded:
+            schema:
+              type: object
+              additionalProperties:
+                type: string
+      responses:
+        '200':
+          description: HTML/redirect после сохранения
+          content:
+            text/html:
+              schema:
+                type: string
+
+  /Administration/Games/TaskEdit.aspx:
+    get:
+      operationId: adminTaskEditGet
+      tags: [admin]
+      summary: Чтение/удаление задания, список команд
+      parameters:
+        - name: gid
+          in: query
+          required: true
+          schema:
+            type: integer
+        - name: level
+          in: query
+          required: true
+          schema:
+            type: integer
+        - name: tid
+          in: query
+          schema:
+            type: integer
+        - name: action
+          in: query
+          schema:
+            type: string
+            enum: [TaskEdit, TaskDelete]
+      responses:
+        '200':
+          description: HTML страницы заданий
+          content:
+            text/html:
+              schema:
+                type: string
+    post:
+      operationId: adminTaskEditPost
+      tags: [admin]
+      summary: Создание/обновление задания
+      parameters:
+        - name: gid
+          in: query
+          required: true
+          schema:
+            type: integer
+        - name: level
+          in: query
+          required: true
+          schema:
+            type: integer
+        - name: tid
+          in: query
+          schema:
+            type: integer
+        - name: action
+          in: query
+          schema:
+            type: string
+            enum: [TaskEdit]
+      requestBody:
+        required: true
+        content:
+          application/x-www-form-urlencoded:
+            schema:
+              type: object
+              additionalProperties:
+                type: string
+      responses:
+        '200':
+          description: HTML/redirect после сохранения
+          content:
+            text/html:
+              schema:
+                type: string
+
+  /Administration/Games/NameCommentEdit.aspx:
+    get:
+      operationId: adminNameCommentGet
+      tags: [admin]
+      summary: Чтение названия/комментария уровня
+      parameters:
+        - name: gid
+          in: query
+          required: true
+          schema:
+            type: integer
+        - name: level
+          in: query
+          required: true
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: HTML формы названия/комментария
+          content:
+            text/html:
+              schema:
+                type: string
+    post:
+      operationId: adminNameCommentPost
+      tags: [admin]
+      summary: Обновление названия/комментария уровня
+      parameters:
+        - name: gid
+          in: query
+          required: true
+          schema:
+            type: integer
+        - name: level
+          in: query
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/x-www-form-urlencoded:
+            schema:
+              type: object
+              additionalProperties:
+                type: string
+      responses:
+        '200':
+          description: HTML/redirect после сохранения
+          content:
+            text/html:
+              schema:
+                type: string
+
+  /ALoader/LevelInfo.aspx:
+    get:
+      operationId: adminLevelInfo
+      tags: [admin]
+      summary: Сектора/ответы уровня
+      parameters:
+        - name: gid
+          in: query
+          required: true
+          schema:
+            type: integer
+        - name: level
+          in: query
+          required: true
+          schema:
+            type: integer
+        - name: object
+          in: query
+          required: true
+          schema:
+            type: integer
+            enum: [2, 3]
+        - name: sector
+          in: query
+          schema:
+            oneOf:
+              - type: integer
+              - type: string
+      responses:
+        '200':
+          description: HTML/fragment с данными уровня
+          content:
+            text/html:
+              schema:
+                type: string
+
+  /GameBonusPenaltyTime.aspx:
+    get:
+      operationId: adminGameCorrectionsGet
+      tags: [admin]
+      summary: Начисления времени (просмотр/добавление/удаление)
+      parameters:
+        - name: gid
+          in: query
+          required: true
+          schema:
+            type: integer
+        - name: lang
+          in: query
+          schema:
+            type: string
+        - name: action
+          in: query
+          schema:
+            type: string
+            enum: [add, save, delete]
+        - name: correct
+          in: query
+          schema:
+            type: string
+      responses:
+        '200':
+          description: HTML страницы начислений
+          content:
+            text/html:
+              schema:
+                type: string
+    post:
+      operationId: adminGameCorrectionsPost
+      tags: [admin]
+      summary: Добавление/сохранение начисления времени
+      parameters:
+        - name: gid
+          in: query
+          required: true
+          schema:
+            type: integer
+        - name: action
+          in: query
+          required: true
+          schema:
+            type: string
+            const: save
+      requestBody:
+        required: true
+        content:
+          application/x-www-form-urlencoded:
+            schema:
+              type: object
+              additionalProperties:
+                type: string
+      responses:
+        '200':
+          description: HTML/redirect после сохранения
+          content:
+            text/html:
+              schema:
+                type: string
+
+  /Administration/Games/GameEditor.aspx:
+    get:
+      operationId: adminGameEditorGet
+      tags: [admin]
+      summary: Чтение настроек игры
+      parameters:
+        - name: gid
+          in: query
+          schema:
+            type: integer
+        - name: action
+          in: query
+          schema:
+            type: string
+            enum: [edit]
+      responses:
+        '200':
+          description: HTML редактора игры
+          content:
+            text/html:
+              schema:
+                type: string
+    post:
+      operationId: adminGameEditorPost
+      tags: [admin]
+      summary: Обновление настроек игры
+      requestBody:
+        required: true
+        content:
+          application/x-www-form-urlencoded:
+            schema:
+              type: object
+              additionalProperties:
+                type: string
+      responses:
+        '200':
+          description: HTML/redirect после сохранения
+          content:
+            text/html:
+              schema:
+                type: string
+
+  /Administration/Games/ActionMonitor.aspx:
+    get:
+      operationId: adminActionMonitor
+      tags: [admin]
+      summary: Монитор действий игры
+      parameters:
+        - name: gid
+          in: query
+          required: true
+          schema:
+            type: integer
+        - name: type
+          in: query
+          required: true
+          schema:
+            type: string
+            enum: [own]
+      responses:
+        '200':
+          description: HTML монитора действий
+          content:
+            text/html:
+              schema:
+                type: string
+
+  /Administration/Games/MessageEdit.aspx:
+    get:
+      operationId: adminMessageEditGet
+      tags: [admin]
+      summary: Чтение/удаление сообщения уровня
+      parameters:
+        - name: gid
+          in: query
+          required: true
+          schema:
+            type: integer
+        - name: level
+          in: query
+          required: true
+          schema:
+            type: integer
+        - name: mid
+          in: query
+          schema:
+            type: integer
+        - name: action
+          in: query
+          schema:
+            type: string
+            enum: [add, delete]
+      responses:
+        '200':
+          description: HTML формы сообщения
+          content:
+            text/html:
+              schema:
+                type: string
+    post:
+      operationId: adminMessageEditPost
+      tags: [admin]
+      summary: Создание/обновление сообщения уровня
+      parameters:
+        - name: gid
+          in: query
+          required: true
+          schema:
+            type: integer
+        - name: level
+          in: query
+          required: true
+          schema:
+            type: integer
+        - name: mid
+          in: query
+          schema:
+            type: integer
+        - name: action
+          in: query
+          schema:
+            type: string
+            enum: [add]
+      requestBody:
+        required: true
+        content:
+          application/x-www-form-urlencoded:
+            schema:
+              type: object
+              additionalProperties:
+                type: string
+      responses:
+        '200':
+          description: HTML/redirect после сохранения
+          content:
+            text/html:
+              schema:
+                type: string
 
 components:
   parameters:
@@ -379,6 +1162,7 @@ components:
 
     LoginResponse:
       type: object
+      required: [Error, Message, AdminWhoCanActivate]
       properties:
         Error:
           type: integer
@@ -434,6 +1218,21 @@ components:
     GameModel:
       type: object
       description: Полная модель текущего состояния игры
+      required:
+        - Event
+        - GameId
+        - GameNumber
+        - GameTitle
+        - GameTypeId
+        - GameZoneId
+        - LevelSequence
+        - UserId
+        - TeamId
+        - Login
+        - TeamName
+        - IsCaptain
+        - GameDateTimeStart
+        - Levels
       properties:
         Event:
           description: |
@@ -492,6 +1291,7 @@ components:
 
     LevelSummary:
       type: object
+      required: [LevelId, LevelNumber, LevelName, Dismissed, IsPassed]
       properties:
         LevelId:
           type: integer
@@ -511,6 +1311,31 @@ components:
     Level:
       type: object
       description: Текущий активный уровень
+      required:
+        - LevelId
+        - Number
+        - Name
+        - Timeout
+        - TimeoutSecondsRemain
+        - TimeoutAward
+        - IsPassed
+        - Dismissed
+        - HasAnswerBlockRule
+        - BlockDuration
+        - BlockTargetId
+        - AttemtsNumber
+        - AttemtsPeriod
+        - RequiredSectorsCount
+        - PassedSectorsCount
+        - PassedBonusesCount
+        - SectorsLeftToClose
+        - Tasks
+        - Messages
+        - Sectors
+        - Helps
+        - Bonuses
+        - PenaltyHelps
+        - MixedActions
       properties:
         LevelId:
           type: integer
@@ -595,6 +1420,7 @@ components:
 
     LevelTask:
       type: object
+      required: [TaskText, TaskTextFormatted, ReplaceNlToBr]
       properties:
         TaskText:
           type: string
@@ -605,6 +1431,7 @@ components:
 
     AdminMessage:
       type: object
+      required: [OwnerId, OwnerLogin, MessageId, MessageText, WrappedText, ReplaceNl2Br]
       properties:
         OwnerId:
           type: integer
@@ -621,6 +1448,7 @@ components:
 
     Sector:
       type: object
+      required: [SectorId, Order, Name, IsAnswered, Answer]
       properties:
         SectorId:
           type: integer
@@ -638,6 +1466,19 @@ components:
 
     Bonus:
       type: object
+      required:
+        - BonusId
+        - Name
+        - Number
+        - Task
+        - Help
+        - IsAnswered
+        - Answer
+        - Expired
+        - SecondsToStart
+        - SecondsLeft
+        - AwardTime
+        - Negative
       properties:
         BonusId:
           type: integer
@@ -668,6 +1509,14 @@ components:
 
     Help:
       type: object
+      required:
+        - HelpId
+        - Number
+        - IsPenalty
+        - Penalty
+        - RequestConfirm
+        - PenaltyHelpState
+        - RemainSeconds
       properties:
         HelpId:
           type: integer
@@ -703,6 +1552,18 @@ components:
     CodeAction:
       type: object
       description: Запись в логе кодов (введённый код игроком команды)
+      required:
+        - ActionId
+        - LevelId
+        - LevelNumber
+        - UserId
+        - Kind
+        - Login
+        - Answer
+        - LocDateTime
+        - IsCorrect
+        - Penalty
+        - Negative
       properties:
         ActionId:
           type: integer
@@ -750,6 +1611,7 @@ components:
     EngineAction:
       type: object
       description: Результат последнего игрового действия
+      required: [LevelNumber, GameId, LevelId]
       properties:
         LevelNumber:
           type: integer
@@ -788,6 +1650,7 @@ components:
     GameListResponse:
       type: object
       description: Ответ со списком игр
+      required: [ComingGames, ActiveGames]
       properties:
         ComingGames:
           type: array
@@ -907,6 +1770,7 @@ components:
     GameStatisticsResponse:
       type: object
       description: Полная статистика игры
+      required: [Game, Level, StatItems, Levels, IsLevelNamesVisible, LevelPlayers, User, PagerVisible, ShowAdminWarning]
       properties:
         Game:
           $ref: '#/components/schemas/GameInfo'
@@ -941,6 +1805,7 @@ components:
     StatItem:
       type: object
       description: Результат команды/игрока на уровне
+      required: [UserId, LevelId, TeamId, UserName, TeamName, LevelNum, SpentSeconds, LevelOrder, PassType, Scores]
       properties:
         ActionTime:
           $ref: '#/components/schemas/DateTime'
@@ -997,6 +1862,29 @@ components:
     UserProfile:
       type: object
       description: Профиль пользователя (возвращается в статистике игры)
+      required:
+        - ID
+        - Login
+        - FirstName
+        - PatronymicName
+        - LastName
+        - Email
+        - EmailChecked
+        - GenderID
+        - CityId
+        - CountryId
+        - ProvinceId
+        - TeamID
+        - ParentID
+        - SiteId
+        - IsActive
+        - Points
+        - BonusPoints
+        - RankID
+        - StatusId
+        - Network
+        - IsSuperAdmin
+        - BlockByIP
       properties:
         ID:
           type: integer
@@ -1060,6 +1948,7 @@ components:
 
     DateTime:
       type: object
+      required: [Value, Timestamp]
       properties:
         Value:
           type: number
@@ -1070,6 +1959,7 @@ components:
 
     Money:
       type: object
+      required: [Cents, Value, Formated]
       properties:
         Cents:
           type: integer
@@ -1086,6 +1976,7 @@ components:
 
     Duration:
       type: object
+      required: [Days, Hours, Minutes, Seconds, TotalSeconds]
       properties:
         Ticks:
           type: integer
