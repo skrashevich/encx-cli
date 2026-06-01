@@ -60,6 +60,18 @@ func TestEnsureJSONBodyAntiSpam(t *testing.T) {
 	}
 }
 
+func TestDecodeJSONEmptyBody(t *testing.T) {
+	c := &Client{domain: "tech.en.cx", scheme: "https"}
+	var out map[string]any
+	err := c.decodeJSON(nil, &out, "game list")
+	if err == nil {
+		t.Fatal("expected error for empty body")
+	}
+	if !strings.Contains(err.Error(), "empty response") {
+		t.Fatalf("expected empty response error, got %v", err)
+	}
+}
+
 func TestAntiSpamPageURL(t *testing.T) {
 	got := AntiSpamPageURL("tech.en.cx", "https", "/home/")
 	if !strings.HasPrefix(got, "https://tech.en.cx/NotHumanRequest.aspx") {

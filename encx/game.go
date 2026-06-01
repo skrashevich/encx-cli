@@ -47,15 +47,20 @@ func (c *Client) GetGameModel(ctx context.Context, gameId int, formValues ...url
 		return nil, err
 	}
 
+	return decodeGameModelJSON(body, "game model")
+}
+
+func decodeGameModelJSON(body []byte, context string) (*GameModel, error) {
 	if len(body) > 0 && body[0] == '<' {
 		return nil, fmt.Errorf("encx: session expired or access denied (server returned HTML instead of JSON; try re-login)")
 	}
-
+	if len(body) == 0 {
+		return nil, fmt.Errorf("encx: empty response (%s)", context)
+	}
 	var model GameModel
 	if err := json.Unmarshal(body, &model); err != nil {
-		return nil, fmt.Errorf("encx: decode game model: %w", err)
+		return nil, fmt.Errorf("encx: decode %s: %w", context, err)
 	}
-
 	return &model, nil
 }
 
@@ -109,14 +114,5 @@ func (c *Client) GetPenaltyHint(ctx context.Context, gameId, penaltyId int) (*Ga
 		return nil, err
 	}
 
-	if len(body) > 0 && body[0] == '<' {
-		return nil, fmt.Errorf("encx: session expired or access denied (server returned HTML instead of JSON; try re-login)")
-	}
-
-	var model GameModel
-	if err := json.Unmarshal(body, &model); err != nil {
-		return nil, fmt.Errorf("encx: decode hint response: %w", err)
-	}
-
-	return &model, nil
+	return decodeGameModelJSON(body, "hint response")
 }
