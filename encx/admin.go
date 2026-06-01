@@ -3,7 +3,6 @@ package encx
 import (
 	"context"
 	"fmt"
-	"io"
 	"net/http"
 	"net/url"
 	"regexp"
@@ -46,9 +45,9 @@ func (c *Client) doPost(ctx context.Context, rawURL string, form url.Values) (st
 	}
 	defer resp.Body.Close()
 
-	body, err := io.ReadAll(resp.Body)
+	body, err := c.readResponseBody(resp)
 	if err != nil {
-		return "", fmt.Errorf("encx: read POST response: %w", err)
+		return "", err
 	}
 
 	return string(body), nil

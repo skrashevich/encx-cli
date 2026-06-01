@@ -2,7 +2,6 @@ package encx
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"net/http"
 	"net/url"
@@ -34,9 +33,14 @@ func (c *Client) GetGameStatistics(ctx context.Context, gameId int) (*GameStatis
 	}
 	defer resp.Body.Close()
 
+	body, err := c.readResponseBody(resp)
+	if err != nil {
+		return nil, err
+	}
+
 	var result GameStatisticsResponse
-	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
-		return nil, fmt.Errorf("encx: decode game statistics: %w", err)
+	if err := c.decodeJSON(body, &result, "game statistics"); err != nil {
+		return nil, err
 	}
 
 	return &result, nil

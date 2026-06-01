@@ -500,6 +500,14 @@ func (h *webHub) httpAuthLogin(w http.ResponseWriter, r *http.Request) {
 			writeJSON(w, http.StatusUnauthorized, map[string]any{"error": le.Error(), "code": le.Code})
 			return
 		}
+		if encx.IsAntiSpam(err) {
+			writeJSON(w, http.StatusForbidden, map[string]any{
+				"error":    encx.AntiSpamUserMessage(err),
+				"antispam": true,
+				"url":      encx.AntiSpamURLFromError(err),
+			})
+			return
+		}
 		writeJSON(w, http.StatusBadGateway, map[string]string{"error": err.Error()})
 		return
 	}

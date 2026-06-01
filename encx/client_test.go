@@ -39,6 +39,9 @@ func loginTestClient(t *testing.T, client *encx.Client) {
 	t.Helper()
 	resp, err := client.Login(t.Context(), testLogin(), testPassword())
 	if err != nil {
+		if encx.IsAntiSpam(err) {
+			t.Skipf("Domain anti-spam active: %s", encx.AntiSpamURLFromError(err))
+		}
 		t.Fatalf("Login failed: %v", err)
 	}
 	if resp.Error != 0 {
@@ -79,6 +82,9 @@ func TestGetDomainGames(t *testing.T) {
 	client := newTestClient()
 	games, err := client.GetDomainGames(t.Context())
 	if err != nil {
+		if encx.IsAntiSpam(err) {
+			t.Skipf("Domain anti-spam active: %s", encx.AntiSpamURLFromError(err))
+		}
 		t.Fatalf("GetDomainGames failed: %v", err)
 	}
 	if len(games) == 0 {
@@ -275,6 +281,9 @@ func TestGetDomainGamesJSON(t *testing.T) {
 	client := newTestClient()
 	games, err := client.GetDomainGames(t.Context())
 	if err != nil {
+		if encx.IsAntiSpam(err) {
+			t.Skipf("Domain anti-spam active: %s", encx.AntiSpamURLFromError(err))
+		}
 		t.Fatalf("GetDomainGames failed: %v", err)
 	}
 	data, err := json.Marshal(games)
