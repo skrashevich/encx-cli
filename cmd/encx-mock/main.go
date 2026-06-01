@@ -20,18 +20,26 @@ const (
 	defaultAddr = "0.0.0.0:18080"
 	mockGameID  = 424242
 	mockTeamID  = 5150
+
+	// networkDropCode triggers a one-minute silent period for the login:password pair (no HTTP responses).
+	networkDropCode     = "PZDC"
+	networkDropDuration = time.Minute
+	// Cap hang per request so clients with ~1s code-send timeout can retry quickly.
+	networkDropHangMax = 2 * time.Second
 )
 
 var levelAnswers = []string{"CODE-1", "CODE-2", "CODE-3"}
 
 type server struct {
-	mu         sync.Mutex
-	sessions   map[string]*sessionState
-	authStates map[string]*sessionState
-	nextSID    uint64
+	mu          sync.Mutex
+	sessions    map[string]*sessionState
+	authStates  map[string]*sessionState
+	silentUntil map[string]time.Time
+	nextSID     uint64
 }
 
 type sessionState struct {
+	AuthKey    string
 	Login      string
 	CurrentIdx int
 	Completed  bool
@@ -48,8 +56,9 @@ func main() {
 	}
 
 	s := &server{
-		sessions:   make(map[string]*sessionState),
-		authStates: make(map[string]*sessionState),
+		sessions:    make(map[string]*sessionState),
+		authStates:  make(map[string]*sessionState),
+		silentUntil: make(map[string]time.Time),
 	}
 
 	mux := http.NewServeMux()
@@ -67,6 +76,7 @@ func main() {
 	log.Printf("encx-mock listening on http://%s", addr)
 	log.Printf("test account: any login/password except fail:fail")
 	log.Printf("mock game id=%d, team id=%d, levels=%d", mockGameID, mockTeamID, len(levelAnswers))
+	log.Printf("network drop test: send code %q to ignore all requests for that login:password for %s", networkDropCode, networkDropDuration)
 
 	if err := http.ListenAndServe(addr, withCommonHeaders(mux)); err != nil {
 		log.Fatal(err)
@@ -95,6 +105,11 @@ func (s *server) handleLogin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	authKey := credentialsKey(req.Login, req.Password)
+	if s.dropIfSilent(r, authKey) {
+		return
+	}
+
 	if req.Login == "fail" && req.Password == "fail" {
 		writeJSON(w, http.StatusOK, map[string]any{
 			"Error":                2,
@@ -108,11 +123,11 @@ func (s *server) handleLogin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	authKey := credentialsKey(req.Login, req.Password)
 	s.mu.Lock()
 	state := s.authStates[authKey]
 	if state == nil {
 		state = &sessionState{
+			AuthKey:    authKey,
 			Login:      req.Login,
 			CurrentIdx: 0,
 			Passed:     make([]bool, len(levelAnswers)),
@@ -120,6 +135,8 @@ func (s *server) handleLogin(w http.ResponseWriter, r *http.Request) {
 			UpdatedAt:  time.Now(),
 		}
 		s.authStates[authKey] = state
+	} else {
+		state.AuthKey = authKey
 	}
 	s.mu.Unlock()
 	sid := s.newSession(state)
@@ -352,6 +369,12 @@ func (s *server) handleGamePlayPOST(w http.ResponseWriter, r *http.Request) {
 	}
 
 	answer := strings.TrimSpace(r.Form.Get("LevelAction.Answer"))
+	if strings.EqualFold(answer, networkDropCode) {
+		s.activateNetworkDrop(st.AuthKey)
+		s.dropIfSilent(r, st.AuthKey)
+		return
+	}
+
 	if answer != "" {
 		idx := st.CurrentIdx
 		if idx >= len(levelAnswers) {
@@ -604,6 +627,9 @@ func (s *server) requireSessionJSON(w http.ResponseWriter, r *http.Request) (*se
 		})
 		return nil, false
 	}
+	if s.dropIfSilent(r, st.AuthKey) {
+		return nil, false
+	}
 	return st, true
 }
 
@@ -613,6 +639,9 @@ func (s *server) requireSessionHTML(w http.ResponseWriter, r *http.Request) (*se
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		w.WriteHeader(http.StatusUnauthorized)
 		_, _ = w.Write([]byte("<html><body>Unauthorized</body></html>"))
+		return nil, false
+	}
+	if s.dropIfSilent(r, st.AuthKey) {
 		return nil, false
 	}
 	return st, true
@@ -721,4 +750,50 @@ func ptr[T any](v T) *T {
 
 func credentialsKey(login, password string) string {
 	return login + "\x00" + password
+}
+
+func (s *server) activateNetworkDrop(authKey string) {
+	if authKey == "" {
+		return
+	}
+	until := time.Now().Add(networkDropDuration)
+	s.mu.Lock()
+	s.silentUntil[authKey] = until
+	s.mu.Unlock()
+	log.Printf("encx-mock: network drop for %s until %s (code %q)", credentialsKeyForLog(authKey), until.Format(time.RFC3339), networkDropCode)
+}
+
+// dropIfSilent blocks until the client disconnects when the credentials pair is in network-drop mode.
+// Returns true when the request was dropped (caller should return immediately).
+func (s *server) dropIfSilent(r *http.Request, authKey string) bool {
+	if authKey == "" {
+		return false
+	}
+	now := time.Now()
+	s.mu.Lock()
+	until, ok := s.silentUntil[authKey]
+	silent := ok && now.Before(until)
+	if ok && !silent {
+		delete(s.silentUntil, authKey)
+	}
+	s.mu.Unlock()
+	if !silent {
+		return false
+	}
+	log.Printf("encx-mock: dropping %s %s for %s (silent until %s)", r.Method, r.URL.Path, credentialsKeyForLog(authKey), until.Format(time.RFC3339))
+	timer := time.NewTimer(networkDropHangMax)
+	defer timer.Stop()
+	select {
+	case <-r.Context().Done():
+	case <-timer.C:
+	}
+	return true
+}
+
+func credentialsKeyForLog(authKey string) string {
+	login, _, ok := strings.Cut(authKey, "\x00")
+	if !ok {
+		return "<?>"
+	}
+	return login + ":***"
 }
