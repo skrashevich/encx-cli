@@ -1,0 +1,21 @@
+# Ralph progress: gomobile iOS bindings
+
+## US-001: Gomobile-compatible wrapper package
+- Created mobile/encxmobile with EncClient wrapping encx.Client
+- JSON-based API for all player methods (Login, GetGameModel, SendCode, etc.)
+- Session persistence via ExportCookies/ImportCookies
+- Package-level LoginErrorText, EventText, ParseTeamLinks
+- Tests pass: go test ./mobile/encxmobile/
+
+## US-002: iOS framework build tooling
+- mobile/bind-ios.sh builds Encx.xcframework via gomobile bind -target=ios
+- golang.org/x/mobile added to go.mod
+- tools/tools.go pins gomobile/gobind for reproducible builds
+- Verified: mobile/build/Encx.xcframework contains ios-arm64 + simulator slices
+
+## US-003: Integration documentation
+- README section "iOS (gomobile)" with build, Xcode setup, Swift example
+
+## Patterns
+- gomobile requires int64 (not int), no context.Context, JSON strings for complex types
+- EncxmobileEncClient is the Swift/ObjC class name from gomobile bind

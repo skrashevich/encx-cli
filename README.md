@@ -133,6 +133,87 @@ func main() {
 | `WithUserAgent(ua)` | Установить User-Agent |
 | `WithLang(lang)` | Язык запросов (по умолчанию: `ru`) |
 
+## iOS (gomobile)
+
+Пакет `mobile/encxmobile` — gomobile-обёртка над `encx` для встраивания в нативное iOS-приложение. API возвращает JSON-строки, которые декодируются в Swift через `JSONDecoder`.
+
+### Сборка Encx.xcframework
+
+```sh
+# из корня репозитория
+./mobile/bind-ios.sh
+
+# результат: mobile/build/Encx.xcframework
+```
+
+Скрипт устанавливает `gomobile`, прогоняет тесты и собирает фреймворк для устройства и симулятора.
+
+### Подключение в Xcode
+
+1. Перетащите `Encx.xcframework` в проект (Embed & Sign).
+2. Добавьте в **Info.plist** разрешение на сеть (если ещё нет):
+
+```xml
+<key>NSAppTransportSecurity</key>
+<dict>
+  <key>NSAllowsArbitraryLoads</key>
+  <true/>
+</dict>
+```
+
+> Для production лучше настроить ATS exceptions только для нужных доменов (`*.en.cx`).
+
+### Пример (Swift)
+
+```swift
+import Encx
+
+guard let client = EncxmobileNewClient("tech.en.cx", true) else { return }
+
+// Авторизация
+var loginErr: NSError?
+let loginJSON = client.login("user", password: "secret", error: &loginErr)
+if let err = loginErr { print(err); return }
+
+struct LoginResponse: Decodable {
+    let Error: Int
+    let Message: String
+}
+let login = try JSONDecoder().decode(LoginResponse.self, from: loginJSON.data(using: .utf8)!)
+guard login.Error == 0 else {
+    print(EncxmobileLoginErrorText(login.Error))
+    return
+}
+
+// Сохранение сессии (Keychain / UserDefaults)
+if let cookies = client.exportCookies(&loginErr) {
+    UserDefaults.standard.set(cookies, forKey: "encx_cookies")
+}
+
+// Состояние игры
+let gameJSON = client.getGameModel(12345, error: &loginErr)
+// decode GameModel from gameJSON...
+
+// Отправка кода
+let resultJSON = client.sendCode(12345, levelID: 67890, levelNumber: 1, code: "КОД123", error: &loginErr)
+```
+
+### Доступные методы
+
+| Go (encxmobile) | Описание |
+|---|---|
+| `NewClient` / `NewClientWithOptions` | Создание клиента |
+| `Login` / `LoginWithCaptcha` | Авторизация |
+| `GetGameModel` | Состояние игры |
+| `SendCode` / `SendBonusCode` | Отправка кодов |
+| `GetPenaltyHint` | Штрафная подсказка |
+| `GetGameList` / `GetDomainGames` | Список игр |
+| `GetGameStatistics` | Статистика |
+| `EnterGame` | Вступление в игру |
+| `GetProfile` | Профиль пользователя |
+| `ExportCookies` / `ImportCookies` | Сохранение сессии |
+| `LoginErrorText` / `EventText` | Тексты ошибок |
+
 ## CLI: `encli`
 
 `encli` полезен, когда нужно быстро дернуть API руками и не городить под это отдельный код.
