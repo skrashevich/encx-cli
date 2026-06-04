@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/url"
 	"strconv"
+	"strings"
 )
 
 // Login authenticates the user on the Encounter domain.
@@ -53,19 +54,13 @@ func (c *Client) Login(ctx context.Context, login, password string, opts ...Logi
 	c.setHeaders(req)
 	req.Header.Set("Content-Type", "application/json")
 
-	resp, err := c.httpClient.Do(req)
+	statusCode, _, respBody, err := c.doRequestAndRead(req)
 	if err != nil {
 		return nil, fmt.Errorf("encx: login request: %w", err)
 	}
-	defer resp.Body.Close()
 
-	respBody, err := c.readResponseBody(resp)
-	if err != nil {
-		return nil, err
-	}
-
-	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("encx: login request failed with HTTP %d", resp.StatusCode)
+	if statusCode != http.StatusOK {
+		return nil, fmt.Errorf("encx: login request failed with HTTP %d", statusCode)
 	}
 
 	var result LoginResponse
@@ -74,4 +69,17 @@ func (c *Client) Login(ctx context.Context, login, password string, opts ...Logi
 	}
 
 	return &result, nil
+}
+
+// LoginForAntiSpamRecovery signs in during anti-spam recovery: Login.aspx form first, then JSON /login/signin.
+// loginPageURL should be the Login.aspx link from NotHumanRequest (see ResolveAntiSpamLoginURL).
+func (c *Client) LoginForAntiSpamRecovery(ctx context.Context, loginPageURL, login, password string, opts ...LoginOptions) (*LoginResponse, error) {
+	if strings.TrimSpace(loginPageURL) != "" {
+		if err := c.LoginViaLoginPage(ctx, loginPageURL, login, password, opts...); err == nil {
+			return &LoginResponse{Error: 0}, nil
+		}
+	}
+	c.antiSpamRecovery.Store(true)
+	defer c.antiSpamRecovery.Store(false)
+	return c.Login(ctx, login, password, opts...)
 }

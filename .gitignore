@@ -9,6 +9,7 @@ apks
 *.log
 /main
 /mobile/build/
-/ios/encx-cli/build/
 build
 /encx-mock
+xcuserdata/
+/ios/encx-cli/

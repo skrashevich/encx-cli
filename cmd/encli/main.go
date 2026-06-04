@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 	"syscall"
 	"text/tabwriter"
 	"time"
@@ -29,18 +30,20 @@ var (
 
 // Config holds parsed CLI configuration.
 type config struct {
-	domain         string
-	login          string
-	password       string
-	gameId         int
-	insecure       bool
-	useHTTP        bool
-	jsonOutput     bool
-	debug          bool
-	harRecording   bool
-	harOut         string
-	agentReadonly  bool
-	agentSecurity  AgentSecurityMode // default for new web chats
+	domain            string
+	login             string
+	password          string
+	gameId            int
+	insecure          bool
+	useHTTP           bool
+	jsonOutput        bool
+	debug             bool
+	harRecording      bool
+	harOut            string
+	agentReadonly     bool
+	agentSecurity     AgentSecurityMode // default for new web chats
+	importDryRun      bool
+	importSyncMissing bool
 }
 
 func main() {
@@ -117,9 +120,13 @@ func main() {
 			debugf("starting llm mode: domain=%s game_id=%d insecure=%v http=%v json=%v login_set=%v password_set=%v prompt_len=%d",
 				cfg.domain, cfg.gameId, cfg.insecure, cfg.useHTTP, cfg.jsonOutput, cfg.login != "", cfg.password != "", len(strings.Join(promptParts, " ")))
 
-			var opts []encx.Option = appendEncOpts(cfg)
-
-			client := encx.New(cfg.domain, opts...)
+			opts := appendEncOpts(cfg)
+			var client *encx.Client
+			antiSpam := newAntiSpamGuard()
+			opts = append(opts, encx.WithAntiSpamHandler(func(url string) error {
+				return handleAntiSpam(context.Background(), cfg, client, antiSpam, url)
+			}))
+			client = encx.New(cfg.domain, opts...)
 			if cfg.harRecording {
 				defer exportClientHAR(client, cfg)
 			}
@@ -169,6 +176,8 @@ func main() {
 	fs.BoolVar(&cfg.jsonOutput, "json", false, "Output results as JSON")
 	fs.BoolVar(&cfg.debug, "debug", envBool("ENCX_DEBUG"), "Enable debug logging (env: ENCX_DEBUG)")
 	registerHARFlags(fs, cfg)
+	fs.BoolVar(&cfg.importDryRun, "dry-run", false, "Dry run for import-scenario (parse only, do not modify game)")
+	fs.BoolVar(&cfg.importSyncMissing, "sync-missing", false, "Align existing import-scenario levels with the export (no full wipe)")
 
 	fs.Usage = func() { printCommandHelp(cmd) }
 	fs.Parse(args)
@@ -177,14 +186,18 @@ func main() {
 	debugf("parsed command=%s domain=%s game_id=%d insecure=%v http=%v json=%v login_set=%v password_set=%v positional=%d",
 		cmd, cfg.domain, cfg.gameId, cfg.insecure, cfg.useHTTP, cfg.jsonOutput, cfg.login != "", cfg.password != "", len(fs.Args()))
 
-	var opts []encx.Option = appendEncOpts(cfg)
-
-	client := encx.New(cfg.domain, opts...)
+	opts := appendEncOpts(cfg)
+	ctx := context.Background()
+	var client *encx.Client
+	antiSpam := newAntiSpamGuard()
+	opts = append(opts, encx.WithAntiSpamHandler(func(url string) error {
+		return handleAntiSpam(ctx, cfg, client, antiSpam, url)
+	}))
+	client = encx.New(cfg.domain, opts...)
 	if cfg.harRecording {
 		defer exportClientHAR(client, cfg)
 	}
 	debugf("created encx client for domain=%s", cfg.domain)
-	ctx := context.Background()
 	positional := fs.Args()
 	debugf("dispatching command=%s positional=%v", cmd, positional)
 
@@ -238,133 +251,138 @@ func main() {
 	case "profile":
 		requireAuth(ctx, cfg, client)
 		cmdProfile(ctx, cfg, client)
+	case "import-scenario":
+		if importScenarioNeedsAdmin(cfg, positional) {
+			requireAdminAuth(ctx, cfg, client)
+		}
+		cmdImportScenario(ctx, cfg, client, positional)
 
 	// Admin commands
 	case "admin-games":
-		requireAuth(ctx, cfg, client)
+		requireAdminAuth(ctx, cfg, client)
 		cmdAdminGames(ctx, cfg, client)
 	case "admin-levels":
-		requireAuth(ctx, cfg, client)
+		requireAdminAuth(ctx, cfg, client)
 		cmdAdminLevels(ctx, cfg, client)
 	case "admin-level-content":
-		requireAuth(ctx, cfg, client)
+		requireAdminAuth(ctx, cfg, client)
 		cmdAdminLevelContent(ctx, cfg, client, positional)
 	case "admin-create-levels":
-		requireAuth(ctx, cfg, client)
+		requireAdminAuth(ctx, cfg, client)
 		cmdAdminCreateLevels(ctx, cfg, client, positional)
 	case "admin-delete-level":
-		requireAuth(ctx, cfg, client)
+		requireAdminAuth(ctx, cfg, client)
 		cmdAdminDeleteLevel(ctx, cfg, client, positional)
 	case "admin-rename-level":
-		requireAuth(ctx, cfg, client)
+		requireAdminAuth(ctx, cfg, client)
 		cmdAdminRenameLevel(ctx, cfg, client, positional)
 	case "admin-set-autopass":
-		requireAuth(ctx, cfg, client)
+		requireAdminAuth(ctx, cfg, client)
 		cmdAdminUpdateAutopass(ctx, cfg, client, positional)
 	case "admin-set-block":
-		requireAuth(ctx, cfg, client)
+		requireAdminAuth(ctx, cfg, client)
 		cmdAdminUpdateAnswerBlock(ctx, cfg, client, positional)
 	case "admin-create-bonus":
-		requireAuth(ctx, cfg, client)
+		requireAdminAuth(ctx, cfg, client)
 		cmdAdminCreateBonus(ctx, cfg, client, positional)
 	case "admin-delete-bonus":
-		requireAuth(ctx, cfg, client)
+		requireAdminAuth(ctx, cfg, client)
 		cmdAdminDeleteBonus(ctx, cfg, client, positional)
 	case "admin-create-sector":
-		requireAuth(ctx, cfg, client)
+		requireAdminAuth(ctx, cfg, client)
 		cmdAdminCreateSector(ctx, cfg, client, positional)
 	case "admin-delete-sector":
-		requireAuth(ctx, cfg, client)
+		requireAdminAuth(ctx, cfg, client)
 		cmdAdminDeleteSector(ctx, cfg, client, positional)
 	case "admin-update-sector":
-		requireAuth(ctx, cfg, client)
+		requireAdminAuth(ctx, cfg, client)
 		cmdAdminUpdateSector(ctx, cfg, client, positional)
 	case "admin-create-hint":
-		requireAuth(ctx, cfg, client)
+		requireAdminAuth(ctx, cfg, client)
 		cmdAdminCreateHint(ctx, cfg, client, positional)
 	case "admin-delete-hint":
-		requireAuth(ctx, cfg, client)
+		requireAdminAuth(ctx, cfg, client)
 		cmdAdminDeleteHint(ctx, cfg, client, positional)
 	case "admin-create-task":
-		requireAuth(ctx, cfg, client)
+		requireAdminAuth(ctx, cfg, client)
 		cmdAdminCreateTask(ctx, cfg, client, positional)
 	case "admin-set-comment":
-		requireAuth(ctx, cfg, client)
+		requireAdminAuth(ctx, cfg, client)
 		cmdAdminSetComment(ctx, cfg, client, positional)
 	case "admin-teams":
-		requireAuth(ctx, cfg, client)
+		requireAdminAuth(ctx, cfg, client)
 		cmdAdminTeams(ctx, cfg, client)
 	case "admin-corrections":
-		requireAuth(ctx, cfg, client)
+		requireAdminAuth(ctx, cfg, client)
 		cmdAdminCorrections(ctx, cfg, client)
 	case "admin-add-correction":
-		requireAuth(ctx, cfg, client)
+		requireAdminAuth(ctx, cfg, client)
 		cmdAdminAddCorrection(ctx, cfg, client, positional)
 	case "admin-delete-correction":
-		requireAuth(ctx, cfg, client)
+		requireAdminAuth(ctx, cfg, client)
 		cmdAdminDeleteCorrection(ctx, cfg, client, positional)
 	case "admin-wipe-game":
-		requireAuth(ctx, cfg, client)
+		requireAdminAuth(ctx, cfg, client)
 		cmdAdminWipeGame(ctx, cfg, client)
 	case "admin-copy-game":
-		requireAuth(ctx, cfg, client)
+		requireAdminAuth(ctx, cfg, client)
 		cmdAdminCopyGame(ctx, cfg, client, positional)
 	case "admin-game-info":
-		requireAuth(ctx, cfg, client)
+		requireAdminAuth(ctx, cfg, client)
 		cmdAdminGameInfo(ctx, cfg, client)
 	case "admin-update-game":
-		requireAuth(ctx, cfg, client)
+		requireAdminAuth(ctx, cfg, client)
 		cmdAdminUpdateGame(ctx, cfg, client, positional)
 	case "admin-not-deliver":
-		requireAuth(ctx, cfg, client)
+		requireAdminAuth(ctx, cfg, client)
 		cmdAdminNotDeliver(ctx, cfg, client)
 	case "admin-deliver":
-		requireAuth(ctx, cfg, client)
+		requireAdminAuth(ctx, cfg, client)
 		cmdAdminDeliverGame(ctx, cfg, client)
 	case "admin-award-points":
-		requireAuth(ctx, cfg, client)
+		requireAdminAuth(ctx, cfg, client)
 		cmdAdminAwardPoints(ctx, cfg, client)
 	case "admin-end-ratings":
-		requireAuth(ctx, cfg, client)
+		requireAdminAuth(ctx, cfg, client)
 		cmdAdminEndRatings(ctx, cfg, client)
 	case "admin-calc-ik":
-		requireAuth(ctx, cfg, client)
+		requireAdminAuth(ctx, cfg, client)
 		cmdAdminCalcIK(ctx, cfg, client)
 	case "admin-swap-levels":
-		requireAuth(ctx, cfg, client)
+		requireAdminAuth(ctx, cfg, client)
 		cmdAdminSwapLevels(ctx, cfg, client, positional)
 	case "admin-insert-level":
-		requireAuth(ctx, cfg, client)
+		requireAdminAuth(ctx, cfg, client)
 		cmdAdminInsertLevel(ctx, cfg, client, positional)
 	case "admin-clone-levels":
-		requireAuth(ctx, cfg, client)
+		requireAdminAuth(ctx, cfg, client)
 		cmdAdminCloneLevels(ctx, cfg, client, positional)
 	case "admin-delete-task":
-		requireAuth(ctx, cfg, client)
+		requireAdminAuth(ctx, cfg, client)
 		cmdAdminDeleteTask(ctx, cfg, client, positional)
 	case "admin-update-task":
-		requireAuth(ctx, cfg, client)
+		requireAdminAuth(ctx, cfg, client)
 		cmdAdminUpdateTask(ctx, cfg, client, positional)
 	case "admin-update-bonus":
-		requireAuth(ctx, cfg, client)
+		requireAdminAuth(ctx, cfg, client)
 		cmdAdminUpdateBonus(ctx, cfg, client, positional)
 	case "admin-update-hint":
-		requireAuth(ctx, cfg, client)
+		requireAdminAuth(ctx, cfg, client)
 		cmdAdminUpdateHint(ctx, cfg, client, positional)
 	case "admin-action-monitor":
-		requireAuth(ctx, cfg, client)
+		requireAdminAuth(ctx, cfg, client)
 		cmdAdminActionMonitor(ctx, cfg, client)
 	case "admin-create-message":
-		requireAuth(ctx, cfg, client)
+		requireAdminAuth(ctx, cfg, client)
 		cmdAdminCreateMessage(ctx, cfg, client, positional)
 	case "admin-messages":
-		requireAuth(ctx, cfg, client)
+		requireAdminAuth(ctx, cfg, client)
 		cmdAdminMessages(ctx, cfg, client, positional)
 	case "admin-update-message":
-		requireAuth(ctx, cfg, client)
+		requireAdminAuth(ctx, cfg, client)
 		cmdAdminUpdateMessage(ctx, cfg, client, positional)
 	case "admin-delete-message":
-		requireAuth(ctx, cfg, client)
+		requireAdminAuth(ctx, cfg, client)
 		cmdAdminDeleteMessage(ctx, cfg, client, positional)
 
 	case "help":
@@ -399,6 +417,7 @@ Commands:
   hint        Request a penalty hint
   game-stats  Show game statistics (levels, teams, rankings)
   profile     Show your profile
+  import-scenario  Import scenario from GameScenario HTML export
 
 Admin commands (require game editor rights):
   admin-games              List your authored games
@@ -545,6 +564,13 @@ func printCommandHelp(cmd string) {
 	case "profile":
 		fmt.Fprintln(os.Stderr, "Usage: encli profile")
 		fmt.Fprintln(os.Stderr, "  Show your profile (login, name, rank, team, points).")
+	case "import-scenario":
+		fmt.Fprintln(os.Stderr, "Usage: encli import-scenario -game-id <id> [--dry-run] [--sync-missing] <path-to-Game scenario.html>")
+		fmt.Fprintln(os.Stderr, "  Replace current game levels with parsed levels/tasks/hints/answers from Encounter GameScenario HTML export.")
+		fmt.Fprintln(os.Stderr, "  Relative image links from the export are embedded as data URLs.")
+		fmt.Fprintln(os.Stderr, "  --dry-run parses and validates scenario file without writing changes to the game.")
+		fmt.Fprintln(os.Stderr, "  --sync-missing aligns each level with the scenario export (replace mismatched tasks/hints/sectors; without full wipe).")
+		fmt.Fprintln(os.Stderr, "  On Encounter anti-spam challenge or timeout, CLI asks for retry and continues import.")
 	case "admin-games":
 		fmt.Fprintln(os.Stderr, "Usage: encli admin-games")
 		fmt.Fprintln(os.Stderr, "  List games where you are an author or have admin access.")
@@ -771,7 +797,7 @@ func loadSession(cfg *config, client *encx.Client) bool {
 
 func requireAuth(ctx context.Context, cfg *config, client *encx.Client) {
 	debugf("require auth: login_set=%v password_set=%v", cfg.login != "", cfg.password != "")
-	if loadSession(cfg, client) && cfg.login == "" {
+	if loadSession(cfg, client) {
 		debugf("require auth: using saved session")
 		return
 	}
@@ -787,6 +813,25 @@ func requireAuth(ctx context.Context, cfg *config, client *encx.Client) {
 		fatal("Login error %d: %s", resp.Error, encx.LoginErrorText(resp.Error))
 	}
 	debugf("require auth: login successful for %s", cfg.login)
+	saveSession(cfg, client)
+}
+
+func requireAdminAuth(ctx context.Context, cfg *config, client *encx.Client) {
+	debugf("require admin auth: login_set=%v password_set=%v", cfg.login != "", cfg.password != "")
+	if loadSession(cfg, client) {
+		if err := client.VerifyAdminSession(ctx); err == nil {
+			debugf("require admin auth: using saved session")
+			return
+		} else {
+			debugf("require admin auth: saved session rejected: %v", err)
+		}
+	}
+	if cfg.login == "" || cfg.password == "" {
+		fatal("No saved session with admin access. Run 'encli login' first, or pass -login and -password")
+	}
+	if err := client.LoginComplete(ctx, cfg.login, cfg.password); err != nil {
+		fatalEncx("Login failed", err)
+	}
 	saveSession(cfg, client)
 }
 
@@ -1594,7 +1639,7 @@ func debugf(format string, args ...any) {
 
 func isBoolFlag(arg string) bool {
 	switch arg {
-	case "-insecure", "-http", "-json", "-debug", "-har", "-web", "--web", "-readonly", "--readonly":
+	case "-insecure", "-http", "-json", "-debug", "-har", "-web", "--web", "-readonly", "--readonly", "-dry-run", "--dry-run", "-sync-missing", "--sync-missing":
 		return true
 	default:
 		return false
@@ -1675,6 +1720,139 @@ func promptPassword(label string) string {
 		fatal("Failed to read password: %v", err)
 	}
 	return string(b)
+}
+
+type antiSpamGuard struct {
+	mu           sync.Mutex
+	reloginTried bool
+}
+
+func newAntiSpamGuard() *antiSpamGuard {
+	return &antiSpamGuard{}
+}
+
+func (g *antiSpamGuard) takeReloginAttempt() bool {
+	if g == nil {
+		return false
+	}
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	if g.reloginTried {
+		return false
+	}
+	g.reloginTried = true
+	return true
+}
+
+func (g *antiSpamGuard) reloginWasTried() bool {
+	if g == nil {
+		return false
+	}
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	return g.reloginTried
+}
+
+func (g *antiSpamGuard) reset() {
+	if g == nil {
+		return
+	}
+	g.mu.Lock()
+	g.reloginTried = false
+	g.mu.Unlock()
+}
+
+// handleAntiSpam tries API re-login once per manual cycle, then falls back to browser verification.
+func handleAntiSpam(ctx context.Context, cfg *config, client *encx.Client, guard *antiSpamGuard, url string) error {
+	if guard.takeReloginAttempt() && client != nil && tryAntiSpamReLogin(ctx, cfg, client, url) {
+		return nil
+	}
+	browserURL := resolveAntiSpamBrowserURL(ctx, client, url)
+	if guard.reloginWasTried() {
+		fmt.Fprintln(os.Stderr)
+		fmt.Fprintf(os.Stderr, "Automatic sign-in did not clear anti-spam. Complete verification in the browser: %s\n", browserURL)
+	}
+	err := promptAntiSpamChallenge(browserURL)
+	guard.reset()
+	return err
+}
+
+func resolveAntiSpamBrowserURL(ctx context.Context, client *encx.Client, challengeURL string) string {
+	if client == nil {
+		return challengeURL
+	}
+	resolved, err := client.ResolveAntiSpamLoginURL(ctx, challengeURL)
+	if err != nil {
+		debugf("anti-spam: could not resolve login URL from NotHumanRequest: %v", err)
+		return challengeURL
+	}
+	return resolved
+}
+
+func antiSpamCredentials(cfg *config) (login, password string, ok bool) {
+	if cfg == nil {
+		return "", "", false
+	}
+	login = strings.TrimSpace(cfg.login)
+	if login == "" {
+		login = loadSessionLogin(cfg.domain)
+	}
+	password = cfg.password
+	if login == "" || password == "" {
+		return "", "", false
+	}
+	return login, password, true
+}
+
+func tryAntiSpamReLogin(ctx context.Context, cfg *config, client *encx.Client, challengeURL string) bool {
+	login, password, ok := antiSpamCredentials(cfg)
+	if !ok {
+		debugf("anti-spam: skip auto re-login (login_set=%v password_set=%v)", cfg.login != "", cfg.password != "")
+		return false
+	}
+	loginPageURL := resolveAntiSpamBrowserURL(ctx, client, challengeURL)
+	fmt.Fprintln(os.Stderr)
+	fmt.Fprintf(os.Stderr, "Encounter anti-spam: trying automatic sign-in at %s\n", loginPageURL)
+	debugf("anti-spam: re-login as %s via %s", login, loginPageURL)
+	resp, err := client.LoginForAntiSpamRecovery(ctx, loginPageURL, login, password)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Auto sign-in failed: %v\n", err)
+		return false
+	}
+	if resp.Error != 0 {
+		fmt.Fprintf(os.Stderr, "Auto sign-in failed: %s\n", encx.LoginErrorText(resp.Error))
+		if resp.CaptchaUrl != nil && strings.TrimSpace(*resp.CaptchaUrl) != "" {
+			fmt.Fprintf(os.Stderr, "Captcha: %s\n", *resp.CaptchaUrl)
+		}
+		return false
+	}
+	if cfg.login == "" {
+		cfg.login = login
+	}
+	saveSession(cfg, client)
+	fmt.Fprintln(os.Stderr, "Auto sign-in succeeded, retrying request...")
+	return true
+}
+
+func promptAntiSpamChallenge(url string) error {
+	if url == "" {
+		url = "https://<domain>/NotHumanRequest.aspx"
+	}
+	fmt.Fprintln(os.Stderr)
+	fmt.Fprintln(os.Stderr, "Encounter anti-spam verification required.")
+	fmt.Fprintf(os.Stderr, "Open in browser and complete the check (sign in if needed): %s\n", url)
+	fmt.Fprint(os.Stderr, "Press Enter to retry request (or type 'abort' to stop): ")
+	scanner := bufio.NewScanner(os.Stdin)
+	if !scanner.Scan() {
+		if err := scanner.Err(); err != nil {
+			return fmt.Errorf("failed to read anti-spam confirmation: %w", err)
+		}
+		return fmt.Errorf("anti-spam confirmation interrupted")
+	}
+	if strings.EqualFold(strings.TrimSpace(scanner.Text()), "abort") {
+		return fmt.Errorf("aborted by user")
+	}
+	return nil
 }
 
 func envInt(key string, fallback int) int {

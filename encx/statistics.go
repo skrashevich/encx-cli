@@ -27,15 +27,9 @@ func (c *Client) GetGameStatistics(ctx context.Context, gameId int) (*GameStatis
 	}
 	c.setHeaders(req)
 
-	resp, err := c.httpClient.Do(req)
+	_, _, body, err := c.doRequestAndRead(req)
 	if err != nil {
 		return nil, fmt.Errorf("encx: game statistics request: %w", err)
-	}
-	defer resp.Body.Close()
-
-	body, err := c.readResponseBody(resp)
-	if err != nil {
-		return nil, err
 	}
 
 	var result GameStatisticsResponse

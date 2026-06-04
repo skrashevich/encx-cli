@@ -83,24 +83,18 @@ func (c *Client) enterGameFeeRequest(ctx context.Context, method, rawURL, formBo
 			req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 		}
 
-		resp, err := c.httpClient.Do(req)
+		statusCode, headers, respBody, err := c.doRequestAndRead(req)
 		if err != nil {
 			return "", fmt.Errorf("encx: enter game request: %w", err)
 		}
 
-		respBody, readErr := c.readResponseBody(resp)
-		resp.Body.Close()
-		if readErr != nil {
-			return "", readErr
-		}
-
-		if isRedirectStatus(resp.StatusCode) {
-			location := resp.Header.Get("Location")
+		if isRedirectStatus(statusCode) {
+			location := headers.Get("Location")
 			if isLoginRedirect(location) {
 				return "", fmt.Errorf("encx: session expired or access denied (redirect to login)")
 			}
 			if location == "" {
-				return "", fmt.Errorf("encx: enter game redirect without Location (HTTP %d)", resp.StatusCode)
+				return "", fmt.Errorf("encx: enter game redirect without Location (HTTP %d)", statusCode)
 			}
 			nextURL, err := resolveAgainstBase(c.baseURL(), location)
 			if err != nil {
@@ -112,11 +106,11 @@ func (c *Client) enterGameFeeRequest(ctx context.Context, method, rawURL, formBo
 			continue
 		}
 
-		if resp.StatusCode == http.StatusNotFound {
+		if statusCode == http.StatusNotFound {
 			return "", fmt.Errorf("encx: enter game failed with HTTP 404 (endpoint missing on %s)", c.domain)
 		}
-		if resp.StatusCode != http.StatusOK {
-			return "", fmt.Errorf("encx: enter game failed with HTTP %d", resp.StatusCode)
+		if statusCode != http.StatusOK {
+			return "", fmt.Errorf("encx: enter game failed with HTTP %d", statusCode)
 		}
 
 		return string(respBody), nil
@@ -134,6 +128,13 @@ func isEnterGameHTTP404(err error) bool {
 
 func isLoginRedirect(location string) bool {
 	return strings.Contains(strings.ToLower(strings.TrimSpace(location)), "login.aspx")
+}
+
+func guardHTTPLoginRedirect(statusCode int, headers http.Header, body []byte) error {
+	if isRedirectStatus(statusCode) && isLoginRedirect(headers.Get("Location")) {
+		return fmt.Errorf("encx: session expired or access denied (redirect to login)")
+	}
+	return guardAdminHTMLRequiresLogin(body)
 }
 
 func resolveAgainstBase(baseURL, location string) (string, error) {

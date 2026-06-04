@@ -36,15 +36,9 @@ func (c *Client) GetGameModel(ctx context.Context, gameId int, formValues ...url
 	c.setHeaders(req)
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 
-	resp, err := c.httpClient.Do(req)
+	_, _, body, err := c.doRequestAndRead(req)
 	if err != nil {
 		return nil, fmt.Errorf("encx: game request: %w", err)
-	}
-	defer resp.Body.Close()
-
-	body, err := c.readResponseBody(resp)
-	if err != nil {
-		return nil, err
 	}
 
 	return decodeGameModelJSON(body, "game model")
@@ -94,15 +88,9 @@ func (c *Client) GetPenaltyHint(ctx context.Context, gameId, penaltyId int) (*Ga
 	}
 	c.setHeaders(req)
 
-	resp, err := c.httpClient.Do(req)
+	_, _, body, err := c.doRequestAndRead(req)
 	if err != nil {
 		return nil, fmt.Errorf("encx: hint request: %w", err)
-	}
-	defer resp.Body.Close()
-
-	body, err := c.readResponseBody(resp)
-	if err != nil {
-		return nil, err
 	}
 
 	return decodeGameModelJSON(body, "hint response")

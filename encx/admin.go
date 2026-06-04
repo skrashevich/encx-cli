@@ -39,15 +39,9 @@ func (c *Client) doPost(ctx context.Context, rawURL string, form url.Values) (st
 	c.setHeaders(req)
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 
-	resp, err := c.httpClient.Do(req)
+	_, _, body, err := c.doRequestAndRead(req)
 	if err != nil {
 		return "", fmt.Errorf("encx: POST %s: %w", rawURL, err)
-	}
-	defer resp.Body.Close()
-
-	body, err := c.readResponseBody(resp)
-	if err != nil {
-		return "", err
 	}
 
 	return string(body), nil
@@ -383,10 +377,11 @@ func (c *Client) AdminCreateSector(ctx context.Context, gameId, levelNum int, s 
 
 // AdminUpdateSector updates an existing sector by its ID.
 func (c *Client) AdminUpdateSector(ctx context.Context, gameId, levelNum, sectorId int, s AdminSector) error {
-	u := fmt.Sprintf("%s/Administration/Games/LevelEditor.aspx?gid=%d&level=%d&swanswers=1&editanswers=%d",
-		c.baseURL(), gameId, levelNum, sectorId)
-	_, err := c.doPost(ctx, u, adminSectorForm(s))
-	if err != nil {
+	name := strings.TrimSpace(s.Name)
+	if name == "" {
+		name = fmt.Sprintf("Сектор %d", sectorId)
+	}
+	if err := c.adminSaveSectorForm(ctx, gameId, levelNum, sectorId, name, s.Answers); err != nil {
 		return fmt.Errorf("encx: admin update sector: %w", err)
 	}
 	return nil
@@ -408,15 +403,71 @@ func adminSectorForm(s AdminSector) url.Values {
 	return form
 }
 
-// AdminDeleteSector deletes a sector by its ID.
+// AdminDeleteSector deletes a sector by its ID (delsector= from LevelEditor).
 func (c *Client) AdminDeleteSector(ctx context.Context, gameId, levelNum, sectorId int) error {
-	u := fmt.Sprintf("%s/Administration/Games/LevelEditor.aspx?gid=%d&level=%d&swanswers=1&delsector=%d",
-		c.baseURL(), gameId, levelNum, sectorId)
-	_, err := c.doGet(ctx, u)
+	return c.adminDeleteSector(ctx, gameId, levelNum, sectorId)
+}
+
+func (c *Client) adminLevelEditorAnswersListURL(gameId, levelNum int) string {
+	return fmt.Sprintf("%s/Administration/Games/LevelEditor.aspx?level=%d&gid=%d&swanswers=1",
+		c.baseURL(), levelNum, gameId)
+}
+
+func (c *Client) adminDeleteSectorURL(ctx context.Context, rawURL, referer string) (string, error) {
+	body, err := c.doGetFollowRedirects(ctx, rawURL, referer)
 	if err != nil {
-		return fmt.Errorf("encx: admin delete sector: %w", err)
+		return "", err
 	}
-	return nil
+	lower := strings.ToLower(body)
+	if strings.Contains(lower, "object moved") && strings.Contains(lower, "login.aspx") {
+		return body, fmt.Errorf("session expired")
+	}
+	return body, nil
+}
+
+// doGetFollowRedirects performs GET and follows redirects (LevelEditor delete often returns 302).
+func (c *Client) doGetFollowRedirects(ctx context.Context, rawURL, referer string) (string, error) {
+	const maxRedirects = 5
+	currentURL := rawURL
+
+	for attempt := 0; attempt < maxRedirects; attempt++ {
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, currentURL, nil)
+		if err != nil {
+			return "", fmt.Errorf("encx: create GET request: %w", err)
+		}
+		c.setHeaders(req)
+		if referer != "" {
+			req.Header.Set("Referer", referer)
+		}
+
+		statusCode, headers, respBody, err := c.doRequestAndRead(req)
+		if err != nil {
+			return "", err
+		}
+
+		if isRedirectStatus(statusCode) {
+			location := headers.Get("Location")
+			if isLoginRedirect(location) {
+				return "", fmt.Errorf("encx: session expired or access denied (redirect to login)")
+			}
+			if location == "" {
+				return "", fmt.Errorf("encx: redirect without Location (HTTP %d)", statusCode)
+			}
+			nextURL, err := resolveAgainstBase(c.baseURL(), location)
+			if err != nil {
+				return "", fmt.Errorf("encx: resolve redirect: %w", err)
+			}
+			currentURL = nextURL
+			continue
+		}
+
+		if statusCode != http.StatusOK {
+			return "", fmt.Errorf("encx: GET %s: HTTP %d", currentURL, statusCode)
+		}
+		return string(respBody), nil
+	}
+
+	return "", fmt.Errorf("encx: GET %s: too many redirects", rawURL)
 }
 
 // --- Hint Management ---

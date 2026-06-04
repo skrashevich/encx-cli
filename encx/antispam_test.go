@@ -72,6 +72,19 @@ func TestDecodeJSONEmptyBody(t *testing.T) {
 	}
 }
 
+func TestExtractLoginURLFromNotHumanHTML(t *testing.T) {
+	page := "https://tech.en.cx/NotHumanRequest.aspx?return=%2fhome%2f"
+	body := []byte(`<html><body>
+		<p>Please verify</p>
+		<a href="/Login.aspx?return=%2fhome%2f">Войти</a>
+		</body></html>`)
+	got := ExtractLoginURLFromNotHumanHTML(page, body)
+	want := "https://tech.en.cx/Login.aspx?return=%2fhome%2f"
+	if got != want {
+		t.Fatalf("got %q want %q", got, want)
+	}
+}
+
 func TestAntiSpamPageURL(t *testing.T) {
 	got := AntiSpamPageURL("tech.en.cx", "https", "/home/")
 	if !strings.HasPrefix(got, "https://tech.en.cx/NotHumanRequest.aspx") {

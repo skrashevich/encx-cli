@@ -495,9 +495,15 @@ func (c *Client) AdminGetSectorAnswers(ctx context.Context, gameId, levelNum int
 
 	sectors := make([]AdminSector, 0, len(opts))
 	for _, opt := range opts {
-		sectorVal := opt[1]
-		sectorName := opt[2]
+		sectorVal := strings.TrimSpace(opt[1])
+		sectorName := strings.TrimSpace(html.UnescapeString(opt[2]))
+		if sectorVal == "" || strings.EqualFold(sectorVal, "all") {
+			continue
+		}
 		sectorID, _ := strconv.Atoi(sectorVal)
+		if sectorID <= 0 {
+			continue
+		}
 
 		// Fetch answers for this sector
 		ansURL := fmt.Sprintf("%s/ALoader/LevelInfo.aspx?gid=%d&level=%d&object=3&sector=%s",
@@ -515,6 +521,32 @@ func (c *Client) AdminGetSectorAnswers(ctx context.Context, gameId, levelNum int
 		})
 	}
 
+	return c.fillSectorAnswersFromListPage(ctx, gameId, levelNum, sectors)
+}
+
+func (c *Client) fillSectorAnswersFromListPage(ctx context.Context, gameId, levelNum int, sectors []AdminSector) ([]AdminSector, error) {
+	needList := false
+	for _, s := range sectors {
+		if len(s.Answers) == 0 {
+			needList = true
+			break
+		}
+	}
+	if !needList {
+		return sectors, nil
+	}
+	listBody, err := c.adminReadSectorAnswersList(ctx, gameId, levelNum)
+	if err != nil {
+		return sectors, err
+	}
+	byID := parseListPageSectorAnswersMap(listBody)
+	for i := range sectors {
+		if len(sectors[i].Answers) == 0 {
+			if ans, ok := byID[sectors[i].ID]; ok {
+				sectors[i].Answers = ans
+			}
+		}
+	}
 	return sectors, nil
 }
 
@@ -578,15 +610,17 @@ func parseAnswerInputs(body string) []string {
 	answers := make([]string, 0, len(matches))
 	for _, m := range matches {
 		if m[1] != "" {
-			answers = append(answers, m[1])
+			answers = append(answers, html.UnescapeString(m[1]))
 		}
 	}
 	return answers
 }
 
 // adminDelay pauses between admin requests to avoid rate limiting.
-func adminDelay() {
-	time.Sleep(1200 * time.Millisecond)
+func (c *Client) adminDelay() {
+	if d := c.AdminDelay(); d > 0 {
+		time.Sleep(d)
+	}
 }
 
 // AdminWipeGame completely resets a game: removes all bonuses, hints, sectors, and levels.
@@ -611,7 +645,7 @@ func (c *Client) AdminWipeGame(ctx context.Context, gameId int, progress func(st
 		if err == nil && len(bonusIds) > 0 {
 			for _, bid := range bonusIds {
 				c.AdminDeleteBonus(ctx, gameId, lvl.Number, bid)
-				adminDelay()
+				c.adminDelay()
 			}
 			progress(fmt.Sprintf("  Level %d: %d bonuses deleted", lvl.Number, len(bonusIds)))
 		}
@@ -620,7 +654,7 @@ func (c *Client) AdminWipeGame(ctx context.Context, gameId int, progress func(st
 	// Delete levels in reverse order
 	for i := len(levels) - 1; i >= 0; i-- {
 		c.AdminDeleteLevel(ctx, gameId, levels[i].Number)
-		adminDelay()
+		c.adminDelay()
 	}
 	progress(fmt.Sprintf("  %d levels deleted", len(levels)))
 
@@ -630,7 +664,7 @@ func (c *Client) AdminWipeGame(ctx context.Context, gameId int, progress func(st
 		for _, corr := range corrections {
 			if corr.ID != "" {
 				c.AdminDeleteCorrection(ctx, gameId, corr.ID)
-				adminDelay()
+				c.adminDelay()
 			}
 		}
 		progress(fmt.Sprintf("  %d corrections deleted", len(corrections)))
@@ -704,11 +738,11 @@ func (c *Client) AdminCopyGame(ctx context.Context, srcGameId, dstGameId int, pr
 		if err == nil && settings != nil {
 			if settings.AutopassHours > 0 || settings.AutopassMinutes > 0 || settings.AutopassSeconds > 0 {
 				c.AdminUpdateAutopass(ctx, dstGameId, dstNum, *settings)
-				adminDelay()
+				c.adminDelay()
 			}
 			if settings.AttemptsNumber > 0 {
 				c.AdminUpdateAnswerBlock(ctx, dstGameId, dstNum, *settings)
-				adminDelay()
+				c.adminDelay()
 			}
 		}
 
@@ -716,7 +750,7 @@ func (c *Client) AdminCopyGame(ctx context.Context, srcGameId, dstGameId int, pr
 		name, comment, err := c.AdminGetComment(ctx, srcGameId, lvlNum)
 		if err == nil && (name != "" || comment != "") {
 			c.AdminUpdateComment(ctx, dstGameId, dstNum, name, comment)
-			adminDelay()
+			c.adminDelay()
 		}
 
 		// Copy tasks
@@ -729,7 +763,7 @@ func (c *Client) AdminCopyGame(ctx context.Context, srcGameId, dstGameId int, pr
 					continue
 				}
 				c.AdminCreateTask(ctx, dstGameId, dstNum, *task)
-				adminDelay()
+				c.adminDelay()
 				copied++
 			}
 			if copied > 0 {
@@ -743,7 +777,7 @@ func (c *Client) AdminCopyGame(ctx context.Context, srcGameId, dstGameId int, pr
 			for _, sec := range sectors {
 				if len(sec.Answers) > 0 {
 					c.AdminCreateSector(ctx, dstGameId, dstNum, sec)
-					adminDelay()
+					c.adminDelay()
 				}
 			}
 			if len(sectors) > 0 {
@@ -774,7 +808,7 @@ func (c *Client) AdminCopyGame(ctx context.Context, srcGameId, dstGameId int, pr
 					bonus.LevelID = dstLevels[i].ID
 				}
 				c.AdminCreateBonus(ctx, dstGameId, dstNum, *bonus)
-				adminDelay()
+				c.adminDelay()
 				copied++
 			}
 			if copied > 0 {
@@ -791,7 +825,7 @@ func (c *Client) AdminCopyGame(ctx context.Context, srcGameId, dstGameId int, pr
 					continue
 				}
 				c.AdminCreateHint(ctx, dstGameId, dstNum, *hint)
-				adminDelay()
+				c.adminDelay()
 			}
 			if len(hintIds) > 0 {
 				progress(fmt.Sprintf("  %d hint(s) copied", len(hintIds)))
