@@ -5,6 +5,7 @@
 [![Last commit](https://img.shields.io/github/last-commit/skrashevich/encx-cli?style=flat-square)](https://github.com/skrashevich/encx-cli/commits/main)
 [![License](https://img.shields.io/github/license/skrashevich/encx-cli?style=flat-square)](https://github.com/skrashevich/encx-cli/blob/main/LICENSE)
 [![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/skrashevich/encx-cli)
+[![Download binaries](https://img.shields.io/badge/dawnl.ink-download%20binaries-blue?style=flat-square)](https://dawnl.ink/skrashevich/encx-cli/workflows/release/main)
 <!-- badges:end -->
 
 
