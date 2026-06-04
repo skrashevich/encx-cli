@@ -236,10 +236,7 @@ func cmdImportScenario(ctx context.Context, cfg *config, client *encx.Client, ar
 
 	for idx, lvl := range scenario.Levels {
 		levelNum := idx + 1
-		levelName := strings.TrimSpace(lvl.Name)
-		if levelName == "" {
-			levelName = fmt.Sprintf("Уровень %d", levelNum)
-		}
+		levelName := importLevelName(levelNum, lvl.Name)
 
 		err := runWithAntiSpamRetry(fmt.Sprintf("set name for level %d", levelNum), func() error {
 			return client.AdminUpdateComment(ctx, cfg.gameId, levelNum, levelName, "")
@@ -650,10 +647,6 @@ func scenarioHintKeys(src importedLevel) []string {
 	return out
 }
 
-func hintKeysMatch(a, b []string) bool {
-	return taskNormsMatch(a, b)
-}
-
 func normalizedAnswerSet(answers []string) map[string]struct{} {
 	set := make(map[string]struct{}, len(answers))
 	for _, ans := range answers {
@@ -846,7 +839,7 @@ func syncLevelHintsToScenario(ctx context.Context, client *encx.Client, gameID, 
 		}
 		existing = append(existing, hintDelayTextKey(sec, text))
 	}
-	if hintKeysMatch(existing, want) {
+	if taskNormsMatch(existing, want) {
 		return nil
 	}
 	for _, hintID := range hintIDs {
@@ -913,7 +906,11 @@ func syncLevelSectorsToScenario(ctx context.Context, client *encx.Client, gameID
 		stats.SectorsCreated++
 	}
 
-	sectors, err = runWithAntiSpamRetryReadSectors(ctx, client, gameID, levelNum)
+	err = runWithAntiSpamRetry(fmt.Sprintf("read level %d sectors", levelNum), func() error {
+		var callErr error
+		sectors, callErr = client.AdminGetSectorAnswers(ctx, gameID, levelNum)
+		return callErr
+	})
 	if err != nil {
 		return err
 	}
@@ -937,16 +934,6 @@ func formatAdminSectorsSummary(sectors []encx.AdminSector) string {
 		parts = append(parts, fmt.Sprintf("%s:%v", name, s.Answers))
 	}
 	return strings.Join(parts, "; ")
-}
-
-func runWithAntiSpamRetryReadSectors(ctx context.Context, client *encx.Client, gameID, levelNum int) ([]encx.AdminSector, error) {
-	var sectors []encx.AdminSector
-	err := runWithAntiSpamRetry(fmt.Sprintf("read level %d sectors", levelNum), func() error {
-		var callErr error
-		sectors, callErr = client.AdminGetSectorAnswers(ctx, gameID, levelNum)
-		return callErr
-	})
-	return sectors, err
 }
 
 func syncMissingScenario(ctx context.Context, cfg *config, client *encx.Client, scenario *importedScenario, progress func(string)) (importSyncStats, error) {
@@ -983,10 +970,7 @@ func syncMissingScenario(ctx context.Context, cfg *config, client *encx.Client, 
 
 	for idx, src := range scenario.Levels {
 		levelNum := idx + 1
-		levelName := strings.TrimSpace(src.Name)
-		if levelName == "" {
-			levelName = fmt.Sprintf("Уровень %d", levelNum)
-		}
+		levelName := importLevelName(levelNum, src.Name)
 
 		var curName string
 		var curComment string
@@ -1049,6 +1033,13 @@ func syncMissingScenario(ctx context.Context, cfg *config, client *encx.Client, 
 	}
 
 	return stats, nil
+}
+
+func importLevelName(levelNum int, name string) string {
+	if levelName := strings.TrimSpace(name); levelName != "" {
+		return levelName
+	}
+	return fmt.Sprintf("Уровень %d", levelNum)
 }
 
 func normalizeComparableText(s string) string {

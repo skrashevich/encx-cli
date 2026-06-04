@@ -22,6 +22,9 @@ var (
 	sectorAnswerInputRE          = regexp.MustCompile(`(?i)<input[^>]*name="(txtAnswer[^"]*)"[^>]*value="([^"]*)"`)
 	sectorDeleteAnswerRE         = regexp.MustCompile(`(?i)name="(chkDeleteAnswer_\d+)"[^>]*value="(\d+)"`)
 	htmlInputTagRE               = regexp.MustCompile(`(?is)<input\b([^>/]*)(/?)>`)
+	htmlInputTypeAttrRE          = regexp.MustCompile(`(?is)\btype\s*=\s*["']([^"']*)["']`)
+	htmlInputNameAttrRE          = regexp.MustCompile(`(?is)\bname\s*=\s*["']([^"']*)["']`)
+	htmlInputValueAttrRE         = regexp.MustCompile(`(?is)\bvalue\s*=\s*["']([^"']*)["']`)
 )
 
 func parseListPageSectorAnswersMap(body string) map[int][]string {
@@ -75,7 +78,17 @@ func parseSectorAnswerFields(body string) []sectorAnswerField {
 }
 
 func htmlAttrValue(attrs, key string) string {
-	re := regexp.MustCompile(`(?is)\b` + regexp.QuoteMeta(key) + `\s*=\s*["']([^"']*)["']`)
+	var re *regexp.Regexp
+	switch strings.ToLower(key) {
+	case "type":
+		re = htmlInputTypeAttrRE
+	case "name":
+		re = htmlInputNameAttrRE
+	case "value":
+		re = htmlInputValueAttrRE
+	default:
+		return ""
+	}
 	if m := re.FindStringSubmatch(attrs); len(m) >= 2 {
 		return html.UnescapeString(m[1])
 	}

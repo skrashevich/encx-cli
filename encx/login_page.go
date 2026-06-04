@@ -84,23 +84,6 @@ func isLoginFailureRedirect(location string) bool {
 	return strings.Contains(loc, "login.aspx")
 }
 
-func loginViaPageSucceeded(status int, headers http.Header, pageHTML []byte) bool {
-	if msg := loginPageFailureMessage(pageHTML); msg != "" {
-		return false
-	}
-	if isRedirectStatus(status) {
-		loc := headers.Get("Location")
-		if isLoginCheckCookieRedirect(loc) {
-			return true
-		}
-		return loc != "" && !isLoginFailureRedirect(loc)
-	}
-	if !loginPageFieldsRE.Match(pageHTML) {
-		return true
-	}
-	return false
-}
-
 func (c *Client) completeLoginPageFlow(ctx context.Context, status int, headers http.Header, respBody []byte, loginPageURL string) error {
 	if msg := loginPageFailureMessage(respBody); msg != "" {
 		return fmt.Errorf("encx: login page: %s", msg)

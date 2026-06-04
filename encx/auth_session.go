@@ -17,14 +17,12 @@ func (c *Client) LoginComplete(ctx context.Context, login, password string, opts
 
 	pageURL := c.baseURL() + "/Login.aspx?return=/"
 	var pageErr error
-	if err := c.LoginViaLoginPage(ctx, pageURL, login, password, opts...); err == nil {
-		if verifyErr := c.VerifyAdminSession(ctx); verifyErr == nil {
-			return nil
-		} else {
-			pageErr = verifyErr
-		}
-	} else {
+	if err := c.LoginViaLoginPage(ctx, pageURL, login, password, opts...); err != nil {
 		pageErr = err
+	} else if verifyErr := c.VerifyAdminSession(ctx); verifyErr == nil {
+		return nil
+	} else {
+		pageErr = verifyErr
 	}
 
 	resp, err := c.Login(ctx, login, password, opts...)
