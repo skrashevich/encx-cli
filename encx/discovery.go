@@ -46,15 +46,9 @@ func (c *Client) fetchGames(ctx context.Context, u string, re *regexp.Regexp) ([
 	}
 	c.setHeaders(req)
 
-	resp, err := c.httpClient.Do(req)
+	_, _, body, err := c.doRequestAndRead(req)
 	if err != nil {
 		return nil, fmt.Errorf("encx: domain games request: %w", err)
-	}
-	defer resp.Body.Close()
-
-	body, err := c.readResponseBody(resp)
-	if err != nil {
-		return nil, err
 	}
 
 	matches := re.FindAllSubmatch(body, -1)
@@ -101,15 +95,9 @@ func (c *Client) GetGameList(ctx context.Context, page ...int) (*GameListRespons
 	}
 	c.setHeaders(req)
 
-	resp, err := c.httpClient.Do(req)
+	_, _, body, err := c.doRequestAndRead(req)
 	if err != nil {
 		return nil, fmt.Errorf("encx: game list request: %w", err)
-	}
-	defer resp.Body.Close()
-
-	body, err := c.readResponseBody(resp)
-	if err != nil {
-		return nil, err
 	}
 
 	var result GameListResponse
@@ -138,15 +126,9 @@ func (c *Client) GetTimeoutToGame(ctx context.Context, gameId int) (*int, error)
 	}
 	c.setHeaders(req)
 
-	resp, err := c.httpClient.Do(req)
+	_, _, body, err := c.doRequestAndRead(req)
 	if err != nil {
 		return nil, fmt.Errorf("encx: timeout request: %w", err)
-	}
-	defer resp.Body.Close()
-
-	body, err := c.readResponseBody(resp)
-	if err != nil {
-		return nil, err
 	}
 
 	match := startCounterRe.FindSubmatch(body)

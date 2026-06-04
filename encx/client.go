@@ -6,6 +6,9 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/cookiejar"
+	"net/url"
+	"strings"
+	"sync/atomic"
 	"time"
 )
 
@@ -14,16 +17,22 @@ const defaultTimeout = 15 * time.Second
 
 // Client is an HTTP client for the Encounter (en.cx) game engine API.
 type Client struct {
-	domain          string
-	scheme          string
-	httpClient      *http.Client
-	rootTransport   http.RoundTripper
-	userAgent       string
-	lang            string
-	debugLog        func(string, ...any)
-	har             *HARRecorder
-	harAutoEnabled  bool
+	domain               string
+	scheme               string
+	httpClient           *http.Client
+	rootTransport        http.RoundTripper
+	userAgent            string
+	lang                 string
+	debugLog             func(string, ...any)
+	har                  *HARRecorder
+	harAutoEnabled       bool
+	antiSpamHandler      func(string) error
+	antiSpamRecovery     atomic.Bool // suppress handler during anti-spam recovery Login
+	adminDelayDuration   time.Duration
+	adminDelayConfigured bool
 }
+
+const defaultAdminDelay = 1200 * time.Millisecond
 
 // Option configures the Client.
 type Option func(*Client)
@@ -79,6 +88,37 @@ func WithHARRecording(enabled bool) Option {
 			c.har = NewHARRecorder()
 		}
 		c.har.SetEnabled(enabled)
+	}
+}
+
+// WithAdminDelay sets the pause between admin panel requests (default 1200ms).
+// Pass 0 to disable throttling (e.g. httptest).
+func WithAdminDelay(d time.Duration) Option {
+	return func(c *Client) {
+		c.adminDelayDuration = d
+		c.adminDelayConfigured = true
+	}
+}
+
+// SetAdminDelay overrides the pause between admin panel requests at runtime.
+func (c *Client) SetAdminDelay(d time.Duration) {
+	c.adminDelayDuration = d
+	c.adminDelayConfigured = true
+}
+
+// AdminDelay returns the configured pause between admin panel requests.
+func (c *Client) AdminDelay() time.Duration {
+	if c.adminDelayConfigured {
+		return c.adminDelayDuration
+	}
+	return defaultAdminDelay
+}
+
+// WithAntiSpamHandler sets a callback used when Encounter anti-spam challenge is detected.
+// The callback should block until user passes verification (or return an error to abort).
+func WithAntiSpamHandler(handler func(url string) error) Option {
+	return func(c *Client) {
+		c.antiSpamHandler = handler
 	}
 }
 
@@ -186,6 +226,29 @@ type debugTransport struct {
 	debugf func(string, ...any)
 }
 
+// httpRedirectDebugTarget returns an absolute redirect URL for debug logging.
+func httpRedirectDebugTarget(req *http.Request, resp *http.Response) string {
+	loc := strings.TrimSpace(resp.Header.Get("Location"))
+	if loc == "" {
+		if refresh := strings.TrimSpace(resp.Header.Get("Refresh")); refresh != "" {
+			return "Refresh: " + refresh
+		}
+		return ""
+	}
+	ref, err := url.Parse(loc)
+	if err != nil {
+		return loc
+	}
+	base := req.URL
+	if resp.Request != nil && resp.Request.URL != nil {
+		base = resp.Request.URL
+	}
+	if base == nil {
+		return loc
+	}
+	return base.ResolveReference(ref).String()
+}
+
 func (t *debugTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 	start := time.Now()
 	urlStr := req.URL.String()
@@ -202,11 +265,14 @@ func (t *debugTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 		return nil, err
 	}
 
-	location := resp.Header.Get("Location")
 	contentType := resp.Header.Get("Content-Type")
-	if location != "" {
+	if isRedirectStatus(resp.StatusCode) {
+		target := httpRedirectDebugTarget(req, resp)
+		if target == "" {
+			target = "(no Location header)"
+		}
 		t.debugf("encx http done: %s %s status=%d duration=%s redirect=%s content_type=%q",
-			req.Method, urlStr, resp.StatusCode, duration, location, contentType)
+			req.Method, urlStr, resp.StatusCode, duration, target, contentType)
 	} else {
 		t.debugf("encx http done: %s %s status=%d duration=%s content_type=%q",
 			req.Method, urlStr, resp.StatusCode, duration, contentType)
@@ -223,16 +289,56 @@ func (c *Client) doGet(ctx context.Context, rawURL string) (string, error) {
 	}
 	c.setHeaders(req)
 
-	resp, err := c.httpClient.Do(req)
+	_, _, body, err := c.doRequestAndRead(req)
 	if err != nil {
 		return "", fmt.Errorf("encx: GET %s: %w", rawURL, err)
 	}
-	defer resp.Body.Close()
-
-	body, err := c.readResponseBody(resp)
-	if err != nil {
-		return "", err
-	}
 
 	return string(body), nil
+}
+
+func cloneRequestForRetry(req *http.Request) (*http.Request, error) {
+	cloned := req.Clone(req.Context())
+	if req.GetBody != nil {
+		body, err := req.GetBody()
+		if err != nil {
+			return nil, err
+		}
+		cloned.Body = body
+	}
+	return cloned, nil
+}
+
+func (c *Client) doRequestAndRead(req *http.Request) (int, http.Header, []byte, error) {
+	for {
+		attemptReq, err := cloneRequestForRetry(req)
+		if err != nil {
+			return 0, nil, nil, err
+		}
+
+		resp, err := c.httpClient.Do(attemptReq)
+		if err != nil {
+			return 0, nil, nil, err
+		}
+
+		statusCode := resp.StatusCode
+		headers := resp.Header.Clone()
+		body, readErr := c.readResponseBody(resp)
+		// readResponseBody consumes body but does not close it.
+		_ = resp.Body.Close()
+
+		if readErr == nil {
+			if err := guardHTTPLoginRedirect(statusCode, headers, body); err != nil {
+				return statusCode, headers, body, err
+			}
+			return statusCode, headers, body, nil
+		}
+		if IsAntiSpam(readErr) && c.antiSpamHandler != nil && !c.antiSpamRecovery.Load() {
+			if err := c.antiSpamHandler(AntiSpamURLFromError(readErr)); err != nil {
+				return statusCode, headers, nil, err
+			}
+			continue
+		}
+		return statusCode, headers, nil, readErr
+	}
 }

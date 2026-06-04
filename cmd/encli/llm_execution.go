@@ -210,31 +210,31 @@ func executeLLMToolCall(ctx context.Context, cfg *config, client *encx.Client, s
 		cmdProfile(ctx, cfg, client)
 
 	case "admin_games":
-		requireAuth(ctx, cfg, client)
+		requireAdminAuth(ctx, cfg, client)
 		cmdAdminGames(ctx, cfg, client)
 
 	case "admin_levels":
-		requireAuth(ctx, cfg, client)
+		requireAdminAuth(ctx, cfg, client)
 		cmdAdminLevels(ctx, cfg, client)
 
 	case "admin_level_content":
-		requireAuth(ctx, cfg, client)
+		requireAdminAuth(ctx, cfg, client)
 		cmdAdminLevelContent(ctx, cfg, client, []string{strconv.Itoa(getInt("level_number"))})
 
 	case "admin_create_levels":
-		requireAuth(ctx, cfg, client)
+		requireAdminAuth(ctx, cfg, client)
 		cmdAdminCreateLevels(ctx, cfg, client, []string{strconv.Itoa(getInt("count"))})
 
 	case "admin_delete_level":
-		requireAuth(ctx, cfg, client)
+		requireAdminAuth(ctx, cfg, client)
 		cmdAdminDeleteLevel(ctx, cfg, client, []string{strconv.Itoa(getInt("level_number"))})
 
 	case "admin_rename_level":
-		requireAuth(ctx, cfg, client)
+		requireAdminAuth(ctx, cfg, client)
 		cmdAdminRenameLevel(ctx, cfg, client, []string{strconv.Itoa(getInt("level_id")), getString("name")})
 
 	case "admin_set_autopass":
-		requireAuth(ctx, cfg, client)
+		requireAdminAuth(ctx, cfg, client)
 		positional := []string{strconv.Itoa(getInt("level_number")), getString("time")}
 		if pt := getString("penalty_time"); pt != "" {
 			positional = append(positional, pt)
@@ -242,7 +242,7 @@ func executeLLMToolCall(ctx context.Context, cfg *config, client *encx.Client, s
 		cmdAdminUpdateAutopass(ctx, cfg, client, positional)
 
 	case "admin_set_block":
-		requireAuth(ctx, cfg, client)
+		requireAdminAuth(ctx, cfg, client)
 		positional := []string{
 			strconv.Itoa(getInt("level_number")),
 			strconv.Itoa(getInt("attempts")),
@@ -256,7 +256,7 @@ func executeLLMToolCall(ctx context.Context, cfg *config, client *encx.Client, s
 		cmdAdminUpdateAnswerBlock(ctx, cfg, client, positional)
 
 	case "admin_create_bonus":
-		requireAuth(ctx, cfg, client)
+		requireAdminAuth(ctx, cfg, client)
 		positional := []string{
 			strconv.Itoa(getInt("level_number")),
 			strconv.Itoa(getInt("level_id")),
@@ -266,14 +266,14 @@ func executeLLMToolCall(ctx context.Context, cfg *config, client *encx.Client, s
 		cmdAdminCreateBonus(ctx, cfg, client, positional)
 
 	case "admin_delete_bonus":
-		requireAuth(ctx, cfg, client)
+		requireAdminAuth(ctx, cfg, client)
 		cmdAdminDeleteBonus(ctx, cfg, client, []string{
 			strconv.Itoa(getInt("level_number")),
 			strconv.Itoa(getInt("bonus_id")),
 		})
 
 	case "admin_create_sector":
-		requireAuth(ctx, cfg, client)
+		requireAdminAuth(ctx, cfg, client)
 		positional := []string{
 			strconv.Itoa(getInt("level_number")),
 			getString("name"),
@@ -282,14 +282,14 @@ func executeLLMToolCall(ctx context.Context, cfg *config, client *encx.Client, s
 		cmdAdminCreateSector(ctx, cfg, client, positional)
 
 	case "admin_delete_sector":
-		requireAuth(ctx, cfg, client)
+		requireAdminAuth(ctx, cfg, client)
 		cmdAdminDeleteSector(ctx, cfg, client, []string{
 			strconv.Itoa(getInt("level_number")),
 			strconv.Itoa(getInt("sector_id")),
 		})
 
 	case "admin_update_sector":
-		requireAuth(ctx, cfg, client)
+		requireAdminAuth(ctx, cfg, client)
 		positional := []string{
 			strconv.Itoa(getInt("level_number")),
 			strconv.Itoa(getInt("sector_id")),
@@ -303,7 +303,7 @@ func executeLLMToolCall(ctx context.Context, cfg *config, client *encx.Client, s
 		cmdAdminUpdateSector(ctx, cfg, client, positional)
 
 	case "admin_create_hint":
-		requireAuth(ctx, cfg, client)
+		requireAdminAuth(ctx, cfg, client)
 		cmdAdminCreateHint(ctx, cfg, client, []string{
 			strconv.Itoa(getInt("level_number")),
 			getString("delay"),
@@ -311,21 +311,21 @@ func executeLLMToolCall(ctx context.Context, cfg *config, client *encx.Client, s
 		})
 
 	case "admin_delete_hint":
-		requireAuth(ctx, cfg, client)
+		requireAdminAuth(ctx, cfg, client)
 		cmdAdminDeleteHint(ctx, cfg, client, []string{
 			strconv.Itoa(getInt("level_number")),
 			strconv.Itoa(getInt("hint_id")),
 		})
 
 	case "admin_create_task":
-		requireAuth(ctx, cfg, client)
+		requireAdminAuth(ctx, cfg, client)
 		cmdAdminCreateTask(ctx, cfg, client, []string{
 			strconv.Itoa(getInt("level_number")),
 			getString("text"),
 		})
 
 	case "admin_set_comment":
-		requireAuth(ctx, cfg, client)
+		requireAdminAuth(ctx, cfg, client)
 		positional := []string{strconv.Itoa(getInt("level_number")), getString("name")}
 		if c := getString("comment"); c != "" {
 			positional = append(positional, c)
@@ -333,15 +333,15 @@ func executeLLMToolCall(ctx context.Context, cfg *config, client *encx.Client, s
 		cmdAdminSetComment(ctx, cfg, client, positional)
 
 	case "admin_teams":
-		requireAuth(ctx, cfg, client)
+		requireAdminAuth(ctx, cfg, client)
 		cmdAdminTeams(ctx, cfg, client)
 
 	case "admin_corrections":
-		requireAuth(ctx, cfg, client)
+		requireAdminAuth(ctx, cfg, client)
 		cmdAdminCorrections(ctx, cfg, client)
 
 	case "admin_add_correction":
-		requireAuth(ctx, cfg, client)
+		requireAdminAuth(ctx, cfg, client)
 		level := getString("level")
 		if level == "" {
 			level = "0"
@@ -358,11 +358,11 @@ func executeLLMToolCall(ctx context.Context, cfg *config, client *encx.Client, s
 		cmdAdminAddCorrection(ctx, cfg, client, positional)
 
 	case "admin_delete_correction":
-		requireAuth(ctx, cfg, client)
+		requireAdminAuth(ctx, cfg, client)
 		cmdAdminDeleteCorrection(ctx, cfg, client, []string{getString("correction_id")})
 
 	case "admin_wipe_game":
-		requireAuth(ctx, cfg, client)
+		requireAdminAuth(ctx, cfg, client)
 		cmdAdminWipeGame(ctx, cfg, client)
 
 	case "admin_copy_game":
@@ -371,15 +371,15 @@ func executeLLMToolCall(ctx context.Context, cfg *config, client *encx.Client, s
 		if sourceID != 0 {
 			cfg.gameId = sourceID
 		}
-		requireAuth(ctx, cfg, client)
+		requireAdminAuth(ctx, cfg, client)
 		cmdAdminCopyGame(ctx, cfg, client, []string{strconv.Itoa(targetID)})
 
 	case "admin_game_info":
-		requireAuth(ctx, cfg, client)
+		requireAdminAuth(ctx, cfg, client)
 		cmdAdminGameInfo(ctx, cfg, client)
 
 	case "admin_update_game":
-		requireAuth(ctx, cfg, client)
+		requireAdminAuth(ctx, cfg, client)
 		var positional []string
 		if t := getString("title"); t != "" {
 			positional = append(positional, "title="+t)
@@ -399,7 +399,7 @@ func executeLLMToolCall(ctx context.Context, cfg *config, client *encx.Client, s
 		cmdAdminUpdateGame(ctx, cfg, client, positional)
 
 	case "admin_not_deliver":
-		requireAuth(ctx, cfg, client)
+		requireAdminAuth(ctx, cfg, client)
 		cmdAdminNotDeliver(ctx, cfg, client)
 
 	case "read_local_file":

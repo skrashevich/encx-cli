@@ -1,14 +1,19 @@
 package encx
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"html"
 	"io"
 	"net/http"
 	"net/url"
+	"regexp"
 	"strings"
 )
+
+var notHumanLoginLinkRE = regexp.MustCompile(`(?is)(?:href|action)\s*=\s*["']([^"']*Login\.aspx[^"']*)["']`)
 
 // ErrAntiSpam indicates the server redirected to NotHumanRequest.aspx (rate-limit / bot check).
 var ErrAntiSpam = errors.New("encx: anti-spam verification required")
@@ -78,6 +83,98 @@ func AntiSpamPageURL(domain, scheme, returnPath string) string {
 func newAntiSpamError(domain, scheme, location string) error {
 	pageURL := resolveAntiSpamURL(domain, scheme, location)
 	return &AntiSpamError{URL: pageURL}
+}
+
+// ExtractLoginURLFromNotHumanHTML finds Login.aspx href/action on a NotHumanRequest page.
+func ExtractLoginURLFromNotHumanHTML(pageURL string, body []byte) string {
+	base, err := url.Parse(pageURL)
+	if err != nil {
+		return ""
+	}
+	best := ""
+	for _, m := range notHumanLoginLinkRE.FindAllStringSubmatch(string(body), -1) {
+		if len(m) < 2 {
+			continue
+		}
+		ref := strings.TrimSpace(html.UnescapeString(m[1]))
+		if ref == "" {
+			continue
+		}
+		resolved := resolveRefURL(base, ref)
+		if resolved == "" {
+			continue
+		}
+		if best == "" || (strings.Contains(resolved, "return=") && !strings.Contains(best, "return=")) {
+			best = resolved
+		}
+	}
+	return best
+}
+
+func resolveRefURL(base *url.URL, ref string) string {
+	refURL, err := url.Parse(ref)
+	if err != nil {
+		return ""
+	}
+	return base.ResolveReference(refURL).String()
+}
+
+// ResolveAntiSpamLoginURL loads NotHumanRequest.aspx and returns the login page URL from it.
+// Falls back to challengeURL when the page cannot be read or has no login link.
+func (c *Client) ResolveAntiSpamLoginURL(ctx context.Context, challengeURL string) (string, error) {
+	u := strings.TrimSpace(challengeURL)
+	if u == "" {
+		u = AntiSpamPageURL(c.domain, c.scheme, "/")
+	}
+	body, err := c.doGetRaw(ctx, u)
+	if err != nil {
+		return u, err
+	}
+	if login := ExtractLoginURLFromNotHumanHTML(u, body); login != "" {
+		return login, nil
+	}
+	return u, nil
+}
+
+func (c *Client) doGetRaw(ctx context.Context, pageURL string) ([]byte, error) {
+	status, _, body, err := c.doRequestRaw(ctx, http.MethodGet, pageURL, nil)
+	if err != nil {
+		return nil, err
+	}
+	if status >= 400 {
+		return body, fmt.Errorf("encx: GET %s: HTTP %d", pageURL, status)
+	}
+	return body, nil
+}
+
+func (c *Client) doPostRaw(ctx context.Context, pageURL string, form url.Values) (status int, headers http.Header, body []byte, err error) {
+	return c.doRequestRaw(ctx, http.MethodPost, pageURL, strings.NewReader(form.Encode()))
+}
+
+func (c *Client) doRequestRaw(ctx context.Context, method, pageURL string, body io.Reader) (int, http.Header, []byte, error) {
+	c.antiSpamRecovery.Store(true)
+	defer c.antiSpamRecovery.Store(false)
+
+	req, err := http.NewRequestWithContext(ctx, method, pageURL, body)
+	if err != nil {
+		return 0, nil, nil, fmt.Errorf("encx: create request: %w", err)
+	}
+	c.setHeaders(req)
+	if body != nil {
+		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	}
+
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return 0, nil, nil, err
+	}
+	defer resp.Body.Close()
+
+	respBody, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return 0, nil, nil, err
+	}
+	return resp.StatusCode, resp.Header.Clone(), respBody, nil
 }
 
 func resolveAntiSpamURL(domain, scheme, location string) string {
