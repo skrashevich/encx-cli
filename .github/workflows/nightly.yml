@@ -1,0 +1,99 @@
+name: Nightly build
+
+on:
+  schedule:
+    - cron: "0 3 * * *" # daily at 03:00 UTC
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build-binaries:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        include:
+          - goos: linux
+            goarch: amd64
+          - goos: linux
+            goarch: arm64
+          - goos: windows
+            goarch: amd64
+          - goos: windows
+            goarch: arm64
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+
+      - name: Build binary
+        env:
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+          CGO_ENABLED: "0"
+        run: |
+          ext=""
+          if [ "${{ matrix.goos }}" = "windows" ]; then ext=".exe"; fi
+          VERSION="nightly-$(date +%Y%m%d)"
+          for target in encli encx-mock; do
+            go build -ldflags="-s -w -X main.version=${VERSION}" \
+              -o "${target}-${{ matrix.goos }}-${{ matrix.goarch }}${ext}" "./cmd/${target}/"
+          done
+
+      - name: Compress with UPX
+        if: (matrix.goos == 'linux' || matrix.goos == 'windows') && !(matrix.goos == 'windows' && matrix.goarch == 'arm64')
+        uses: crazy-max/ghaction-upx@v4
+        with:
+          version: latest
+          files: |
+            encli-${{ matrix.goos }}-${{ matrix.goarch }}*
+            encx-mock-${{ matrix.goos }}-${{ matrix.goarch }}*
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: binaries-${{ matrix.goos }}-${{ matrix.goarch }}
+          path: |
+            encli-*
+            encx-mock-*
+          retention-days: 30
+
+  build-macos:
+    runs-on: macos-latest
+    strategy:
+      matrix:
+        include:
+          - goos: darwin
+            goarch: amd64
+          - goos: darwin
+            goarch: arm64
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+
+      - name: Build binary
+        env:
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+          CGO_ENABLED: "0"
+        run: |
+          VERSION="nightly-$(date +%Y%m%d)"
+          for target in encli encx-mock; do
+            go build -ldflags="-s -w -X main.version=${VERSION}" \
+              -o "${target}-${{ matrix.goos }}-${{ matrix.goarch }}" "./cmd/${target}/"
+          done
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: binaries-${{ matrix.goos }}-${{ matrix.goarch }}
+          path: |
+            encli-*
+            encx-mock-*
+          retention-days: 30
