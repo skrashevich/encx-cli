@@ -209,9 +209,9 @@ func (s *server) buildGameModelFromScenario(st *sessionState, now time.Time) (ma
 		"MixedActions":      nil,
 	}
 	if st.Completed {
-		model["Event"] = 100
+		model["Event"] = encx.EventGameFinished
 	} else {
-		model["Event"] = 0
+		model["Event"] = encx.EventGameNormal
 	}
 	if st.LastAction != nil {
 		model["EngineAction"] = engineActionToMap(st.LastAction, mockGameID)

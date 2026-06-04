@@ -39,9 +39,9 @@ func (s *server) buildGameModelFromFixtures(st *sessionState, now time.Time) (ma
 	model["GameTitle"] = "Mock Game 2026"
 	model["GameDateTimeStart"] = now.Format("2006-01-02 15:04:05")
 	if st.Completed {
-		model["Event"] = 100
+		model["Event"] = encx.EventGameFinished
 	} else {
-		model["Event"] = 0
+		model["Event"] = encx.EventGameNormal
 	}
 
 	idx := st.CurrentIdx
