@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 )
 
@@ -80,5 +81,59 @@ func TestHARRecorderClear(t *testing.T) {
 	client.ClearHAR()
 	if client.HAREntryCount() != 0 {
 		t.Fatalf("ClearHAR did not reset entries")
+	}
+}
+
+func TestHARRedactsLoginPassword(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"Error":0}`))
+	}))
+	defer server.Close()
+
+	host := strings.TrimPrefix(server.URL, "http://")
+	client := New(host, WithHTTP(), WithHARRecording(true))
+	_, err := client.Login(t.Context(), "player", "super-secret")
+	if err != nil {
+		t.Fatalf("Login: %v", err)
+	}
+
+	raw, err := client.ExportHARJSON()
+	if err != nil {
+		t.Fatalf("ExportHARJSON: %v", err)
+	}
+	if strings.Contains(raw, "super-secret") {
+		t.Fatalf("HAR must not contain plaintext password: %s", raw)
+	}
+	if !strings.Contains(raw, harRedactedSecret) {
+		t.Fatalf("HAR should contain redacted placeholder: %s", raw)
+	}
+
+	var doc struct {
+		Log struct {
+			Entries []struct {
+				Request struct {
+					PostData struct {
+						Text string `json:"text"`
+					} `json:"postData"`
+				} `json:"request"`
+			} `json:"entries"`
+		} `json:"log"`
+	}
+	if err := json.Unmarshal([]byte(raw), &doc); err != nil {
+		t.Fatalf("json.Unmarshal: %v", err)
+	}
+	if len(doc.Log.Entries) == 0 {
+		t.Fatal("expected HAR entries")
+	}
+	var payload map[string]string
+	if err := json.Unmarshal([]byte(doc.Log.Entries[0].Request.PostData.Text), &payload); err != nil {
+		t.Fatalf("login payload: %v", err)
+	}
+	if payload["Login"] != "player" {
+		t.Fatalf("login = %q", payload["Login"])
+	}
+	if payload["Password"] != harRedactedSecret {
+		t.Fatalf("password = %q", payload["Password"])
 	}
 }

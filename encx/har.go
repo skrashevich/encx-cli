@@ -6,6 +6,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httputil"
+	"net/url"
 	"strings"
 	"sync"
 	"time"
@@ -13,6 +14,7 @@ import (
 
 const harCreatorName = "encx-cli"
 const harCreatorVersion = "1.0"
+const harRedactedSecret = "[REDACTED]"
 
 type harNameValue struct {
 	Name  string `json:"name"`
@@ -226,9 +228,10 @@ func buildHAREntry(req *http.Request, started time.Time) harEntry {
 	bodyBytes := readRequestBody(req)
 	entry.Request.BodySize = len(bodyBytes)
 	if len(bodyBytes) > 0 {
+		mimeType := req.Header.Get("Content-Type")
 		entry.Request.PostData = &harPostData{
-			MimeType: req.Header.Get("Content-Type"),
-			Text:     string(bodyBytes),
+			MimeType: mimeType,
+			Text:     redactSensitiveHARBody(mimeType, bodyBytes),
 		}
 		if entry.Request.PostData.MimeType == "" {
 			entry.Request.PostData.MimeType = "application/octet-stream"
@@ -302,9 +305,79 @@ func queryPairs(rawQuery string) []harNameValue {
 			continue
 		}
 		name, value, _ := strings.Cut(part, "=")
+		if isSensitiveHARField(name) {
+			value = harRedactedSecret
+		}
 		pairs = append(pairs, harNameValue{Name: name, Value: value})
 	}
 	return pairs
+}
+
+func redactSensitiveHARBody(mimeType string, body []byte) string {
+	if len(body) == 0 {
+		return ""
+	}
+	mediaType := strings.ToLower(strings.TrimSpace(strings.Split(mimeType, ";")[0]))
+	switch mediaType {
+	case "application/json", "text/json":
+		return redactJSONSecrets(body)
+	case "application/x-www-form-urlencoded":
+		return redactFormSecrets(body)
+	default:
+		return string(body)
+	}
+}
+
+func redactJSONSecrets(body []byte) string {
+	var value any
+	if err := json.Unmarshal(body, &value); err != nil {
+		return string(body)
+	}
+	redactJSONValue(value)
+	out, err := json.Marshal(value)
+	if err != nil {
+		return string(body)
+	}
+	return string(out)
+}
+
+func redactJSONValue(value any) {
+	switch typed := value.(type) {
+	case map[string]any:
+		for key, item := range typed {
+			if isSensitiveHARField(key) {
+				typed[key] = harRedactedSecret
+				continue
+			}
+			redactJSONValue(item)
+		}
+	case []any:
+		for _, item := range typed {
+			redactJSONValue(item)
+		}
+	}
+}
+
+func redactFormSecrets(body []byte) string {
+	values, err := url.ParseQuery(string(body))
+	if err != nil {
+		return string(body)
+	}
+	for key := range values {
+		if isSensitiveHARField(key) {
+			values[key] = []string{harRedactedSecret}
+		}
+	}
+	return values.Encode()
+}
+
+func isSensitiveHARField(name string) bool {
+	switch strings.ToLower(strings.TrimSpace(name)) {
+	case "password", "passwd", "pwd":
+		return true
+	default:
+		return false
+	}
 }
 
 func estimateHeaderSize(req *http.Request) int {
