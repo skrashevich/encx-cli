@@ -1,0 +1,191 @@
+{
+  "Level": {
+    "LevelId": 1400001,
+    "Name": "",
+    "Number": 1,
+    "Timeout": 0,
+    "TimeoutSecondsRemain": 0,
+    "TimeoutAward": 0,
+    "IsPassed": false,
+    "Dismissed": false,
+    "StartTime": {
+      "Value": 63804887880000,
+      "Timestamp": 1669291080
+    },
+    "HasAnswerBlockRule": false,
+    "BlockDuration": 0,
+    "BlockTargetId": 1,
+    "AttemtsNumber": 0,
+    "AttemtsPeriod": 0,
+    "RequiredSectorsCount": 4,
+    "PassedSectorsCount": 0,
+    "PassedBonusesCount": 1,
+    "SectorsLeftToClose": 4,
+    "Tasks": [
+      {
+        "ReplaceNlToBr": false,
+        "TaskText": "<link rel='stylesheet' href='https://d1.endata.cx/images/personal/1438581/olympMatrix2.0.css'>\r\n<div class='olymp_wrapper'></div>\r\n<script src='https://d1.endata.cx/images/personal/1438581/utilsOlympMatrix2.0.js'></script>\r\n<script src='https://d1.endata.cx/images/personal/1438581/olymp2.0.js'></script>\r\n\r\n<script>createSimpleOlymp(8);</script>\r\n\r\n",
+        "TaskTextFormatted": "<link rel='stylesheet' href='https://d1.endata.cx/images/personal/1438581/olympMatrix2.0.css'>\r\n<div class='olymp_wrapper'></div>\r\n<script src='https://d1.endata.cx/images/personal/1438581/utilsOlympMatrix2.0.js'></script>\r\n<script src='https://d1.endata.cx/images/personal/1438581/olymp2.0.js'></script>\r\n\r\n<script>createSimpleOlymp(8);</script>\r\n\r\n"
+      }
+    ],
+    "MixedActions": [],
+    "Messages": [],
+    "Sectors": [
+      {
+        "SectorId": 3010001,
+        "Order": 1,
+        "Name": "Сектор 1",
+        "Answer": null,
+        "IsAnswered": false
+      },
+      {
+        "SectorId": 3010002,
+        "Order": 2,
+        "Name": "Сектор 2",
+        "Answer": null,
+        "IsAnswered": false
+      },
+      {
+        "SectorId": 3010003,
+        "Order": 3,
+        "Name": "Сектор 3",
+        "Answer": null,
+        "IsAnswered": false
+      },
+      {
+        "SectorId": 3010004,
+        "Order": 4,
+        "Name": "Сектор 4",
+        "Answer": null,
+        "IsAnswered": false
+      }
+    ],
+    "Helps": [],
+    "PenaltyHelps": [],
+    "Bonuses": [
+      {
+        "BonusId": 1864477,
+        "Name": "name 1",
+        "Number": 1,
+        "Task": "11111",
+        "Help": null,
+        "IsAnswered": false,
+        "Expired": false,
+        "SecondsToStart": 0,
+        "SecondsLeft": 0,
+        "AwardTime": 0,
+        "Negative": false,
+        "Answer": null
+      },
+      {
+        "BonusId": 1865020,
+        "Name": "nanov94",
+        "Number": 2,
+        "Task": "task nanov94",
+        "Help": null,
+        "IsAnswered": true,
+        "Expired": false,
+        "SecondsToStart": 0,
+        "SecondsLeft": 0,
+        "AwardTime": 0,
+        "Negative": false,
+        "Answer": {
+          "Answer": "4",
+          "AnswerDateTime": {
+            "Value": 63915916362033,
+            "Timestamp": 1780319562
+          },
+          "Login": "skrashevich",
+          "UserId": 1516219
+        }
+      },
+      {
+        "BonusId": 1865021,
+        "Name": "nanov94",
+        "Number": 3,
+        "Task": "task 2 nanov94",
+        "Help": null,
+        "IsAnswered": false,
+        "Expired": false,
+        "SecondsToStart": 0,
+        "SecondsLeft": 0,
+        "AwardTime": 0,
+        "Negative": false,
+        "Answer": null
+      },
+      {
+        "BonusId": 1897294,
+        "Name": null,
+        "Number": 4,
+        "Task": "",
+        "Help": null,
+        "IsAnswered": false,
+        "Expired": false,
+        "SecondsToStart": 0,
+        "SecondsLeft": 0,
+        "AwardTime": 0,
+        "Negative": false,
+        "Answer": null
+      }
+    ]
+  },
+  "Levels": [
+    {
+      "LevelId": 1400001,
+      "LevelNumber": 1,
+      "LevelName": "",
+      "Dismissed": false,
+      "IsPassed": false,
+      "Task": null,
+      "LevelAction": null
+    },
+    {
+      "LevelId": 1400002,
+      "LevelNumber": 2,
+      "LevelName": "",
+      "Dismissed": false,
+      "IsPassed": false,
+      "Task": null,
+      "LevelAction": null
+    },
+    {
+      "LevelId": 1400003,
+      "LevelNumber": 3,
+      "LevelName": "",
+      "Dismissed": false,
+      "IsPassed": false,
+      "Task": null,
+      "LevelAction": null
+    }
+  ],
+  "GameId": 424242,
+  "GameTypeId": 1,
+  "GameZoneId": 0,
+  "GameNumber": 22,
+  "GameTitle": "Mock Game 2026",
+  "GameDateTimeStart": "1669291080",
+  "LevelSequence": 0,
+  "UserId": 1516219,
+  "Login": "{{LOGIN}}",
+  "TeamId": 5150,
+  "TeamName": "MockTeam",
+  "IsCaptain": true,
+  "EngineAction": {
+    "LevelNumber": 0,
+    "LevelAction": {
+      "Answer": null,
+      "IsCorrectAnswer": null
+    },
+    "BonusAction": {
+      "Answer": null,
+      "IsCorrectAnswer": null
+    },
+    "PenaltyAction": {
+      "PenaltyId": 0,
+      "ActionType": 0
+    },
+    "GameId": 424242,
+    "LevelId": 0
+  },
+  "Event": 0
+}

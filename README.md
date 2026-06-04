@@ -57,8 +57,8 @@ go install github.com/skrashevich/encx-cli/cmd/encx-mock@latest
 Для локальной разработки и ручной проверки CLI в репозитории есть `encx-mock` — небольшой HTTP-сервер, который имитирует домен Encounter без похода в реальный `tech.en.cx`.
 
 ```sh
-# запустить mock-сервер на 127.0.0.1:18080
-ENCX_MOCK_ADDR=127.0.0.1:18080 encx-mock
+# запустить mock-сервер на 0.0.0.0:18080
+encx-mock
 
 # или через Docker
 docker run --rm -p 18080:18080 -e ENCX_MOCK_ADDR=0.0.0.0:18080 ghcr.io/skrashevich/encx-mock
@@ -74,8 +74,12 @@ encli send-code -domain 127.0.0.1:18080 -http -game-id 424242 "CODE-1"
 
 - слушает адрес из `ENCX_MOCK_ADDR` или `0.0.0.0:18080` по умолчанию;
 - принимает любой логин/пароль, кроме `fail:fail`;
-- поднимает тестовую игру `424242` с тремя уровнями;
+- поднимает тестовую игру `424242` с тремя уровнями и кодами секторов `1`–`12`;
+- умеет загружать экспорт `Game scenario.html` через `-scenario` или `ENCX_MOCK_SCENARIO`;
+- умеет брать формы JSON-ответов из HAR через `ENCX_MOCK_HAR`;
 - код `PZDC` включает минутную "потерю сети" для текущей пары логин/пароль, чтобы проверять retry/timeout-логику клиента.
+
+Подробное описание режимов, кодов и ограничений: [`cmd/encx-mock/README.md`](cmd/encx-mock/README.md).
 
 ### Docker
 

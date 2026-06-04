@@ -3,7 +3,9 @@ package main
 import (
 	"encoding/json"
 	"errors"
+	"flag"
 	"fmt"
+	"html"
 	"log"
 	"net/http"
 	"os"
@@ -14,6 +16,7 @@ import (
 	"time"
 
 	"github.com/skrashevich/encx-cli/encx"
+	"github.com/skrashevich/encx-cli/encx/scenario"
 )
 
 const (
@@ -21,19 +24,17 @@ const (
 	mockGameID  = 424242
 	mockTeamID  = 5150
 
-	// networkDropCode triggers a one-minute silent period for the login:password pair (no HTTP responses).
 	networkDropCode     = "PZDC"
 	networkDropDuration = time.Minute
-	// Cap hang per request so clients with ~1s code-send timeout can retry quickly.
-	networkDropHangMax = 2 * time.Second
+	networkDropHangMax  = 2 * time.Second
 )
 
 var version = "dev"
 
-var levelAnswers = []string{"CODE-1", "CODE-2", "CODE-3"}
-
 type server struct {
 	mu          sync.Mutex
+	fixtures    *fixtureSet
+	scenario    *scenario.Document
 	sessions    map[string]*sessionState
 	authStates  map[string]*sessionState
 	silentUntil map[string]time.Time
@@ -41,14 +42,20 @@ type server struct {
 }
 
 type sessionState struct {
-	AuthKey    string
-	Login      string
-	CurrentIdx int
-	Completed  bool
-	Passed     []bool
-	Actions    []encx.CodeAction
-	LastAction *encx.EngineAction
-	UpdatedAt  time.Time
+	mu              sync.Mutex
+	AuthKey         string
+	Login           string
+	CurrentIdx      int
+	Completed       bool
+	Passed          []bool
+	SectorPassed    [][]bool
+	SectorAnswers   [][]string
+	LevelStartedAt  []time.Time
+	AnsweredBonuses map[int]bool
+	BonusAnswers    map[int]string
+	Actions         []encx.CodeAction
+	LastAction      *encx.EngineAction
+	UpdatedAt       time.Time
 }
 
 func main() {
@@ -60,12 +67,30 @@ func main() {
 		}
 	}
 
+	var scenarioFlag string
+	fs := flag.NewFlagSet("encx-mock", flag.ExitOnError)
+	fs.StringVar(&scenarioFlag, "scenario", "", "path to scenario file (overrides ENCX_MOCK_SCENARIO)")
+	_ = fs.Parse(os.Args[1:])
+
+	fixtures, err := loadFixtures()
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	scenarioPath := resolveScenarioPath(scenarioFlag)
+	scenarioDoc, err := loadScenario(scenarioPath)
+	if err != nil {
+		log.Fatal(err)
+	}
+
 	addr := strings.TrimSpace(os.Getenv("ENCX_MOCK_ADDR"))
 	if addr == "" {
 		addr = defaultAddr
 	}
 
 	s := &server{
+		fixtures:    fixtures,
+		scenario:    scenarioDoc,
 		sessions:    make(map[string]*sessionState),
 		authStates:  make(map[string]*sessionState),
 		silentUntil: make(map[string]time.Time),
@@ -73,6 +98,7 @@ func main() {
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("POST /login/signin", s.handleLogin)
+	mux.HandleFunc("GET /UserDetails.aspx", s.handleUserDetails)
 	mux.HandleFunc("GET /home/", s.handleGameList)
 	mux.HandleFunc("GET /", s.handleDomainRoot)
 	mux.HandleFunc("POST /gameengines/encounter/makefee/Login.aspx", s.handleEnterGame)
@@ -86,8 +112,22 @@ func main() {
 
 	log.Printf("encx-mock listening on http://%s", addr)
 	log.Printf("test account: any login/password except fail:fail")
-	log.Printf("mock game id=%d, team id=%d, levels=%d", mockGameID, mockTeamID, len(levelAnswers))
+	log.Printf("mock game id=%d, team id=%d, levels=%d", mockGameID, mockTeamID, s.levelCount())
+	if s.scenario != nil {
+		log.Printf("scenario: %q (%d levels) from %s", s.gameTitle(), len(s.scenario.Levels), s.scenario.SourcePath)
+		if len(s.scenario.MissingAssets) > 0 {
+			log.Printf("scenario: warning: %d linked asset(s) missing on disk", len(s.scenario.MissingAssets))
+		}
+	} else {
+		log.Printf("sectors/level=%d; level codes: %v; sector codes: 1-%d", mockSectorsPerLevel, legacyLevelCodes, mockLevelCount*mockSectorsPerLevel)
+	}
 	log.Printf("network drop test: send code %q to ignore all requests for that login:password for %s", networkDropCode, networkDropDuration)
+	if path := strings.TrimSpace(os.Getenv("ENCX_MOCK_HAR")); path != "" {
+		log.Printf("loaded fixtures from HAR: %s", path)
+	}
+	if scenarioPath != "" {
+		log.Printf("loaded game content from scenario: %s", scenarioPath)
+	}
 
 	if err := http.ListenAndServe(addr, withCommonHeaders(mux)); err != nil {
 		log.Fatal(err)
@@ -96,17 +136,16 @@ func main() {
 
 func withCommonHeaders(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Cache-Control", "no-store")
+		w.Header().Set("Cache-Control", "no-cache")
+		w.Header().Set("Pragma", "no-cache")
 		next.ServeHTTP(w, r)
 	})
 }
 
 func (s *server) handleLogin(w http.ResponseWriter, r *http.Request) {
 	var req struct {
-		Login       string `json:"Login"`
-		Password    string `json:"Password"`
-		DdlNetwork  any    `json:"ddlNetwork"`
-		MagicNumber string `json:"MagicNumbers"`
+		Login    string `json:"Login"`
+		Password string `json:"Password"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]any{
@@ -129,45 +168,88 @@ func (s *server) handleLogin(w http.ResponseWriter, r *http.Request) {
 			"BruteForceUnblockUrl": nil,
 			"ConfirmEmailUrl":      nil,
 			"CaptchaUrl":           nil,
-			"AdminWhoCanActivate":  []string{},
+			"AdminWhoCanActivate":  nil,
 		})
 		return
 	}
 
 	s.mu.Lock()
-	state := s.authStates[authKey]
-	if state == nil {
+	state, exists := s.authStates[authKey]
+	if !exists {
 		state = &sessionState{
-			AuthKey:    authKey,
-			Login:      req.Login,
-			CurrentIdx: 0,
-			Passed:     make([]bool, len(levelAnswers)),
-			Actions:    []encx.CodeAction{},
-			UpdatedAt:  time.Now(),
+			AuthKey:         authKey,
+			Login:           req.Login,
+			CurrentIdx:      0,
+			Passed:          s.newSessionPassedState(),
+			SectorPassed:    s.newSessionSectorState(),
+			SectorAnswers:   s.newSessionSectorAnswerState(),
+			LevelStartedAt:  make([]time.Time, s.levelCount()),
+			AnsweredBonuses: make(map[int]bool),
+			BonusAnswers:    make(map[int]string),
+			Actions:         []encx.CodeAction{},
+			UpdatedAt:       time.Now(),
 		}
+		s.ensureLevelStarted(state, 0, time.Now())
 		s.authStates[authKey] = state
-	} else {
-		state.AuthKey = authKey
 	}
 	s.mu.Unlock()
+
+	if exists {
+		state.mu.Lock()
+		state.AuthKey = authKey
+		state.Login = req.Login
+		if len(state.LevelStartedAt) == 0 {
+			state.LevelStartedAt = make([]time.Time, s.levelCount())
+			s.ensureLevelStarted(state, state.CurrentIdx, time.Now())
+		}
+		state.mu.Unlock()
+	}
+
 	sid := s.newSession(state)
-	http.SetCookie(w, &http.Cookie{
-		Name:     "SESSION_ID",
-		Value:    sid,
-		Path:     "/",
-		HttpOnly: true,
-		SameSite: http.SameSiteLaxMode,
-	})
+	setMockAuthCookies(w, sid, req.Login)
 
 	writeJSON(w, http.StatusOK, map[string]any{
 		"Error":                0,
-		"Message":              "",
+		"Message":              nil,
 		"IpUnblockUrl":         nil,
 		"BruteForceUnblockUrl": nil,
 		"ConfirmEmailUrl":      nil,
 		"CaptchaUrl":           nil,
-		"AdminWhoCanActivate":  []string{},
+		"AdminWhoCanActivate":  nil,
 	})
+}
+
+func setMockAuthCookies(w http.ResponseWriter, sessionID, login string) {
+	http.SetCookie(w, &http.Cookie{
+		Name:     "SESSION_ID",
+		Value:    sessionID,
+		Path:     "/",
+		HttpOnly: true,
+		SameSite: http.SameSiteLaxMode,
+	})
+	http.SetCookie(w, &http.Cookie{
+		Name:  "stoken",
+		Value: "mock-stoken",
+		Path:  "/",
+	})
+	http.SetCookie(w, &http.Cookie{
+		Name:     "atoken",
+		Value:    fmt.Sprintf("uid%%3d101%%26iss%%3d0%%26iscd%%3d1%%26tkn%%3dmock-%s", login),
+		Path:     "/",
+		HttpOnly: true,
+	})
+}
+
+func (s *server) handleUserDetails(w http.ResponseWriter, r *http.Request) {
+	st, ok := s.requireSessionHTML(w, r)
+	if !ok {
+		return
+	}
+	st.mu.Lock()
+	login := st.Login
+	st.mu.Unlock()
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	_, _ = w.Write([]byte(s.renderUserDetails(login)))
 }
 
 func (s *server) handleGameList(w http.ResponseWriter, r *http.Request) {
@@ -175,26 +257,42 @@ func (s *server) handleGameList(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	st.mu.Lock()
+	defer st.mu.Unlock()
 	now := time.Now()
-	game := buildGameInfoForState(st, now)
-	resp := encx.GameListResponse{
-		ComingGames: []encx.GameInfo{},
-		ActiveGames: func() []encx.GameInfo {
-			if st.Completed {
-				return []encx.GameInfo{}
-			}
-			return []encx.GameInfo{game}
-		}(),
+	gameInfo, err := s.buildGameInfoResponse(st, now)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]any{"Error": 5, "Message": err.Error()})
+		return
 	}
-	writeJSON(w, http.StatusOK, resp)
+	active := []any{}
+	if !st.Completed {
+		active = append(active, gameInfo)
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"ComingGames":          []any{},
+		"ActiveGames":          active,
+		"Error":                0,
+		"Message":              nil,
+		"IpUnblockUrl":         nil,
+		"BruteForceUnblockUrl": nil,
+		"ConfirmEmailUrl":      nil,
+		"CaptchaUrl":           nil,
+		"AdminWhoCanActivate":  nil,
+	})
 }
 
 func (s *server) handleDomainRoot(w http.ResponseWriter, r *http.Request) {
+	if r.URL.Path != "/" {
+		http.NotFound(w, r)
+		return
+	}
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	title := html.EscapeString(s.gameTitle())
 	_, _ = fmt.Fprintf(w, `<html><body>
-<h1 class="gametitle"><a href="/details/%d/">Mock Game 2026</a></h1>
-<a id="lnkGameTitle" href="/GameDetails.aspx?gid=%d">Mock Game 2026</a>
-</body></html>`, mockGameID, mockGameID)
+<h1 class="gametitle"><a href="/details/%d/">%s</a></h1>
+<a id="lnkGameTitle" href="/GameDetails.aspx?gid=%d">%s</a>
+</body></html>`, mockGameID, title, mockGameID, title)
 }
 
 func (s *server) handleEnterGame(w http.ResponseWriter, r *http.Request) {
@@ -242,7 +340,7 @@ func (s *server) handleGameDetails(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	_, _ = fmt.Fprintf(w, `<html><body><h1>Mock Game %d</h1><p>Team accepted: yes</p><p>Levels: %d</p></body></html>`, mockGameID, len(levelAnswers))
+	_, _ = fmt.Fprintf(w, `<html><body><h1>%s</h1><p>Team accepted: yes</p><p>Levels: %d</p></body></html>`, html.EscapeString(s.gameTitle()), s.levelCount())
 }
 
 func (s *server) handleTeamDetails(w http.ResponseWriter, r *http.Request) {
@@ -268,6 +366,8 @@ func (s *server) handleGameStatistics(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	st.mu.Lock()
+	defer st.mu.Unlock()
 	gameID, err := extractTailInt(r.URL.Path, "/gamestatistics/full/")
 	if err != nil || gameID != mockGameID {
 		http.NotFound(w, r)
@@ -275,13 +375,13 @@ func (s *server) handleGameStatistics(w http.ResponseWriter, r *http.Request) {
 	}
 	now := time.Now()
 
-	stats := make([][]encx.StatItem, len(levelAnswers))
-	for i := range levelAnswers {
+	stats := make([][]encx.StatItem, s.levelCount())
+	for i := 0; i < s.levelCount(); i++ {
 		stats[i] = []encx.StatItem{
 			{
 				ActionTime:   dt(now.Add(time.Duration(i+1) * time.Minute)),
 				UserId:       101,
-				LevelId:      levelID(i),
+				LevelId:      mockLevelBaseID + i + 1,
 				TeamId:       mockTeamID,
 				UserName:     st.Login,
 				TeamName:     "MockTeam",
@@ -294,13 +394,13 @@ func (s *server) handleGameStatistics(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	levels := make([]encx.LevelStatInfo, len(levelAnswers))
-	levelPlayers := make([]encx.LevelPlayerCount, len(levelAnswers))
-	for i := range levelAnswers {
+	levels := make([]encx.LevelStatInfo, s.levelCount())
+	levelPlayers := make([]encx.LevelPlayerCount, s.levelCount())
+	for i := 0; i < s.levelCount(); i++ {
 		levels[i] = encx.LevelStatInfo{
-			LevelId:       levelID(i),
+			LevelId:       mockLevelBaseID + i + 1,
 			LevelNumber:   i + 1,
-			LevelName:     fmt.Sprintf("Mock level %d", i+1),
+			LevelName:     s.levelName(i),
 			Dismissed:     false,
 			PassedPlayers: 1,
 		}
@@ -311,17 +411,24 @@ func (s *server) handleGameStatistics(w http.ResponseWriter, r *http.Request) {
 	}
 
 	curIdx := st.CurrentIdx
-	if curIdx >= len(levelAnswers) {
-		curIdx = len(levelAnswers) - 1
+	if curIdx >= s.levelCount() {
+		curIdx = s.levelCount() - 1
 	}
 
+	gameInfo, err := s.buildGameInfoResponse(st, now)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]any{"Error": 5, "Message": err.Error()})
+		return
+	}
+	gameInfoStruct := mapToGameInfo(gameInfo)
+
 	resp := encx.GameStatisticsResponse{
-		Game:               ptr(buildGameInfoForState(st, now)),
-		Level:              &levels[curIdx],
-		StatItems:          stats,
-		Levels:             levels,
+		Game:                &gameInfoStruct,
+		Level:               &levels[curIdx],
+		StatItems:           stats,
+		Levels:              levels,
 		IsLevelNamesVisible: true,
-		LevelPlayers:       levelPlayers,
+		LevelPlayers:        levelPlayers,
 		User: &encx.UserProfile{
 			ID:             101,
 			Login:          st.Login,
@@ -355,11 +462,26 @@ func (s *server) handleGameStatistics(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, resp)
 }
 
+func mapToGameInfo(m map[string]any) encx.GameInfo {
+	raw, _ := json.Marshal(m)
+	var info encx.GameInfo
+	_ = json.Unmarshal(raw, &info)
+	if info.GameID == 0 {
+		info.GameID = mockGameID
+	}
+	if info.Title == "" {
+		info.Title = "Mock Game 2026"
+	}
+	return info
+}
+
 func (s *server) handleGamePlayGET(w http.ResponseWriter, r *http.Request) {
 	st, ok := s.requireSessionJSON(w, r)
 	if !ok {
 		return
 	}
+	st.mu.Lock()
+	defer st.mu.Unlock()
 	gameID, err := extractTailInt(r.URL.Path, "/gameengines/encounter/play/")
 	if err != nil || gameID != mockGameID {
 		http.NotFound(w, r)
@@ -374,12 +496,14 @@ func (s *server) handleGamePlayGET(w http.ResponseWriter, r *http.Request) {
 				PenaltyId:  mustAtoi(q.Get("pid")),
 				ActionType: 1,
 			},
-			GameId: mockGameID,
-			LevelId: currentLevelID(st),
+			LevelAction: &encx.ActionResult{},
+			BonusAction: &encx.ActionResult{},
+			GameId:      mockGameID,
+			LevelId:     currentLevelID(st),
 		}
 	}
-	s.touch(st)
-	writeJSON(w, http.StatusOK, s.buildGameModel(st))
+	st.UpdatedAt = time.Now()
+	s.writeGameModel(w, st)
 }
 
 func (s *server) handleGamePlayPOST(w http.ResponseWriter, r *http.Request) {
@@ -400,252 +524,40 @@ func (s *server) handleGamePlayPOST(w http.ResponseWriter, r *http.Request) {
 
 	answer := strings.TrimSpace(r.Form.Get("LevelAction.Answer"))
 	if strings.EqualFold(answer, networkDropCode) {
-		s.activateNetworkDrop(st.AuthKey)
-		s.dropIfSilent(r, st.AuthKey)
+		st.mu.Lock()
+		authKey := st.AuthKey
+		st.mu.Unlock()
+		s.activateNetworkDrop(authKey)
+		s.dropIfSilent(r, authKey)
 		return
 	}
 
+	st.mu.Lock()
+	defer st.mu.Unlock()
 	if answer != "" {
-		idx := st.CurrentIdx
-		if idx >= len(levelAnswers) {
-			idx = len(levelAnswers) - 1
-		}
-		expected := levelAnswers[idx]
-		correct := strings.EqualFold(answer, expected)
-
-		if correct && idx < len(st.Passed) {
-			st.Passed[idx] = true
-			if st.CurrentIdx < len(levelAnswers)-1 {
-				st.CurrentIdx++
-			} else {
-				st.Completed = true
-			}
-		}
-
-		st.Actions = append(st.Actions, encx.CodeAction{
-			ActionId:    len(st.Actions) + 1,
-			LevelId:     levelID(idx),
-			LevelNumber: idx + 1,
-			UserId:      101,
-			Kind:        1,
-			Login:       st.Login,
-			Answer:      answer,
-			LocDateTime: time.Now().Format("2006-01-02 15:04:05"),
-			IsCorrect:   correct,
-			Penalty:     0,
-			Negative:    false,
-		})
-
-		st.LastAction = &encx.EngineAction{
-			LevelNumber: idx + 1,
-			LevelAction: &encx.ActionResult{
-				Answer:          ptr(answer),
-				IsCorrectAnswer: ptr(correct),
-			},
-			GameId:  mockGameID,
-			LevelId: levelID(idx),
-		}
+		s.processAnswer(st, answer)
 	}
 
-	s.touch(st)
-	writeJSON(w, http.StatusOK, s.buildGameModel(st))
+	st.UpdatedAt = time.Now()
+	s.writeGameModel(w, st)
+}
+
+func (s *server) writeGameModel(w http.ResponseWriter, st *sessionState) {
+	now := time.Now()
+	if s.scenario != nil {
+		s.applyScenarioAutopass(st, now)
+	}
+	model, err := s.buildGameModelResponse(st, now)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]any{"Error": 5, "Message": err.Error()})
+		return
+	}
+	writeJSON(w, http.StatusOK, model)
 }
 
 func (s *server) handleNotHuman(w http.ResponseWriter, _ *http.Request) {
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	_, _ = w.Write([]byte(`<html><body><h1>Anti-spam check</h1><p>Mock page.</p></body></html>`))
-}
-
-func (s *server) buildGameModel(st *sessionState) encx.GameModel {
-	now := time.Now()
-	lvlSummaries := make([]encx.LevelSummary, len(levelAnswers))
-	for i := range levelAnswers {
-		lvlSummaries[i] = encx.LevelSummary{
-			LevelId:     levelID(i),
-			LevelNumber: i + 1,
-			LevelName:   fmt.Sprintf("Mock level %d", i+1),
-			Dismissed:   false,
-			IsPassed:    st.Passed[i],
-			Task: &encx.LevelTask{
-				TaskText:          fmt.Sprintf("Find code for level %d", i+1),
-				TaskTextFormatted: fmt.Sprintf("<p>Find code for level %d</p>", i+1),
-				ReplaceNlToBr:     true,
-			},
-			LevelAction: nil,
-		}
-	}
-
-	idx := st.CurrentIdx
-	if idx >= len(levelAnswers) {
-		idx = len(levelAnswers) - 1
-	}
-	curPassed := st.Passed[idx]
-	curAnswer := ""
-	if curPassed {
-		curAnswer = levelAnswers[idx]
-	}
-
-	model := encx.GameModel{
-		Event:             func() any { if st.Completed { return 100 } ; return 0 }(),
-		GameId:            mockGameID,
-		GameNumber:        1,
-		GameTitle:         "Mock Game 2026",
-		GameTypeId:        1,
-		GameZoneId:        0,
-		LevelSequence:     1,
-		UserId:            101,
-		TeamId:            mockTeamID,
-		Login:             st.Login,
-		TeamName:          "MockTeam",
-		IsCaptain:         true,
-		GameDateTimeStart: now.Format("2006-01-02 15:04:05"),
-		Levels:            lvlSummaries,
-		EngineAction:      st.LastAction,
-		Level: &encx.Level{
-			LevelId:              levelID(idx),
-			Number:               idx + 1,
-			Name:                 func() string { if st.Completed { return "Финиш — игра завершена" } ; return fmt.Sprintf("Mock level %d", idx+1) }(),
-			Timeout:              1800,
-			TimeoutSecondsRemain: 1200,
-			TimeoutAward:         0,
-			IsPassed:             curPassed,
-			Dismissed:            false,
-			StartTime:            dt(now.Add(-10 * time.Minute)),
-			HasAnswerBlockRule:   false,
-			BlockDuration:        0,
-			BlockTargetId:        0,
-			AttemtsNumber:        0,
-			AttemtsPeriod:        0,
-			RequiredSectorsCount: 1,
-			PassedSectorsCount:   btoi(curPassed),
-			PassedBonusesCount:   0,
-			SectorsLeftToClose:   1 - btoi(curPassed),
-			Tasks: []encx.LevelTask{
-				{
-					TaskText:          fmt.Sprintf("Answer is %s (for automated tests)", levelAnswers[idx]),
-					TaskTextFormatted: fmt.Sprintf("<p>Answer is <b>%s</b> (for automated tests)</p>", levelAnswers[idx]),
-					ReplaceNlToBr:     true,
-				},
-			},
-			Task: &encx.LevelTask{
-				TaskText:          fmt.Sprintf("Answer is %s (for automated tests)", levelAnswers[idx]),
-				TaskTextFormatted: fmt.Sprintf("<p>Answer is <b>%s</b> (for automated tests)</p>", levelAnswers[idx]),
-				ReplaceNlToBr:     true,
-			},
-			Messages: []encx.AdminMessage{
-				{
-					OwnerId:      1,
-					OwnerLogin:   "mock-admin",
-					MessageId:    1,
-					MessageText:  func() string { if st.Completed { return "Игра завершена. Все коды приняты." } ; return "Test mode enabled" }(),
-					WrappedText:  func() string { if st.Completed { return "Игра завершена. Все коды приняты." } ; return "Test mode enabled" }(),
-					ReplaceNl2Br: true,
-				},
-			},
-			Sectors: []encx.Sector{
-				{
-					SectorId:   levelID(idx)*10 + 1,
-					Order:      1,
-					Name:       "Main sector",
-					IsAnswered: curPassed || st.Completed,
-					Answer:     encx.FlexString(curAnswer),
-				},
-			},
-			Helps: []encx.Help{
-				{
-					HelpId:           101,
-					Number:           1,
-					HelpText:         ptr("Try CODE-N format"),
-					IsPenalty:        false,
-					Penalty:          0,
-					PenaltyComment:   nil,
-					RequestConfirm:   false,
-					PenaltyHelpState: 1,
-					RemainSeconds:    0,
-					PenaltyMessage:   nil,
-				},
-			},
-			Bonuses: []encx.Bonus{},
-			PenaltyHelps: []encx.Help{
-				{
-					HelpId:           201,
-					Number:           1,
-					HelpText:         ptr("Penalty hint content"),
-					IsPenalty:        true,
-					Penalty:          30,
-					PenaltyComment:   ptr("Penalty 30 sec"),
-					RequestConfirm:   true,
-					PenaltyHelpState: 1,
-					RemainSeconds:    0,
-					PenaltyMessage:   ptr("Penalty accepted"),
-				},
-			},
-			MixedActions: st.Actions,
-		},
-	}
-
-	return model
-}
-
-func buildGameInfo(_ string, now time.Time) encx.GameInfo {
-	return encx.GameInfo{
-		GameID:                mockGameID,
-		GameNum:               1,
-		SiteID:                1,
-		LangID:                1,
-		CompetitionID:         0,
-		OwnerID:               1,
-		LevelNumber:           len(levelAnswers),
-		CreateDateTime:        dt(now.Add(-24 * time.Hour)),
-		StartDateTime:         dt(now.Add(-1 * time.Hour)),
-		FinishDateTime:        dt(now.Add(3 * time.Hour)),
-		Title:                 "Mock Game 2026",
-		Descr:                 "Single always-available game for integration tests",
-		DescrWrapped:          "<p>Single always-available game for integration tests</p>",
-		GameTypeID:            1,
-		ZoneId:                0,
-		LevelsSequence:        1,
-		ScenarioAvailability:  1,
-		MaxPlayers:            100,
-		MaxTeamMembers:        10,
-		ShowInCalendar:        true,
-		FeeType:               0,
-		FeeCurrencyId:         1,
-		FeeName:               "RUB",
-		ShowFee:               1,
-		Fee:                   &encx.Money{Cents: 0, Value: 0, Formated: "0"},
-		Prize:                 &encx.Money{Cents: 0, Value: 0, Formated: "0"},
-		PrizeType:             0,
-		PrizeTypeSymbol:       "",
-		TSRemain:              dur(3 * time.Hour),
-		Started:               true,
-		Finished:              false,
-		InProgress:            true,
-		IsSectorsSupported:    true,
-		IsOnlineStatAvailable: true,
-		IsComplexitySupported: false,
-		IsModerated:           false,
-		ComplexityFactor:      1,
-		ComplexityMembersFactor: 1,
-		QualityRate:           100,
-		QualityRateFormatted:  "100",
-		TopicId:               1,
-		AcceptRateFromDateTime: dt(now.Add(-2 * time.Hour)),
-		RequestLastDate:       dt(now.Add(2 * time.Hour)),
-		HideLevelsNames:       false,
-		AlwaysAvailable:       true,
-		PublicAccess:          true,
-		DisplayMonitoring:     0,
-	}
-}
-
-func buildGameInfoForState(st *sessionState, now time.Time) encx.GameInfo {
-	g := buildGameInfo(st.Login, now)
-	if st.Completed {
-		g.Finished = true
-		g.InProgress = false
-	}
-	return g
 }
 
 func (s *server) requireSessionJSON(w http.ResponseWriter, r *http.Request) (*sessionState, bool) {
@@ -657,7 +569,7 @@ func (s *server) requireSessionJSON(w http.ResponseWriter, r *http.Request) (*se
 		})
 		return nil, false
 	}
-	if s.dropIfSilent(r, st.AuthKey) {
+	if s.dropIfSilent(r, sessionAuthKey(st)) {
 		return nil, false
 	}
 	return st, true
@@ -671,7 +583,7 @@ func (s *server) requireSessionHTML(w http.ResponseWriter, r *http.Request) (*se
 		_, _ = w.Write([]byte("<html><body>Unauthorized</body></html>"))
 		return nil, false
 	}
-	if s.dropIfSilent(r, st.AuthKey) {
+	if s.dropIfSilent(r, sessionAuthKey(st)) {
 		return nil, false
 	}
 	return st, true
@@ -700,10 +612,10 @@ func (s *server) newSession(st *sessionState) string {
 	return sid
 }
 
-func (s *server) touch(st *sessionState) {
-	s.mu.Lock()
-	st.UpdatedAt = time.Now()
-	s.mu.Unlock()
+func sessionAuthKey(st *sessionState) string {
+	st.mu.Lock()
+	defer st.mu.Unlock()
+	return st.AuthKey
 }
 
 func extractTailInt(path, prefix string) (int, error) {
@@ -721,22 +633,24 @@ func writeJSON(w http.ResponseWriter, status int, v any) {
 	_ = json.NewEncoder(w).Encode(v)
 }
 
-func levelID(idx int) int {
-	return 1000 + idx + 1
-}
-
 func currentLevelID(st *sessionState) int {
 	idx := st.CurrentIdx
-	if idx >= len(levelAnswers) {
-		idx = len(levelAnswers) - 1
+	if idx >= len(st.Passed) {
+		idx = len(st.Passed) - 1
 	}
-	return levelID(idx)
+	if idx < 0 {
+		idx = 0
+	}
+	return mockLevelBaseID + idx + 1
 }
 
 func currentLevelNum(st *sessionState) int {
 	idx := st.CurrentIdx
-	if idx >= len(levelAnswers) {
-		idx = len(levelAnswers) - 1
+	if idx >= len(st.Passed) {
+		idx = len(st.Passed) - 1
+	}
+	if idx < 0 {
+		idx = 0
 	}
 	return idx + 1
 }
@@ -746,31 +660,10 @@ func mustAtoi(s string) int {
 	return v
 }
 
-func btoi(v bool) int {
-	if v {
-		return 1
-	}
-	return 0
-}
-
 func dt(t time.Time) *encx.DateTime {
 	return &encx.DateTime{
 		Value:     float64(t.Unix()),
 		Timestamp: t.Unix(),
-	}
-}
-
-func dur(d time.Duration) *encx.Duration {
-	totalSeconds := d.Seconds()
-	h := int(d.Hours())
-	m := int(d.Minutes()) % 60
-	s := int(d.Seconds()) % 60
-	return &encx.Duration{
-		Days:         h / 24,
-		Hours:        h % 24,
-		Minutes:      m,
-		Seconds:      s,
-		TotalSeconds: totalSeconds,
 	}
 }
 
@@ -793,8 +686,6 @@ func (s *server) activateNetworkDrop(authKey string) {
 	log.Printf("encx-mock: network drop for %s until %s (code %q)", credentialsKeyForLog(authKey), until.Format(time.RFC3339), networkDropCode)
 }
 
-// dropIfSilent blocks until the client disconnects when the credentials pair is in network-drop mode.
-// Returns true when the request was dropped (caller should return immediately).
 func (s *server) dropIfSilent(r *http.Request, authKey string) bool {
 	if authKey == "" {
 		return false
