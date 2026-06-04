@@ -37,6 +37,8 @@ type config struct {
 	useHTTP        bool
 	jsonOutput     bool
 	debug          bool
+	harRecording   bool
+	harOut         string
 	agentReadonly  bool
 	agentSecurity  AgentSecurityMode // default for new web chats
 }
@@ -67,6 +69,7 @@ func main() {
 			fs.BoolVar(&cfg.insecure, "insecure", envBool("ENCX_INSECURE"), "Skip TLS verification")
 			fs.BoolVar(&cfg.useHTTP, "http", false, "Use plain HTTP")
 			fs.BoolVar(&cfg.debug, "debug", envBool("ENCX_DEBUG"), "Enable debug logging")
+			registerHARFlags(fs, cfg)
 			fs.BoolVar(&cfg.agentReadonly, "readonly", false, "Agent: block tools that modify or delete data")
 			fs.StringVar(&webAddr, "web-addr", cmp.Or(os.Getenv("ENCLI_WEB_ADDR"), defaultWebAddr), "Web UI listen address")
 			if cfg.agentReadonly {
@@ -107,24 +110,19 @@ func main() {
 			fs.BoolVar(&cfg.useHTTP, "http", false, "Use plain HTTP")
 			fs.BoolVar(&cfg.jsonOutput, "json", false, "Output as JSON")
 			fs.BoolVar(&cfg.debug, "debug", envBool("ENCX_DEBUG"), "Enable debug logging")
+			registerHARFlags(fs, cfg)
 			fs.BoolVar(&cfg.agentReadonly, "readonly", false, "Block agent tools that modify or delete data")
 			fs.Parse(flagArgs)
 			debugMode = cfg.debug
 			debugf("starting llm mode: domain=%s game_id=%d insecure=%v http=%v json=%v login_set=%v password_set=%v prompt_len=%d",
 				cfg.domain, cfg.gameId, cfg.insecure, cfg.useHTTP, cfg.jsonOutput, cfg.login != "", cfg.password != "", len(strings.Join(promptParts, " ")))
 
-			var opts []encx.Option
-			if cfg.insecure {
-				opts = append(opts, encx.WithInsecureTLS())
-			}
-			if cfg.useHTTP {
-				opts = append(opts, encx.WithHTTP())
-			}
-			if cfg.debug {
-				opts = append(opts, encx.WithDebugLogger(debugf))
-			}
+			var opts []encx.Option = appendEncOpts(cfg)
 
 			client := encx.New(cfg.domain, opts...)
+			if cfg.harRecording {
+				defer exportClientHAR(client, cfg)
+			}
 			debugf("created encx client for domain=%s", cfg.domain)
 			loadSession(cfg, client)
 			cmdLLM(context.Background(), cfg, client, strings.Join(promptParts, " "))
@@ -170,6 +168,7 @@ func main() {
 	fs.BoolVar(&cfg.useHTTP, "http", false, "Use plain HTTP instead of HTTPS")
 	fs.BoolVar(&cfg.jsonOutput, "json", false, "Output results as JSON")
 	fs.BoolVar(&cfg.debug, "debug", envBool("ENCX_DEBUG"), "Enable debug logging (env: ENCX_DEBUG)")
+	registerHARFlags(fs, cfg)
 
 	fs.Usage = func() { printCommandHelp(cmd) }
 	fs.Parse(args)
@@ -178,18 +177,12 @@ func main() {
 	debugf("parsed command=%s domain=%s game_id=%d insecure=%v http=%v json=%v login_set=%v password_set=%v positional=%d",
 		cmd, cfg.domain, cfg.gameId, cfg.insecure, cfg.useHTTP, cfg.jsonOutput, cfg.login != "", cfg.password != "", len(fs.Args()))
 
-	var opts []encx.Option
-	if cfg.insecure {
-		opts = append(opts, encx.WithInsecureTLS())
-	}
-	if cfg.useHTTP {
-		opts = append(opts, encx.WithHTTP())
-	}
-	if cfg.debug {
-		opts = append(opts, encx.WithDebugLogger(debugf))
-	}
+	var opts []encx.Option = appendEncOpts(cfg)
 
 	client := encx.New(cfg.domain, opts...)
+	if cfg.harRecording {
+		defer exportClientHAR(client, cfg)
+	}
 	debugf("created encx client for domain=%s", cfg.domain)
 	ctx := context.Background()
 	positional := fs.Args()
@@ -466,6 +459,8 @@ Global flags:
   -insecure    Skip TLS certificate verification
   -http        Use plain HTTP instead of HTTPS
   -debug       Enable debug logging
+  -har         Record HTTP traffic as HAR 1.2
+  -har-out     HAR export path (file or directory)
 
 Environment variables:
   ENCX_DOMAIN          Domain (default: tech.en.cx)
@@ -474,6 +469,8 @@ Environment variables:
   ENCX_GAME_ID         Game ID
   ENCX_INSECURE        Skip TLS verification (1/true)
   ENCX_DEBUG           Enable debug logging (1/true)
+  ENCX_HAR             Enable HAR recording (1/true)
+  ENCX_HAR_OUT         HAR export path (file or directory)
   LLM_BASE_URL         OpenAI-compatible API base URL (default: https://openrouter.ai/api/v1)
   LLM_API_KEY          API key for --llm mode (not required for localhost)
   LLM_MODEL            LLM model override (default: openai/gpt-oss-120b:free)
@@ -1597,7 +1594,7 @@ func debugf(format string, args ...any) {
 
 func isBoolFlag(arg string) bool {
 	switch arg {
-	case "-insecure", "-http", "-json", "-debug", "-web", "--web", "-readonly", "--readonly":
+	case "-insecure", "-http", "-json", "-debug", "-har", "-web", "--web", "-readonly", "--readonly":
 		return true
 	default:
 		return false
@@ -1606,7 +1603,7 @@ func isBoolFlag(arg string) bool {
 
 func isValueFlag(arg string) bool {
 	switch arg {
-	case "-domain", "-login", "-password", "-game-id", "-web-addr":
+	case "-domain", "-login", "-password", "-game-id", "-web-addr", "-har-out":
 		return true
 	default:
 		return false

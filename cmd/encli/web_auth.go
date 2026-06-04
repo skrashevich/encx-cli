@@ -70,6 +70,15 @@ func (r *AuthRegistry) Get(domain string, opts []encx.Option) *encx.Client {
 	return c
 }
 
+// ForEachClient invokes fn for every cached client under read lock.
+func (r *AuthRegistry) ForEachClient(fn func(domain string, client *encx.Client)) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	for domain, client := range r.clients {
+		fn(domain, client)
+	}
+}
+
 // Login authenticates and persists cookies via saveSession (same path as CLI sessionFile).
 func (r *AuthRegistry) Login(ctx context.Context, domain, login, password string, opts []encx.Option) error {
 	c := encx.New(domain, opts...)
