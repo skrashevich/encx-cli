@@ -83,6 +83,38 @@ ENCX_MOCK_SCENARIO="/path/to/Game scenario.html" encx-mock
 Локальные файлы, на которые ссылается экспорт, по возможности встраиваются как
 `data:` URL. Отсутствующие файлы перечисляются при запуске.
 
+## Сценарий для App Store Review
+
+В репозитории есть безопасный fixture для проверки iOS-приложения ревьюерами
+Apple без доступа к реальному Encounter:
+
+```sh
+go run ./cmd/encx-mock -scenario cmd/encx-mock/fixtures/app_store_review_scenario.html
+```
+
+Для проверки с физического iPhone сервер должен быть доступен в локальной сети:
+
+```sh
+ENCX_MOCK_ADDR=0.0.0.0:18080 \
+  encx-mock -scenario /path/to/app_store_review_scenario.html
+```
+
+В настройках приложения укажите HTTP endpoint mock-сервера, например
+`http://<LAN-IP>:18080`. Можно использовать любой логин и пароль, например
+`apple-review` / `apple-review`.
+
+Игровые данные fixture:
+
+| Уровень | Название | Коды |
+| --- | --- | --- |
+| 1 | `Welcome` | `REVIEW-START` |
+| 2 | `Checkpoint` | `MAP-101`, `LOCK-202`; бонус `BONUS-5` |
+| 3 | `Finish` | `FINISH-303`; автопереход через 30 секунд |
+
+Дополнительно можно отправить неправильный ответ, чтобы проверить отображение
+ошибки, и код `PZDC`, чтобы включить эмуляцию потери сети для текущей пары
+логин/пароль.
+
 ## Получение fixtures из HAR
 
 `ENCX_MOCK_HAR` заменяет встроенные формы ответов шаблонами, полученными из HAR

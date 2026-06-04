@@ -1,0 +1,73 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Encounter App Store Review Scenario</title>
+</head>
+<body>
+  <a id="lnkGameInfo" href="/GameDetails.aspx?gid=424242">Encounter App Store Review</a>
+  <span id="lblGameId">424242</span>
+  <span id="lblGameNumber">9001</span>
+
+  <a id="LevelsScenarioRepeater_ctl00_lnkLevelAnchorPoint" name="1"></a>
+  Уровень №1 "Welcome"
+  <div class="scenarioBlock border_dark">
+    <span id="LevelsScenarioRepeater_ctl00_LevelTasksRepeater_ctl00_lblLevelTask">
+      Welcome to the App Store review test game.<br>
+      Submit <b>REVIEW-START</b> to open the next level.
+    </span>
+    <br><br>
+    <span id="LevelsScenarioRepeater_ctl00_LevelHelpsRepeater_ctl00_lblLevelHelpTitle">Hint 1 (15 секунд)</span><br>
+    <span id="LevelsScenarioRepeater_ctl00_LevelHelpsRepeater_ctl00_lblLevelHelp">
+      The first answer is REVIEW-START.
+    </span>
+    <br><br>
+    <span id="LevelsScenarioRepeater_ctl00_SectorsRepeater_ctl00_LevelAnswersRepeater_ctl00_lblLevelAnswer">REVIEW-START</span> - <span id="LevelsScenarioRepeater_ctl00_SectorsRepeater_ctl00_LevelAnswersRepeater_ctl00_lblAnswerFor">for all</span>
+  </div>
+
+  <a id="LevelsScenarioRepeater_ctl01_lnkLevelAnchorPoint" name="2"></a>
+  Уровень №2 "Checkpoint"
+  <div class="scenarioBlock border_dark">
+    <span id="LevelsScenarioRepeater_ctl01_LevelTasksRepeater_ctl00_lblLevelTask">
+      This level has two sectors and one optional bonus. It is intended to verify
+      answer submission, progress counters, action history, and bonus rendering.
+    </span>
+    <br><br>
+    <span id="LevelsScenarioRepeater_ctl01_LevelHelpsRepeater_ctl00_lblLevelHelpTitle">Hint 1 (30 секунд)</span><br>
+    <span id="LevelsScenarioRepeater_ctl01_LevelHelpsRepeater_ctl00_lblLevelHelp">
+      Sector answers: MAP-101 and LOCK-202.
+    </span>
+    <br><br>
+    <span id="LevelsScenarioRepeater_ctl01_SectorsRepeater_ctl00_LevelAnswersRepeater_ctl00_lblLevelAnswer">MAP-101</span> - <span id="LevelsScenarioRepeater_ctl01_SectorsRepeater_ctl00_LevelAnswersRepeater_ctl00_lblAnswerFor">for all</span>
+    <br>
+    <span id="LevelsScenarioRepeater_ctl01_SectorsRepeater_ctl01_LevelAnswersRepeater_ctl00_lblLevelAnswer">LOCK-202</span> - <span id="LevelsScenarioRepeater_ctl01_SectorsRepeater_ctl01_LevelAnswersRepeater_ctl00_lblAnswerFor">for all</span>
+    <br><br>
+    <span id="LevelsScenarioRepeater_ctl01_LevelBonusesRepeater_ctl00_lblBonusNum" class="light_yellow bold">Бонус №1 "Optional review bonus" для всех</span>
+    <br><br>
+    <span class="green">Бонусное время:  1 минута</span>
+    <br><br>
+    <span class="green">Задание</span><br>
+    Submit BONUS-5 to check optional bonus handling.
+    <br><br>
+    <span class="green">Ответы</span><br>
+    <span id="LevelsScenarioRepeater_ctl01_LevelBonusesRepeater_ctl00_BonusAnswersRepeater_ctl00_lblBonusAnswer" class="bold w00FF00x10">BONUS-5</span>
+  </div>
+
+  <a id="LevelsScenarioRepeater_ctl02_lnkLevelAnchorPoint" name="3"></a>
+  Уровень №3 "Finish"
+  <div class="scenarioBlock border_dark">
+    <div class="white bold">Автопереход: через 30 секунд<br><br></div>
+    <span id="LevelsScenarioRepeater_ctl02_LevelTasksRepeater_ctl00_lblLevelTask">
+      Final level. Submit <b>FINISH-303</b> to finish immediately, or wait for
+      the short auto-transition timer.
+    </span>
+    <br><br>
+    <span id="LevelsScenarioRepeater_ctl02_LevelHelpsRepeater_ctl00_lblLevelHelpTitle">Hint 1 (10 секунд)</span><br>
+    <span id="LevelsScenarioRepeater_ctl02_LevelHelpsRepeater_ctl00_lblLevelHelp">
+      The final answer is FINISH-303.
+    </span>
+    <br><br>
+    <span id="LevelsScenarioRepeater_ctl02_SectorsRepeater_ctl00_LevelAnswersRepeater_ctl00_lblLevelAnswer">FINISH-303</span> - <span id="LevelsScenarioRepeater_ctl02_SectorsRepeater_ctl00_LevelAnswersRepeater_ctl00_lblAnswerFor">for all</span>
+  </div>
+</body>
+</html>
