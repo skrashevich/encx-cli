@@ -43,17 +43,7 @@ func (h *webHub) publishSSE(chatID, eventType string, payload any) {
 }
 
 func encOptsFromConfig(cfg *config) []encx.Option {
-	var opts []encx.Option
-	if cfg.insecure {
-		opts = append(opts, encx.WithInsecureTLS())
-	}
-	if cfg.useHTTP {
-		opts = append(opts, encx.WithHTTP())
-	}
-	if cfg.debug {
-		opts = append(opts, encx.WithDebugLogger(debugf))
-	}
-	return opts
+	return appendEncOpts(cfg)
 }
 
 func writeJSON(w http.ResponseWriter, code int, v any) {
@@ -127,7 +117,11 @@ func cmdWeb(ctx context.Context, cfg *config, addr string) error {
 		debugf("open browser: %v", err)
 	}
 	fmt.Fprintf(os.Stderr, "encli web UI at %s (Ctrl+C to stop)\n", url)
-	return startWebServer(ctx, cfg, addr, registry, store)
+	err := startWebServer(ctx, cfg, addr, registry, store)
+	if cfg.harRecording {
+		exportRegistryHAR(registry, cfg)
+	}
+	return err
 }
 
 func startWebServer(ctx context.Context, cfg *config, addr string, registry *AuthRegistry, store *ChatStore) error {

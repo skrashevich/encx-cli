@@ -14,12 +14,15 @@ const defaultTimeout = 15 * time.Second
 
 // Client is an HTTP client for the Encounter (en.cx) game engine API.
 type Client struct {
-	domain     string
-	scheme     string
-	httpClient *http.Client
-	userAgent  string
-	lang       string
-	debugLog   func(string, ...any)
+	domain          string
+	scheme          string
+	httpClient      *http.Client
+	rootTransport   http.RoundTripper
+	userAgent       string
+	lang            string
+	debugLog        func(string, ...any)
+	har             *HARRecorder
+	harAutoEnabled  bool
 }
 
 // Option configures the Client.
@@ -68,24 +71,38 @@ func WithDebugLogger(logf func(string, ...any)) Option {
 	}
 }
 
+// WithHARRecording enables HAR 1.2 capture for all HTTP requests made by the client.
+func WithHARRecording(enabled bool) Option {
+	return func(c *Client) {
+		c.harAutoEnabled = enabled
+		if c.har == nil {
+			c.har = NewHARRecorder()
+		}
+		c.har.SetEnabled(enabled)
+	}
+}
+
 // New creates a new Encounter API client for the given domain.
 // By default it uses HTTPS, a 15-second timeout, and the standard User-Agent.
 func New(domain string, opts ...Option) *Client {
 	jar, _ := cookiejar.New(nil)
 
+	rootTransport := &http.Transport{
+		TLSClientConfig: &tls.Config{
+			NextProtos: []string{"http/1.1"},
+		},
+	}
+
 	c := &Client{
-		domain:    domain,
-		scheme:    "https",
-		userAgent: defaultUserAgent,
-		lang:      "ru",
+		domain:        domain,
+		scheme:        "https",
+		userAgent:     defaultUserAgent,
+		lang:          "ru",
+		rootTransport: rootTransport,
 		httpClient: &http.Client{
-			Timeout: defaultTimeout,
-			Jar:     jar,
-			Transport: &http.Transport{
-				TLSClientConfig: &tls.Config{
-					NextProtos: []string{"http/1.1"},
-				},
-			},
+			Timeout:   defaultTimeout,
+			Jar:       jar,
+			Transport: rootTransport,
 			CheckRedirect: func(req *http.Request, via []*http.Request) error {
 				return http.ErrUseLastResponse
 			},
@@ -95,18 +112,54 @@ func New(domain string, opts ...Option) *Client {
 	for _, opt := range opts {
 		opt(c)
 	}
-	if c.debugLog != nil {
-		base := c.httpClient.Transport
-		if base == nil {
-			base = http.DefaultTransport
+	c.rebuildTransport()
+
+	return c
+}
+
+func (c *Client) ensureHAR() *HARRecorder {
+	if c.har == nil {
+		c.har = NewHARRecorder()
+		if c.harAutoEnabled {
+			c.har.SetEnabled(true)
 		}
-		c.httpClient.Transport = &debugTransport{
-			base:   base,
+	}
+	return c.har
+}
+
+// SetHARRecordingEnabled toggles HAR capture for subsequent HTTP requests.
+func (c *Client) SetHARRecordingEnabled(enabled bool) {
+	c.ensureHAR().SetEnabled(enabled)
+	c.rebuildTransport()
+}
+
+// ClearHAR removes all captured HAR entries.
+func (c *Client) ClearHAR() {
+	c.ensureHAR().Clear()
+}
+
+// HAREntryCount returns the number of captured HAR entries.
+func (c *Client) HAREntryCount() int {
+	return c.ensureHAR().EntryCount()
+}
+
+// ExportHARJSON returns captured traffic as a HAR 1.2 JSON document.
+func (c *Client) ExportHARJSON() (string, error) {
+	return c.ensureHAR().ExportJSON()
+}
+
+func (c *Client) rebuildTransport() {
+	transport := c.rootTransport
+	if c.debugLog != nil {
+		transport = &debugTransport{
+			base:   transport,
 			debugf: c.debugf,
 		}
 	}
-
-	return c
+	if c.har != nil && c.har.Enabled() {
+		transport = c.har.wrap(transport)
+	}
+	c.httpClient.Transport = transport
 }
 
 func (c *Client) baseURL() string {

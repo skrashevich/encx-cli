@@ -3,7 +3,7 @@ module github.com/skrashevich/encx-cli
 go 1.26
 
 require (
-	golang.org/x/mobile v0.0.0-20260529142300-ecb4cd65260a
+	golang.org/x/mobile v0.0.0-20260602190626-68735029466e
 	golang.org/x/term v0.43.0
 )
 
