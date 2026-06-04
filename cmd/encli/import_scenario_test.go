@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/skrashevich/encx-cli/encx"
+	"github.com/skrashevich/encx-cli/encx/scenario"
 )
 
 func TestParseScenarioFile(t *testing.T) {
@@ -45,15 +46,15 @@ func TestParseScenarioFile(t *testing.T) {
 		t.Fatalf("write scenario: %v", err)
 	}
 
-	scenario, err := parseScenarioFile(docPath)
+	scenarioDoc, err := scenario.ParseFile(docPath)
 	if err != nil {
-		t.Fatalf("parseScenarioFile error: %v", err)
+		t.Fatalf("ParseFile error: %v", err)
 	}
-	if len(scenario.Levels) != 2 {
-		t.Fatalf("expected 2 levels, got %d", len(scenario.Levels))
+	if len(scenarioDoc.Levels) != 2 {
+		t.Fatalf("expected 2 levels, got %d", len(scenarioDoc.Levels))
 	}
 
-	l1 := scenario.Levels[0]
+	l1 := scenarioDoc.Levels[0]
 	if l1.Number != 1 || l1.Name != "Бриф" {
 		t.Fatalf("unexpected level #1 metadata: %+v", l1)
 	}
@@ -69,8 +70,8 @@ func TestParseScenarioFile(t *testing.T) {
 	if l1.SectorAnswers[0][0] != "код166" {
 		t.Fatalf("expected first code to preserve suffix, got %q", l1.SectorAnswers[0][0])
 	}
-	if scenario.EmbeddedAssets != 1 {
-		t.Fatalf("expected embedded asset count 1, got %d", scenario.EmbeddedAssets)
+	if scenarioDoc.EmbeddedAssets != 1 {
+		t.Fatalf("expected embedded asset count 1, got %d", scenarioDoc.EmbeddedAssets)
 	}
 	if len(l1.Tasks) == 0 || !strings.Contains(l1.Tasks[0], "data:image/png;base64,") {
 		t.Fatalf("expected embedded data URL in task, got: %q", strings.Join(l1.Tasks, "\n"))
@@ -85,7 +86,7 @@ func TestParseRuDuration(t *testing.T) {
 		"1 день 1 час 1 минута": 90060,
 	}
 	for input, expected := range tests {
-		got := parseRuDuration(input)
+		got := scenario.ParseRuDuration(input)
 		if got != expected {
 			t.Fatalf("parseRuDuration(%q) = %d, expected %d", input, got, expected)
 		}
@@ -188,7 +189,7 @@ func TestSplitIntoBatches(t *testing.T) {
 
 func TestNormalizeComparableText(t *testing.T) {
 	in := "  a \r\n b\tc  "
-	got := normalizeComparableText(in)
+	got := scenario.NormalizeComparableText(in)
 	if got != "a b c" {
 		t.Fatalf("normalizeComparableText got %q", got)
 	}
@@ -266,12 +267,12 @@ func TestLiveSyncLevel1Sectors82311(t *testing.T) {
 	if !loadSession(cfg, client) {
 		t.Fatal("no saved session; run encli login")
 	}
-	scenario, err := parseScenarioFile(scenarioPath)
+	scenarioDoc, err := scenario.ParseFile(scenarioPath)
 	if err != nil {
 		t.Fatal(err)
 	}
 	stats := &importSyncStats{}
-	if err := syncLevelSectorsToScenario(context.Background(), client, cfg.gameId, 1, scenario.Levels[0], stats); err != nil {
+	if err := syncLevelSectorsToScenario(context.Background(), client, cfg.gameId, 1, scenarioDoc.Levels[0], stats); err != nil {
 		t.Fatal(err)
 	}
 	sectors, err := client.AdminGetSectorAnswers(context.Background(), cfg.gameId, 1)

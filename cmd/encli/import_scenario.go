@@ -3,57 +3,23 @@ package main
 import (
 	"bufio"
 	"context"
-	"encoding/base64"
 	"errors"
 	"fmt"
-	"html"
-	"mime"
 	"net"
-	"net/http"
 	"os"
-	"path/filepath"
 	"regexp"
 	"sort"
-	"strconv"
 	"strings"
 	"time"
 
 	"github.com/skrashevich/encx-cli/encx"
+	"github.com/skrashevich/encx-cli/encx/scenario"
 )
-
-type importedHint struct {
-	Title        string `json:"title,omitempty"`
-	Text         string `json:"text"`
-	DelaySeconds int    `json:"delay_seconds"`
-}
-
-type importedLevel struct {
-	Number         int            `json:"number"`
-	Name           string         `json:"name"`
-	AutopassSecond int            `json:"autopass_seconds,omitempty"`
-	Tasks          []string       `json:"tasks,omitempty"`
-	Hints          []importedHint `json:"hints,omitempty"`
-	SectorAnswers  [][]string     `json:"sector_answers,omitempty"`
-}
-
-type importedScenario struct {
-	SourcePath     string          `json:"source_path"`
-	Levels         []importedLevel `json:"levels"`
-	EmbeddedAssets int             `json:"embedded_assets"`
-	MissingAssets  []string        `json:"missing_assets,omitempty"`
-}
 
 type importScenarioOptions struct {
 	SourcePath  string
 	DryRun      bool
 	SyncMissing bool
-}
-
-type assetRewriteState struct {
-	baseDir       string
-	cache         map[string]string
-	embeddedCount int
-	missingSet    map[string]struct{}
 }
 
 type importSyncStats struct {
@@ -68,18 +34,7 @@ type importSyncStats struct {
 	SectorsCreated  int `json:"sectors_created"`
 }
 
-var (
-	levelAnchorRe = regexp.MustCompile(`(?is)<a id="LevelsScenarioRepeater_ctl\d+_lnkLevelAnchorPoint" name="\d+"></a>`)
-	levelTitleRe  = regexp.MustCompile(`(?is)Уровень №\s*(\d+)\s*(?:"([^"]*)")?`)
-	autopassRe    = regexp.MustCompile(`(?is)Автопереход:\s*через\s*([^<]+)`)
-	taskRe        = regexp.MustCompile(`(?is)<span[^>]*id="LevelsScenarioRepeater_ctl\d+_LevelTasksRepeater_ctl\d+_lblLevelTask"[^>]*>(.*?)</span>`)
-	hintPairRe    = regexp.MustCompile(`(?is)<span[^>]*id="LevelsScenarioRepeater_ctl\d+_LevelHelpsRepeater_ctl\d+_lblLevelHelpTitle"[^>]*>(.*?)</span>\s*<br>\s*<span[^>]*id="LevelsScenarioRepeater_ctl\d+_LevelHelpsRepeater_ctl\d+_lblLevelHelp"[^>]*>(.*?)</span>`)
-	answerRe      = regexp.MustCompile(`(?is)<span[^>]*id="LevelsScenarioRepeater_ctl\d+_SectorsRepeater_ctl(\d+)_LevelAnswersRepeater_ctl\d+_lblLevelAnswer"[^>]*>(.*?)</span>\s*-\s*<span[^>]*id="LevelsScenarioRepeater_ctl\d+_SectorsRepeater_ctl\d+_LevelAnswersRepeater_ctl\d+_lblAnswerFor"`)
-	hintDelayRe   = regexp.MustCompile(`\(([^()]*)\)\s*$`)
-	durationRe    = regexp.MustCompile(`(?i)(\d+)\s*(день|дня|дней|час(?:а|ов)?|минут(?:а|ы)?|секунд(?:а|ы)?)`)
-	assetAttrRe   = regexp.MustCompile(`(?i)\b(src|href)\s*=\s*"([^"]+)"`)
-	dataURIBlobRe = regexp.MustCompile(`(?i)data:([a-z0-9.+-]+/[a-z0-9.+-]+)?;base64,[a-z0-9+/=]+`)
-)
+var dataURIBlobRe = regexp.MustCompile(`(?i)data:([a-z0-9.+-]+/[a-z0-9.+-]+)?;base64,[a-z0-9+/=]+`)
 
 const maxCreateLevelsPerRequest = 30
 
@@ -107,11 +62,11 @@ func cmdImportScenario(ctx context.Context, cfg *config, client *encx.Client, ar
 	opts.DryRun = opts.DryRun || cfg.importDryRun
 	opts.SyncMissing = opts.SyncMissing || cfg.importSyncMissing
 
-	scenario, err := parseScenarioFile(opts.SourcePath)
+	scenarioDoc, err := scenario.ParseFile(opts.SourcePath)
 	if err != nil {
 		fatal("Failed to parse scenario file: %v", err)
 	}
-	if len(scenario.Levels) == 0 {
+	if len(scenarioDoc.Levels) == 0 {
 		fatal("No levels found in scenario file")
 	}
 
@@ -121,35 +76,35 @@ func cmdImportScenario(ctx context.Context, cfg *config, client *encx.Client, ar
 		}
 	}
 
-	progress(fmt.Sprintf("Parsed %d level(s), embedding %d asset(s)", len(scenario.Levels), scenario.EmbeddedAssets))
-	if len(scenario.MissingAssets) > 0 {
-		progress(fmt.Sprintf("Warning: %d linked asset(s) were not found on disk", len(scenario.MissingAssets)))
+	progress(fmt.Sprintf("Parsed %d level(s), embedding %d asset(s)", len(scenarioDoc.Levels), scenarioDoc.EmbeddedAssets))
+	if len(scenarioDoc.MissingAssets) > 0 {
+		progress(fmt.Sprintf("Warning: %d linked asset(s) were not found on disk", len(scenarioDoc.MissingAssets)))
 	}
 
 	totalTasks := 0
 	totalHints := 0
 	totalSectors := 0
-	for _, lvl := range scenario.Levels {
+	for _, lvl := range scenarioDoc.Levels {
 		totalTasks += len(lvl.Tasks)
 		totalHints += len(lvl.Hints)
 		totalSectors += len(lvl.SectorAnswers)
 	}
 
 	if opts.DryRun {
-		redactedLevels := redactScenarioBinaryPayloads(scenario.Levels)
+		redactedLevels := redactScenarioBinaryPayloads(scenarioDoc.Levels)
 		if cfg.jsonOutput {
 			outputJSON(map[string]any{
 				"success":         true,
 				"dry_run":         true,
 				"sync_missing":    opts.SyncMissing,
 				"game_id":         cfg.gameId,
-				"source_path":     scenario.SourcePath,
-				"levels":          len(scenario.Levels),
+				"source_path":     scenarioDoc.SourcePath,
+				"levels":          len(scenarioDoc.Levels),
 				"tasks":           totalTasks,
 				"hints":           totalHints,
 				"sectors":         totalSectors,
-				"embedded_assets": scenario.EmbeddedAssets,
-				"missing_assets":  scenario.MissingAssets,
+				"embedded_assets": scenarioDoc.EmbeddedAssets,
+				"missing_assets":  scenarioDoc.MissingAssets,
 				"scenario":        redactedLevels,
 			})
 			return
@@ -158,12 +113,12 @@ func cmdImportScenario(ctx context.Context, cfg *config, client *encx.Client, ar
 		if opts.SyncMissing {
 			action = "sync"
 		}
-		fmt.Printf("Dry-run: would %s game %d with %d level(s), %d task(s), %d hint(s), %d sector(s)\n", action, cfg.gameId, len(scenario.Levels), totalTasks, totalHints, totalSectors)
-		fmt.Printf("Source: %s\n", scenario.SourcePath)
-		fmt.Printf("Embedded assets: %d\n", scenario.EmbeddedAssets)
-		if len(scenario.MissingAssets) > 0 {
+		fmt.Printf("Dry-run: would %s game %d with %d level(s), %d task(s), %d hint(s), %d sector(s)\n", action, cfg.gameId, len(scenarioDoc.Levels), totalTasks, totalHints, totalSectors)
+		fmt.Printf("Source: %s\n", scenarioDoc.SourcePath)
+		fmt.Printf("Embedded assets: %d\n", scenarioDoc.EmbeddedAssets)
+		if len(scenarioDoc.MissingAssets) > 0 {
 			fmt.Println("Missing assets:")
-			for _, missing := range scenario.MissingAssets {
+			for _, missing := range scenarioDoc.MissingAssets {
 				fmt.Printf("  - %s\n", missing)
 			}
 		}
@@ -174,7 +129,7 @@ func cmdImportScenario(ctx context.Context, cfg *config, client *encx.Client, ar
 	}
 
 	if opts.SyncMissing {
-		stats, err := syncMissingScenario(ctx, cfg, client, scenario, progress)
+		stats, err := syncMissingScenario(ctx, cfg, client, scenarioDoc, progress)
 		if err != nil {
 			fatal("Failed to sync missing parts: %v", err)
 		}
@@ -183,10 +138,10 @@ func cmdImportScenario(ctx context.Context, cfg *config, client *encx.Client, ar
 				"success":         true,
 				"sync_missing":    true,
 				"game_id":         cfg.gameId,
-				"source_path":     scenario.SourcePath,
-				"levels":          len(scenario.Levels),
-				"embedded_assets": scenario.EmbeddedAssets,
-				"missing_assets":  scenario.MissingAssets,
+				"source_path":     scenarioDoc.SourcePath,
+				"levels":          len(scenarioDoc.Levels),
+				"embedded_assets": scenarioDoc.EmbeddedAssets,
+				"missing_assets":  scenarioDoc.MissingAssets,
 				"stats":           stats,
 			})
 			return
@@ -221,7 +176,7 @@ func cmdImportScenario(ctx context.Context, cfg *config, client *encx.Client, ar
 		progress(fmt.Sprintf("Deleted %d existing level(s)", len(existing)))
 	}
 
-	batches := splitIntoBatches(len(scenario.Levels), maxCreateLevelsPerRequest)
+	batches := splitIntoBatches(len(scenarioDoc.Levels), maxCreateLevelsPerRequest)
 	created := 0
 	for i, batchSize := range batches {
 		err = runWithAntiSpamRetry(fmt.Sprintf("create level batch %d/%d (%d level(s))", i+1, len(batches), batchSize), func() error {
@@ -231,10 +186,10 @@ func cmdImportScenario(ctx context.Context, cfg *config, client *encx.Client, ar
 			fatal("Failed to create levels batch %d/%d: %v", i+1, len(batches), err)
 		}
 		created += batchSize
-		progress(fmt.Sprintf("Created level batch %d/%d (+%d, total %d/%d)", i+1, len(batches), batchSize, created, len(scenario.Levels)))
+		progress(fmt.Sprintf("Created level batch %d/%d (+%d, total %d/%d)", i+1, len(batches), batchSize, created, len(scenarioDoc.Levels)))
 	}
 
-	for idx, lvl := range scenario.Levels {
+	for idx, lvl := range scenarioDoc.Levels {
 		levelNum := idx + 1
 		levelName := importLevelName(levelNum, lvl.Name)
 
@@ -313,25 +268,25 @@ func cmdImportScenario(ctx context.Context, cfg *config, client *encx.Client, ar
 			}
 		}
 
-		progress(fmt.Sprintf("Imported level %d/%d: %s", levelNum, len(scenario.Levels), levelName))
+		progress(fmt.Sprintf("Imported level %d/%d: %s", levelNum, len(scenarioDoc.Levels), levelName))
 	}
 
 	if cfg.jsonOutput {
 		outputJSON(map[string]any{
 			"success":         true,
 			"game_id":         cfg.gameId,
-			"source_path":     scenario.SourcePath,
-			"levels":          len(scenario.Levels),
+			"source_path":     scenarioDoc.SourcePath,
+			"levels":          len(scenarioDoc.Levels),
 			"tasks":           totalTasks,
 			"hints":           totalHints,
 			"sectors":         totalSectors,
-			"embedded_assets": scenario.EmbeddedAssets,
-			"missing_assets":  scenario.MissingAssets,
+			"embedded_assets": scenarioDoc.EmbeddedAssets,
+			"missing_assets":  scenarioDoc.MissingAssets,
 		})
 		return
 	}
 
-	fmt.Printf("Scenario imported: %d levels, %d tasks, %d hints, %d sectors\n", len(scenario.Levels), totalTasks, totalHints, totalSectors)
+	fmt.Printf("Scenario imported: %d levels, %d tasks, %d hints, %d sectors\n", len(scenarioDoc.Levels), totalTasks, totalHints, totalSectors)
 }
 
 func importScenarioNeedsAdmin(cfg *config, args []string) bool {
@@ -401,187 +356,6 @@ func parseImportScenarioArgs(args []string) (importScenarioOptions, error) {
 	return opts, nil
 }
 
-func parseScenarioFile(path string) (*importedScenario, error) {
-	raw, err := os.ReadFile(path)
-	if err != nil {
-		return nil, err
-	}
-	absPath, err := filepath.Abs(path)
-	if err != nil {
-		absPath = path
-	}
-
-	state := &assetRewriteState{
-		baseDir:    filepath.Dir(absPath),
-		cache:      make(map[string]string),
-		missingSet: make(map[string]struct{}),
-	}
-
-	levels, err := parseScenarioLevels(string(raw), state)
-	if err != nil {
-		return nil, err
-	}
-	missing := make([]string, 0, len(state.missingSet))
-	for path := range state.missingSet {
-		missing = append(missing, path)
-	}
-	sort.Strings(missing)
-
-	return &importedScenario{
-		SourcePath:     absPath,
-		Levels:         levels,
-		EmbeddedAssets: state.embeddedCount,
-		MissingAssets:  missing,
-	}, nil
-}
-
-func parseScenarioLevels(raw string, state *assetRewriteState) ([]importedLevel, error) {
-	anchors := levelAnchorRe.FindAllStringIndex(raw, -1)
-	if len(anchors) == 0 {
-		return nil, fmt.Errorf("no level anchors found (LevelsScenarioRepeater)")
-	}
-
-	levels := make([]importedLevel, 0, len(anchors))
-	for i, anchor := range anchors {
-		start := anchor[0]
-		end := len(raw)
-		if i+1 < len(anchors) {
-			end = anchors[i+1][0]
-		}
-		block := raw[start:end]
-		level, ok := parseLevelBlock(block, state)
-		if !ok {
-			continue
-		}
-		levels = append(levels, level)
-	}
-
-	sort.Slice(levels, func(i, j int) bool { return levels[i].Number < levels[j].Number })
-	return levels, nil
-}
-
-func parseLevelBlock(block string, state *assetRewriteState) (importedLevel, bool) {
-	title := levelTitleRe.FindStringSubmatch(block)
-	if len(title) < 2 {
-		return importedLevel{}, false
-	}
-	levelNum, _ := strconv.Atoi(strings.TrimSpace(title[1]))
-	levelName := ""
-	if len(title) >= 3 {
-		levelName = strings.TrimSpace(html.UnescapeString(title[2]))
-	}
-	level := importedLevel{
-		Number: levelNum,
-		Name:   levelName,
-	}
-
-	if m := autopassRe.FindStringSubmatch(block); len(m) >= 2 {
-		level.AutopassSecond = parseRuDuration(strings.TrimSpace(html.UnescapeString(m[1])))
-	}
-
-	for _, taskMatch := range taskRe.FindAllStringSubmatch(block, -1) {
-		if len(taskMatch) < 2 {
-			continue
-		}
-		taskHTML := normalizeHTMLFragment(taskMatch[1], state)
-		if taskHTML != "" {
-			level.Tasks = append(level.Tasks, taskHTML)
-		}
-	}
-
-	for _, hintMatch := range hintPairRe.FindAllStringSubmatch(block, -1) {
-		if len(hintMatch) < 3 {
-			continue
-		}
-		titleText := cleanInlineText(hintMatch[1])
-		hintHTML := normalizeHTMLFragment(hintMatch[2], state)
-		if hintHTML == "" {
-			continue
-		}
-		level.Hints = append(level.Hints, importedHint{
-			Title:        titleText,
-			Text:         hintHTML,
-			DelaySeconds: parseHintDelay(titleText),
-		})
-	}
-
-	answersBySector := map[int][]string{}
-	for _, answerMatch := range answerRe.FindAllStringSubmatch(block, -1) {
-		if len(answerMatch) < 3 {
-			continue
-		}
-		sectorIdx, err := strconv.Atoi(answerMatch[1])
-		if err != nil {
-			continue
-		}
-		answer := cleanInlineText(answerMatch[2])
-		if answer == "" {
-			continue
-		}
-		answersBySector[sectorIdx] = append(answersBySector[sectorIdx], answer)
-	}
-	if len(answersBySector) > 0 {
-		keys := make([]int, 0, len(answersBySector))
-		for key := range answersBySector {
-			keys = append(keys, key)
-		}
-		sort.Ints(keys)
-		level.SectorAnswers = make([][]string, 0, len(keys))
-		for _, key := range keys {
-			level.SectorAnswers = append(level.SectorAnswers, dedupeKeepOrder(answersBySector[key]))
-		}
-	}
-
-	return level, true
-}
-
-func normalizeHTMLFragment(fragment string, state *assetRewriteState) string {
-	out := strings.TrimSpace(fragment)
-	out = strings.ReplaceAll(out, "\r\n", "\n")
-	out = strings.ReplaceAll(out, "\r", "\n")
-	out = embedLocalAssets(out, state)
-	return strings.TrimSpace(out)
-}
-
-func cleanInlineText(v string) string {
-	text := stripHTML(v)
-	text = html.UnescapeString(text)
-	return strings.Join(strings.Fields(strings.TrimSpace(text)), " ")
-}
-
-func parseHintDelay(title string) int {
-	match := hintDelayRe.FindStringSubmatch(title)
-	if len(match) < 2 {
-		return 0
-	}
-	return parseRuDuration(strings.TrimSpace(match[1]))
-}
-
-func parseRuDuration(s string) int {
-	total := 0
-	for _, match := range durationRe.FindAllStringSubmatch(strings.ToLower(s), -1) {
-		if len(match) < 3 {
-			continue
-		}
-		value, err := strconv.Atoi(match[1])
-		if err != nil {
-			continue
-		}
-		unit := match[2]
-		switch {
-		case unit == "день" || unit == "дня" || unit == "дней":
-			total += value * 24 * 3600
-		case strings.HasPrefix(unit, "час"):
-			total += value * 3600
-		case strings.HasPrefix(unit, "минут"):
-			total += value * 60
-		case strings.HasPrefix(unit, "секунд"):
-			total += value
-		}
-	}
-	return total
-}
-
 func splitSeconds(total int) (h, m, s int) {
 	if total < 0 {
 		total = 0
@@ -609,10 +383,10 @@ func splitIntoBatches(total, maxBatch int) []int {
 	return out
 }
 
-func scenarioTaskNorms(src importedLevel) []string {
+func scenarioTaskNorms(src scenario.Level) []string {
 	var out []string
 	for _, t := range src.Tasks {
-		if n := normalizeComparableText(t); n != "" {
+		if n := scenario.NormalizeComparableText(t); n != "" {
 			out = append(out, n)
 		}
 	}
@@ -632,10 +406,10 @@ func taskNormsMatch(a, b []string) bool {
 }
 
 func hintDelayTextKey(delaySec int, text string) string {
-	return fmt.Sprintf("%d|%s", delaySec, normalizeComparableText(text))
+	return fmt.Sprintf("%d|%s", delaySec, scenario.NormalizeComparableText(text))
 }
 
-func scenarioHintKeys(src importedLevel) []string {
+func scenarioHintKeys(src scenario.Level) []string {
 	var out []string
 	for _, h := range src.Hints {
 		text := strings.TrimSpace(h.Text)
@@ -650,7 +424,7 @@ func scenarioHintKeys(src importedLevel) []string {
 func normalizedAnswerSet(answers []string) map[string]struct{} {
 	set := make(map[string]struct{}, len(answers))
 	for _, ans := range answers {
-		if n := normalizeComparableText(ans); n != "" {
+		if n := scenario.NormalizeComparableText(ans); n != "" {
 			set[n] = struct{}{}
 		}
 	}
@@ -746,7 +520,7 @@ func sectorGroupsMatch(scenarioGroups [][]string, gameSectors []encx.AdminSector
 	return true
 }
 
-func syncLevelTasksToScenario(ctx context.Context, client *encx.Client, gameID, levelNum int, src importedLevel, stats *importSyncStats) error {
+func syncLevelTasksToScenario(ctx context.Context, client *encx.Client, gameID, levelNum int, src scenario.Level, stats *importSyncStats) error {
 	want := scenarioTaskNorms(src)
 	var taskIDs []int
 	err := runWithAntiSpamRetry(fmt.Sprintf("read level %d task IDs", levelNum), func() error {
@@ -769,7 +543,7 @@ func syncLevelTasksToScenario(ctx context.Context, client *encx.Client, gameID, 
 			return err
 		}
 		if task != nil {
-			if n := normalizeComparableText(task.Text); n != "" {
+			if n := scenario.NormalizeComparableText(task.Text); n != "" {
 				existing = append(existing, n)
 			}
 		}
@@ -807,7 +581,7 @@ func syncLevelTasksToScenario(ctx context.Context, client *encx.Client, gameID, 
 	return nil
 }
 
-func syncLevelHintsToScenario(ctx context.Context, client *encx.Client, gameID, levelNum int, src importedLevel, stats *importSyncStats) error {
+func syncLevelHintsToScenario(ctx context.Context, client *encx.Client, gameID, levelNum int, src scenario.Level, stats *importSyncStats) error {
 	want := scenarioHintKeys(src)
 	var hintIDs []int
 	err := runWithAntiSpamRetry(fmt.Sprintf("read level %d hint IDs", levelNum), func() error {
@@ -870,7 +644,7 @@ func syncLevelHintsToScenario(ctx context.Context, client *encx.Client, gameID, 
 	return nil
 }
 
-func syncLevelSectorsToScenario(ctx context.Context, client *encx.Client, gameID, levelNum int, src importedLevel, stats *importSyncStats) error {
+func syncLevelSectorsToScenario(ctx context.Context, client *encx.Client, gameID, levelNum int, src scenario.Level, stats *importSyncStats) error {
 	var sectors []encx.AdminSector
 	err := runWithAntiSpamRetry(fmt.Sprintf("read level %d sectors", levelNum), func() error {
 		var callErr error
@@ -936,7 +710,24 @@ func formatAdminSectorsSummary(sectors []encx.AdminSector) string {
 	return strings.Join(parts, "; ")
 }
 
-func syncMissingScenario(ctx context.Context, cfg *config, client *encx.Client, scenario *importedScenario, progress func(string)) (importSyncStats, error) {
+func dedupeKeepOrder(items []string) []string {
+	out := make([]string, 0, len(items))
+	seen := map[string]struct{}{}
+	for _, item := range items {
+		item = strings.TrimSpace(item)
+		if item == "" {
+			continue
+		}
+		if _, ok := seen[item]; ok {
+			continue
+		}
+		seen[item] = struct{}{}
+		out = append(out, item)
+	}
+	return out
+}
+
+func syncMissingScenario(ctx context.Context, cfg *config, client *encx.Client, doc *scenario.Document, progress func(string)) (importSyncStats, error) {
 	stats := importSyncStats{}
 
 	prevDelay := client.AdminDelay()
@@ -954,8 +745,8 @@ func syncMissingScenario(ctx context.Context, cfg *config, client *encx.Client, 
 	}
 
 	existingCount := len(levels)
-	if existingCount < len(scenario.Levels) {
-		missing := len(scenario.Levels) - existingCount
+	if existingCount < len(doc.Levels) {
+		missing := len(doc.Levels) - existingCount
 		for i, batch := range splitIntoBatches(missing, maxCreateLevelsPerRequest) {
 			err := runWithAntiSpamRetry(fmt.Sprintf("create missing level batch %d (%d)", i+1, batch), func() error {
 				return client.AdminCreateLevels(ctx, cfg.gameId, batch)
@@ -968,7 +759,7 @@ func syncMissingScenario(ctx context.Context, cfg *config, client *encx.Client, 
 		progress(fmt.Sprintf("Created %d missing level(s)", stats.LevelsCreated))
 	}
 
-	for idx, src := range scenario.Levels {
+	for idx, src := range doc.Levels {
 		levelNum := idx + 1
 		levelName := importLevelName(levelNum, src.Name)
 
@@ -1029,7 +820,7 @@ func syncMissingScenario(ctx context.Context, cfg *config, client *encx.Client, 
 			return stats, err
 		}
 
-		progress(fmt.Sprintf("Synced level %d/%d: %s", levelNum, len(scenario.Levels), levelName))
+		progress(fmt.Sprintf("Synced level %d/%d: %s", levelNum, len(doc.Levels), levelName))
 	}
 
 	return stats, nil
@@ -1042,16 +833,8 @@ func importLevelName(levelNum int, name string) string {
 	return fmt.Sprintf("Уровень %d", levelNum)
 }
 
-func normalizeComparableText(s string) string {
-	s = html.UnescapeString(s)
-	s = strings.TrimSpace(s)
-	s = strings.ReplaceAll(s, "\r\n", "\n")
-	s = strings.ReplaceAll(s, "\r", "\n")
-	return strings.Join(strings.Fields(s), " ")
-}
-
-func redactScenarioBinaryPayloads(levels []importedLevel) []importedLevel {
-	out := make([]importedLevel, len(levels))
+func redactScenarioBinaryPayloads(levels []scenario.Level) []scenario.Level {
+	out := make([]scenario.Level, len(levels))
 	for i, level := range levels {
 		out[i] = level
 		if len(level.Tasks) > 0 {
@@ -1061,7 +844,7 @@ func redactScenarioBinaryPayloads(levels []importedLevel) []importedLevel {
 			}
 		}
 		if len(level.Hints) > 0 {
-			out[i].Hints = make([]importedHint, len(level.Hints))
+			out[i].Hints = make([]scenario.Hint, len(level.Hints))
 			for j, hint := range level.Hints {
 				out[i].Hints[j] = hint
 				out[i].Hints[j].Text = redactBinaryPayloads(hint.Text)
@@ -1085,7 +868,7 @@ func redactBinaryPayloads(text string) string {
 	})
 }
 
-func printDryRunLevel(level importedLevel) {
+func printDryRunLevel(level scenario.Level) {
 	fmt.Printf("\n=== Level %d", level.Number)
 	if strings.TrimSpace(level.Name) != "" {
 		fmt.Printf(": %s", strings.TrimSpace(level.Name))
@@ -1122,95 +905,4 @@ func printDryRunLevel(level importedLevel) {
 			}
 		}
 	}
-}
-
-func dedupeKeepOrder(items []string) []string {
-	out := make([]string, 0, len(items))
-	seen := map[string]struct{}{}
-	for _, item := range items {
-		item = strings.TrimSpace(item)
-		if item == "" {
-			continue
-		}
-		if _, ok := seen[item]; ok {
-			continue
-		}
-		seen[item] = struct{}{}
-		out = append(out, item)
-	}
-	return out
-}
-
-func embedLocalAssets(fragment string, state *assetRewriteState) string {
-	if state == nil {
-		return fragment
-	}
-	return assetAttrRe.ReplaceAllStringFunc(fragment, func(attr string) string {
-		m := assetAttrRe.FindStringSubmatch(attr)
-		if len(m) < 3 {
-			return attr
-		}
-		pathValue := strings.TrimSpace(m[2])
-		if skipAssetEmbedding(pathValue) {
-			return attr
-		}
-		localPath := resolveAssetPath(state.baseDir, pathValue)
-		if localPath == "" {
-			return attr
-		}
-		dataURI, ok := state.cache[localPath]
-		if !ok {
-			payload, err := os.ReadFile(localPath)
-			if err != nil {
-				state.missingSet[pathValue] = struct{}{}
-				return attr
-			}
-			mimeType := mime.TypeByExtension(strings.ToLower(filepath.Ext(localPath)))
-			if mimeType == "" {
-				mimeType = http.DetectContentType(payload)
-			}
-			if mimeType == "" {
-				mimeType = "application/octet-stream"
-			}
-			dataURI = "data:" + mimeType + ";base64," + base64.StdEncoding.EncodeToString(payload)
-			state.cache[localPath] = dataURI
-			state.embeddedCount++
-		}
-		return fmt.Sprintf(`%s="%s"`, m[1], dataURI)
-	})
-}
-
-func skipAssetEmbedding(pathValue string) bool {
-	lower := strings.ToLower(pathValue)
-	return strings.HasPrefix(lower, "http://") ||
-		strings.HasPrefix(lower, "https://") ||
-		strings.HasPrefix(lower, "data:") ||
-		strings.HasPrefix(lower, "mailto:") ||
-		strings.HasPrefix(lower, "#") ||
-		strings.HasPrefix(lower, "//")
-}
-
-func resolveAssetPath(baseDir, pathValue string) string {
-	if baseDir == "" || pathValue == "" {
-		return ""
-	}
-	clean := strings.ReplaceAll(pathValue, "\\", "/")
-	if strings.HasPrefix(clean, "/") {
-		return ""
-	}
-	local := filepath.Clean(filepath.Join(baseDir, filepath.FromSlash(clean)))
-	// Block escaping outside the scenario directory.
-	baseAbs, err := filepath.Abs(baseDir)
-	if err != nil {
-		return ""
-	}
-	localAbs, err := filepath.Abs(local)
-	if err != nil {
-		return ""
-	}
-	baseWithSep := baseAbs + string(os.PathSeparator)
-	if localAbs != baseAbs && !strings.HasPrefix(localAbs, baseWithSep) {
-		return ""
-	}
-	return localAbs
 }
