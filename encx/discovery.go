@@ -13,16 +13,29 @@ import (
 var (
 	// Mobile format: <h1 class="gametitle"><a href="...details/{id}...">Title</a></h1>
 	gameTitleMobileRe = regexp.MustCompile(`(?i)<h1[^>]*class="gametitle"[^>]*>\s*<a[^>]*href="[^"]*details/(\d+)[^"]*"[^>]*>([^<]+)</a>`)
-	// Desktop format: <a ... ID="lnkGameTitle" href="/GameDetails.aspx?gid=12345">Title</a>
-	gameTitleDesktopRe = regexp.MustCompile(`(?i)<a[^>]*href="[^"]*gid=(\d+)[^"]*"[^>]*>([^<]+)</a>`)
+	// Desktop format: <a ... id="lnkGameTitle" href="/GameDetails.aspx?gid=12345">Title</a>
+	gameTitleDesktopRe = regexp.MustCompile(`(?i)<a[^>]*\bid="lnkGameTitle"[^>]*href="[^"]*gid=(\d+)[^"]*"[^>]*>([^<]+)</a>`)
 	// Matches "StartCounter":12345, in HTML/JSON response
 	startCounterRe = regexp.MustCompile(`"StartCounter"\s*:\s*(\d+)`)
 )
 
-// GetDomainGames fetches the domain's main page and parses the list of available games.
-// It first tries the mobile version (m.{domain}), then falls back to the desktop version.
+// GetDomainGames fetches the domain's list of available games.
+// It prefers the JSON endpoint (/home/?json=1), then mobile HTML, then desktop HTML.
 func (c *Client) GetDomainGames(ctx context.Context) ([]DomainGame, error) {
-	// Try mobile first, fall back to desktop
+	c.debugf("encx games: trying JSON catalog at %s/home/?json=1", c.baseURL())
+	list, err := c.GetGameList(ctx)
+	if err == nil {
+		games := domainGamesFromList(list)
+		if len(games) > 0 {
+			c.debugf("encx games: JSON catalog returned %d game(s)", len(games))
+			return games, nil
+		}
+		c.debugf("encx games: JSON catalog returned 0 game(s), falling back to HTML")
+	} else {
+		c.debugf("encx games: JSON catalog failed: %v", err)
+	}
+
+	// Try mobile HTML, fall back to desktop HTML.
 	c.debugf("encx games: trying mobile catalog at %s/", c.mobileBaseURL())
 	games, err := c.fetchGames(ctx, c.mobileBaseURL()+"/", gameTitleMobileRe)
 	if err == nil && len(games) > 0 {
@@ -37,6 +50,29 @@ func (c *Client) GetDomainGames(ctx context.Context) ([]DomainGame, error) {
 
 	c.debugf("encx games: trying desktop catalog at %s/", c.baseURL())
 	return c.fetchGames(ctx, c.baseURL()+"/", gameTitleDesktopRe)
+}
+
+func domainGamesFromList(list *GameListResponse) []DomainGame {
+	if list == nil {
+		return nil
+	}
+	seen := map[int]bool{}
+	games := make([]DomainGame, 0, len(list.ActiveGames)+len(list.ComingGames))
+	appendGames := func(infos []GameInfo) {
+		for _, g := range infos {
+			if g.GameID == 0 || seen[g.GameID] {
+				continue
+			}
+			seen[g.GameID] = true
+			games = append(games, DomainGame{
+				Title:  strings.TrimSpace(g.Title),
+				GameId: g.GameID,
+			})
+		}
+	}
+	appendGames(list.ActiveGames)
+	appendGames(list.ComingGames)
+	return games
 }
 
 func (c *Client) fetchGames(ctx context.Context, u string, re *regexp.Regexp) ([]DomainGame, error) {
