@@ -151,12 +151,85 @@ func (c *EncClient) GetTeamDetails(teamID int64) (string, error) {
 	return c.client.GetTeamDetails(c.bg(), int(teamID))
 }
 
+// GetMyTeamDetails returns the current user's team page HTML.
+func (c *EncClient) GetMyTeamDetails() (string, error) {
+	return c.client.GetMyTeamDetails(c.bg())
+}
+
+// GetTeamManagementInfo returns parsed team management info as JSON.
+func (c *EncClient) GetTeamManagementInfo(teamID int64) (string, error) {
+	info, err := c.client.GetTeamManagementInfo(c.bg(), int(teamID))
+	if err != nil {
+		return "", err
+	}
+	return marshalJSON(info)
+}
+
+// GetTeamInvitations returns team invitations addressed to the current user as JSON.
+func (c *EncClient) GetTeamInvitations() (string, error) {
+	invitations, err := c.client.GetTeamInvitations(c.bg())
+	if err != nil {
+		return "", err
+	}
+	return marshalJSON(invitations)
+}
+
 // AcceptTeamInvitation accepts a team invitation.
 func (c *EncClient) AcceptTeamInvitation(teamID int64) error {
 	return c.client.AcceptTeamInvitation(c.bg(), int(teamID))
 }
 
+// RejectTeamInvitation rejects a team invitation.
+func (c *EncClient) RejectTeamInvitation(teamID int64) error {
+	return c.client.RejectTeamInvitation(c.bg(), int(teamID))
+}
+
+// RequestTeamMembership sends a request to join a team by name.
+func (c *EncClient) RequestTeamMembership(teamName string) error {
+	return c.client.RequestTeamMembership(c.bg(), teamName)
+}
+
+// InviteTeamMember invites a user login into a team.
+func (c *EncClient) InviteTeamMember(teamID int64, login string) error {
+	return c.client.InviteTeamMember(c.bg(), int(teamID), login)
+}
+
+// RemoveTeamInvitation removes a pending invitation sent by a team.
+func (c *EncClient) RemoveTeamInvitation(teamID, userID int64) error {
+	return c.client.RemoveTeamInvitation(c.bg(), int(teamID), int(userID))
+}
+
+// LeaveTeam leaves a team when TeamDetails.aspx exposes a leave action.
+func (c *EncClient) LeaveTeam(teamID int64) error {
+	return c.client.LeaveTeam(c.bg(), int(teamID))
+}
+
+// RenameTeam renames a team.
+func (c *EncClient) RenameTeam(teamID int64, name string) error {
+	return c.client.RenameTeam(c.bg(), int(teamID), name)
+}
+
+// SetTeamSite updates the team website URL.
+func (c *EncClient) SetTeamSite(teamID int64, site string) error {
+	return c.client.SetTeamSite(c.bg(), int(teamID), site)
+}
+
+// SetTeamForum updates the team external forum URL.
+func (c *EncClient) SetTeamForum(teamID int64, forum string) error {
+	return c.client.SetTeamForum(c.bg(), int(teamID), forum)
+}
+
 // ParseTeamLinks extracts team IDs and names from HTML. Returns JSON array of TeamInfo.
 func ParseTeamLinks(html string) (string, error) {
 	return marshalJSON(encx.ParseTeamLinks(html))
+}
+
+// ParseTeamManagementInfo extracts team management info from HTML. Returns JSON.
+func ParseTeamManagementInfo(html string, teamID int64) (string, error) {
+	return marshalJSON(encx.ParseTeamManagementInfo(html, int(teamID)))
+}
+
+// ParseTeamInvitations extracts incoming team invitations from HTML. Returns JSON array.
+func ParseTeamInvitations(html string) (string, error) {
+	return marshalJSON(encx.ParseTeamInvitations(html))
 }

@@ -12,7 +12,7 @@ import (
 	"time"
 )
 
-const defaultUserAgent = "EnApp by necto68"
+const defaultUserAgent = "encx-cli"
 const defaultTimeout = 15 * time.Second
 
 // Client is an HTTP client for the Encounter (en.cx) game engine API.

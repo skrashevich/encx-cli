@@ -61,6 +61,52 @@ func TestParseTeamLinks(t *testing.T) {
 	}
 }
 
+func TestParseTeamManagementInfo(t *testing.T) {
+	html := `
+		<a id="lnkTeamName" href="/Teams/TeamDetails.aspx?tid=200714">svk team</a>
+		id&nbsp;1408504 <a href="/UserDetails.aspx?uid=1408504">Santa</a>
+		<a href="/Teams/TeamDetails.aspx?action=remove_invitation&uid=1408504&tid=200714">Удалить приглашение</a>
+	`
+	out, err := ParseTeamManagementInfo(html, 200714)
+	if err != nil {
+		t.Fatalf("ParseTeamManagementInfo: %v", err)
+	}
+	var info struct {
+		TeamID             int `json:"team_id"`
+		PendingInvitations []struct {
+			UserID int    `json:"user_id"`
+			Login  string `json:"login"`
+		} `json:"pending_invitations"`
+	}
+	if err := json.Unmarshal([]byte(out), &info); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if info.TeamID != 200714 || len(info.PendingInvitations) != 1 || info.PendingInvitations[0].Login != "Santa" {
+		t.Fatalf("unexpected info: %+v", info)
+	}
+}
+
+func TestParseTeamInvitations(t *testing.T) {
+	html := `
+		<a href="/Teams/TeamDetails.aspx?tid=144561">PHGP</a>
+		<a href="/Teams/TeamDetails.aspx?action=accept_invitation&tid=144561">Вступить</a>
+	`
+	out, err := ParseTeamInvitations(html)
+	if err != nil {
+		t.Fatalf("ParseTeamInvitations: %v", err)
+	}
+	var invitations []struct {
+		TeamID int    `json:"team_id"`
+		Name   string `json:"name"`
+	}
+	if err := json.Unmarshal([]byte(out), &invitations); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if len(invitations) != 1 || invitations[0].TeamID != 144561 || invitations[0].Name != "PHGP" {
+		t.Fatalf("unexpected invitations: %+v", invitations)
+	}
+}
+
 func TestNewClientWithOptions(t *testing.T) {
 	c := NewClientWithOptions("tech.en.cx", true, false, 30, "en")
 	if c.Domain() != "tech.en.cx" {
