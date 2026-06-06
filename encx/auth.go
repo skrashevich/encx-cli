@@ -1,9 +1,7 @@
 package encx
 
 import (
-	"bytes"
 	"context"
-	"encoding/json"
 	"fmt"
 	"net/http"
 	"net/url"
@@ -27,32 +25,26 @@ func (c *Client) Login(ctx context.Context, login, password string, opts ...Logi
 	q.Set("lang", c.lang)
 	u.RawQuery = q.Encode()
 
-	payload := map[string]string{
-		"Login":    login,
-		"Password": password,
-	}
+	form := url.Values{}
+	form.Set("Login", login)
+	form.Set("Password", password)
 
 	if len(opts) > 0 {
 		opt := opts[0]
 		if opt.Network > 0 {
-			payload["ddlNetwork"] = strconv.Itoa(opt.Network)
+			form.Set("ddlNetwork", strconv.Itoa(opt.Network))
 		}
 		if opt.MagicNumbers != "" {
-			payload["MagicNumbers"] = opt.MagicNumbers
+			form.Set("MagicNumbers", opt.MagicNumbers)
 		}
 	}
 
-	body, err := json.Marshal(payload)
-	if err != nil {
-		return nil, fmt.Errorf("encx: marshal login body: %w", err)
-	}
-
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, u.String(), bytes.NewReader(body))
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, u.String(), strings.NewReader(form.Encode()))
 	if err != nil {
 		return nil, fmt.Errorf("encx: create login request: %w", err)
 	}
 	c.setHeaders(req)
-	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 
 	statusCode, _, respBody, err := c.doRequestAndRead(req)
 	if err != nil {

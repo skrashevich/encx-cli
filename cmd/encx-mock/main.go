@@ -143,24 +143,22 @@ func withCommonHeaders(next http.Handler) http.Handler {
 }
 
 func (s *server) handleLogin(w http.ResponseWriter, r *http.Request) {
-	var req struct {
-		Login    string `json:"Login"`
-		Password string `json:"Password"`
-	}
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+	if err := r.ParseForm(); err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]any{
 			"Error":   5,
-			"Message": "Invalid JSON body",
+			"Message": "Invalid form body",
 		})
 		return
 	}
+	login := r.Form.Get("Login")
+	password := r.Form.Get("Password")
 
-	authKey := credentialsKey(req.Login, req.Password)
+	authKey := credentialsKey(login, password)
 	if s.dropIfSilent(r, authKey) {
 		return
 	}
 
-	if req.Login == "fail" && req.Password == "fail" {
+	if login == "fail" && password == "fail" {
 		writeJSON(w, http.StatusOK, map[string]any{
 			"Error":                2,
 			"Message":              "Неправильный логин или пароль.",
@@ -178,7 +176,7 @@ func (s *server) handleLogin(w http.ResponseWriter, r *http.Request) {
 	if !exists {
 		state = &sessionState{
 			AuthKey:         authKey,
-			Login:           req.Login,
+			Login:           login,
 			CurrentIdx:      0,
 			Passed:          s.newSessionPassedState(),
 			SectorPassed:    s.newSessionSectorState(),
@@ -197,7 +195,7 @@ func (s *server) handleLogin(w http.ResponseWriter, r *http.Request) {
 	if exists {
 		state.mu.Lock()
 		state.AuthKey = authKey
-		state.Login = req.Login
+		state.Login = login
 		if len(state.LevelStartedAt) == 0 {
 			state.LevelStartedAt = make([]time.Time, s.levelCount())
 			s.ensureLevelStarted(state, state.CurrentIdx, time.Now())
@@ -206,7 +204,7 @@ func (s *server) handleLogin(w http.ResponseWriter, r *http.Request) {
 	}
 
 	sid := s.newSession(state)
-	setMockAuthCookies(w, sid, req.Login)
+	setMockAuthCookies(w, sid, login)
 
 	writeJSON(w, http.StatusOK, map[string]any{
 		"Error":                0,
@@ -522,7 +520,12 @@ func (s *server) handleGamePlayPOST(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	answer := strings.TrimSpace(r.Form.Get("LevelAction.Answer"))
+	levelAnswer := strings.TrimSpace(r.Form.Get("LevelAction.Answer"))
+	bonusAnswer := strings.TrimSpace(r.Form.Get("BonusAction.Answer"))
+	answer := levelAnswer
+	if answer == "" {
+		answer = bonusAnswer
+	}
 	if strings.EqualFold(answer, networkDropCode) {
 		st.mu.Lock()
 		authKey := st.AuthKey
@@ -534,7 +537,9 @@ func (s *server) handleGamePlayPOST(w http.ResponseWriter, r *http.Request) {
 
 	st.mu.Lock()
 	defer st.mu.Unlock()
-	if answer != "" {
+	if levelAnswer != "" {
+		s.processAnswer(st, levelAnswer)
+	} else if bonusAnswer != "" {
 		s.processAnswer(st, answer)
 	}
 
