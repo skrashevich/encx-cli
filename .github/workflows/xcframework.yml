@@ -1,0 +1,62 @@
+name: Rebuild Encx.xcframework
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'encx/**'
+      - 'mobile/encxmobile/**'
+      - 'go.mod'
+      - 'go.sum'
+      - 'mobile/bind-ios.sh'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  rebuild:
+    runs-on: macos-15
+    timeout-minutes: 20
+    steps:
+      - name: Checkout encx-cli
+        uses: actions/checkout@v4
+
+      - name: Setup Go
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+
+      - name: Build Encx.xcframework
+        run: |
+          cd "$GITHUB_WORKSPACE"
+          ./mobile/bind-ios.sh /tmp/xcframework-out
+          echo "Built xcframework:"
+          ls -R /tmp/xcframework-out/Encx.xcframework/
+
+      - name: Checkout enkapp
+        uses: actions/checkout@v4
+        with:
+          repository: skrashevich/enkapp
+          token: ${{ secrets.ENKAPP_PAT }}
+          path: enkapp
+
+      - name: Sync xcframework
+        run: |
+          FRAMEWORK_DIR="$GITHUB_WORKSPACE/enkapp/encx-cli/Frameworks/Encx.xcframework"
+          mkdir -p "$FRAMEWORK_DIR"
+          rsync -a --delete /tmp/xcframework-out/Encx.xcframework/ "$FRAMEWORK_DIR/"
+
+      - name: Commit and push
+        working-directory: enkapp
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add -A encx-cli/Frameworks/Encx.xcframework/
+          if git diff --cached --quiet; then
+            echo "No changes to commit"
+            exit 0
+          fi
+          SHORT_SHA=$(echo "$GITHUB_SHA" | cut -c1-7)
+          git commit -m "chore: update Encx.xcframework (encx-cli@${SHORT_SHA})"
+          git push
