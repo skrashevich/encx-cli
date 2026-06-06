@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"strings"
 	"testing"
 )
@@ -43,7 +44,7 @@ func TestHARRecorderCapturesRequestResponse(t *testing.T) {
 					URL    string `json:"url"`
 				} `json:"request"`
 				Response struct {
-					Status int `json:"status"`
+					Status  int `json:"status"`
 					Content struct {
 						Text string `json:"text"`
 					} `json:"content"`
@@ -105,7 +106,7 @@ func TestHARRedactsLoginPassword(t *testing.T) {
 	if strings.Contains(raw, "super-secret") {
 		t.Fatalf("HAR must not contain plaintext password: %s", raw)
 	}
-	if !strings.Contains(raw, harRedactedSecret) {
+	if !strings.Contains(raw, url.QueryEscape(harRedactedSecret)) && !strings.Contains(raw, harRedactedSecret) {
 		t.Fatalf("HAR should contain redacted placeholder: %s", raw)
 	}
 
@@ -126,14 +127,14 @@ func TestHARRedactsLoginPassword(t *testing.T) {
 	if len(doc.Log.Entries) == 0 {
 		t.Fatal("expected HAR entries")
 	}
-	var payload map[string]string
-	if err := json.Unmarshal([]byte(doc.Log.Entries[0].Request.PostData.Text), &payload); err != nil {
+	payload, err := url.ParseQuery(doc.Log.Entries[0].Request.PostData.Text)
+	if err != nil {
 		t.Fatalf("login payload: %v", err)
 	}
-	if payload["Login"] != "player" {
-		t.Fatalf("login = %q", payload["Login"])
+	if payload.Get("Login") != "player" {
+		t.Fatalf("login = %q", payload.Get("Login"))
 	}
-	if payload["Password"] != harRedactedSecret {
-		t.Fatalf("password = %q", payload["Password"])
+	if payload.Get("Password") != harRedactedSecret {
+		t.Fatalf("password = %q", payload.Get("Password"))
 	}
 }
