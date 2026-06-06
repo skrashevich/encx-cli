@@ -11,5 +11,7 @@ apks
 /mobile/build/
 build
 /encx-mock
+docs/vhs/bin/
+docs/gifs/*.gif
 xcuserdata/
 /ios/encx-cli/
