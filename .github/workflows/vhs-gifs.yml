@@ -5,14 +5,14 @@ on:
     branches: [main]
     paths:
       - 'docs/vhs/**'
-      - 'docs/pages/**'
+      - 'docs/gifs/**'
       - 'cmd/encli/**'
       - 'cmd/encx-mock/**'
       - '.github/workflows/vhs-gifs.yml'
   pull_request:
     paths:
       - 'docs/vhs/**'
-      - 'docs/pages/**'
+      - 'docs/gifs/**'
       - 'cmd/encli/**'
       - 'cmd/encx-mock/**'
       - '.github/workflows/vhs-gifs.yml'
@@ -49,12 +49,11 @@ jobs:
             test -s "docs/gifs/${f}.gif"
           done
 
-      - name: Prepare GitHub Pages site
+      - name: Prepare Pages artifact
         if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
         run: |
           mkdir -p _site/gifs
           cp docs/gifs/*.gif _site/gifs/
-          cp docs/pages/index.html _site/index.html
 
       - name: Upload Pages artifact
         if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
