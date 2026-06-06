@@ -1,0 +1,75 @@
+name: Demo GIFs
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'docs/vhs/**'
+      - 'docs/pages/**'
+      - 'cmd/encli/**'
+      - 'cmd/encx-mock/**'
+      - '.github/workflows/vhs-gifs.yml'
+  pull_request:
+    paths:
+      - 'docs/vhs/**'
+      - 'docs/pages/**'
+      - 'cmd/encli/**'
+      - 'cmd/encx-mock/**'
+      - '.github/workflows/vhs-gifs.yml'
+  workflow_dispatch:
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+jobs:
+  render:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: Install VHS dependencies
+        run: brew install vhs ttyd ffmpeg
+
+      - name: Render GIFs
+        run: ./docs/vhs/render.sh
+
+      - name: Verify GIF output
+        run: |
+          for f in encli-quickstart encli-gameplay encx-mock-server encx-mock-features; do
+            test -s "docs/gifs/${f}.gif"
+          done
+
+      - name: Prepare GitHub Pages site
+        if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+        run: |
+          mkdir -p _site/gifs
+          cp docs/gifs/*.gif _site/gifs/
+          cp docs/pages/index.html _site/index.html
+
+      - name: Upload Pages artifact
+        if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: _site
+
+  deploy:
+    if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+    needs: render
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
