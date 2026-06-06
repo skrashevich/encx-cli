@@ -254,6 +254,39 @@ func main() {
 	case "profile":
 		requireAuth(ctx, cfg, client)
 		cmdProfile(ctx, cfg, client)
+	case "team-info":
+		requireAuth(ctx, cfg, client)
+		cmdTeamInfo(ctx, cfg, client, positional)
+	case "team-invitations":
+		requireAuth(ctx, cfg, client)
+		cmdTeamInvitations(ctx, cfg, client)
+	case "team-invite":
+		requireAuth(ctx, cfg, client)
+		cmdTeamInvite(ctx, cfg, client, positional)
+	case "team-remove-invitation":
+		requireAuth(ctx, cfg, client)
+		cmdTeamRemoveInvitation(ctx, cfg, client, positional)
+	case "team-accept":
+		requireAuth(ctx, cfg, client)
+		cmdTeamAccept(ctx, cfg, client, positional)
+	case "team-reject":
+		requireAuth(ctx, cfg, client)
+		cmdTeamReject(ctx, cfg, client, positional)
+	case "team-join-request":
+		requireAuth(ctx, cfg, client)
+		cmdTeamJoinRequest(ctx, cfg, client, positional)
+	case "team-leave":
+		requireAuth(ctx, cfg, client)
+		cmdTeamLeave(ctx, cfg, client, positional)
+	case "team-rename":
+		requireAuth(ctx, cfg, client)
+		cmdTeamRename(ctx, cfg, client, positional)
+	case "team-set-site":
+		requireAuth(ctx, cfg, client)
+		cmdTeamSetSite(ctx, cfg, client, positional)
+	case "team-set-forum":
+		requireAuth(ctx, cfg, client)
+		cmdTeamSetForum(ctx, cfg, client, positional)
 	case "import-scenario":
 		if importScenarioNeedsAdmin(cfg, positional) {
 			requireAdminAuth(ctx, cfg, client)
@@ -421,6 +454,16 @@ Commands:
   hint        Request a penalty hint
   game-stats  Show game statistics (levels, teams, rankings)
   profile     Show your profile
+  team-info   Show team management info
+  team-invitations  Show incoming invitations for your account
+  team-invite Invite a user into your team
+  team-accept Accept a team invitation
+  team-reject Reject a team invitation
+  team-join-request  Request to join a team by name
+  team-leave  Leave a team when the site exposes a leave action
+  team-rename Rename your team
+  team-set-site   Update team website URL
+  team-set-forum  Update team external forum URL
   import-scenario  Import scenario from GameScenario HTML export
 
 Admin commands (require game editor rights):
@@ -571,6 +614,39 @@ func printCommandHelp(cmd string) {
 	case "profile":
 		fmt.Fprintln(os.Stderr, "Usage: encli profile")
 		fmt.Fprintln(os.Stderr, "  Show your profile (login, name, rank, team, points).")
+	case "team-info":
+		fmt.Fprintln(os.Stderr, "Usage: encli team-info <team-id>")
+		fmt.Fprintln(os.Stderr, "  Show parsed team management actions and outgoing invitations.")
+	case "team-invitations":
+		fmt.Fprintln(os.Stderr, "Usage: encli team-invitations")
+		fmt.Fprintln(os.Stderr, "  Show incoming team invitations for the current account.")
+	case "team-invite":
+		fmt.Fprintln(os.Stderr, "Usage: encli team-invite <team-id> <login>")
+		fmt.Fprintln(os.Stderr, "  Invite a user into your team.")
+	case "team-remove-invitation":
+		fmt.Fprintln(os.Stderr, "Usage: encli team-remove-invitation <team-id> <user-id>")
+		fmt.Fprintln(os.Stderr, "  Remove a pending invitation sent by your team.")
+	case "team-accept":
+		fmt.Fprintln(os.Stderr, "Usage: encli team-accept <team-id>")
+		fmt.Fprintln(os.Stderr, "  Accept an incoming team invitation.")
+	case "team-reject":
+		fmt.Fprintln(os.Stderr, "Usage: encli team-reject <team-id>")
+		fmt.Fprintln(os.Stderr, "  Reject an incoming team invitation.")
+	case "team-join-request":
+		fmt.Fprintln(os.Stderr, "Usage: encli team-join-request <team-name>")
+		fmt.Fprintln(os.Stderr, "  Send a request to join a team by name.")
+	case "team-leave":
+		fmt.Fprintln(os.Stderr, "Usage: encli team-leave <team-id>")
+		fmt.Fprintln(os.Stderr, "  Leave a team by following the leave action link exposed by TeamDetails.aspx.")
+	case "team-rename":
+		fmt.Fprintln(os.Stderr, "Usage: encli team-rename <team-id> <new-name>")
+		fmt.Fprintln(os.Stderr, "  Rename your team.")
+	case "team-set-site":
+		fmt.Fprintln(os.Stderr, "Usage: encli team-set-site <team-id> <url>")
+		fmt.Fprintln(os.Stderr, "  Update the team website URL.")
+	case "team-set-forum":
+		fmt.Fprintln(os.Stderr, "Usage: encli team-set-forum <team-id> <url>")
+		fmt.Fprintln(os.Stderr, "  Update the team external forum URL.")
 	case "import-scenario":
 		fmt.Fprintln(os.Stderr, "Usage: encli import-scenario -game-id <id> [--dry-run] [--sync-missing] <path-to-Game scenario.html>")
 		fmt.Fprintln(os.Stderr, "  Replace current game levels with parsed levels/tasks/hints/answers from Encounter GameScenario HTML export.")

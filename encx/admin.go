@@ -115,8 +115,8 @@ func (c *Client) GetProfile(ctx context.Context) (*Profile, error) {
 		}
 	}
 
-	// Rank - appears as a span near the points, pattern: "points / <span>Rank</span>"
-	rankRe := regexp.MustCompile(`(?i)\d+[,\.]\d+\s*/\s*(?:<[^>]*>)*\s*<span[^>]*>([^<]+)</span>`)
+	// Rank appears near points, e.g. "points / <b>Rank</b>" or "points / <span>Rank</span>".
+	rankRe := regexp.MustCompile(`(?i)\d+[,\.]\d+\s*/\s*(?:<[^>]*>)*\s*<(?:span|b)[^>]*>\s*([^<]+?)\s*</(?:span|b)>`)
 	if m := rankRe.FindStringSubmatch(body); m != nil {
 		p.Rank = strings.TrimSpace(m[1])
 	}
