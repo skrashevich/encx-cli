@@ -20,7 +20,7 @@ jobs:
     timeout-minutes: 20
     steps:
       - name: Checkout encx-cli
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Setup Go
         uses: actions/setup-go@v6
@@ -35,7 +35,7 @@ jobs:
           ls -R /tmp/xcframework-out/Encx.xcframework/
 
       - name: Checkout enkapp
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           repository: skrashevich/enkapp
           token: ${{ secrets.ENKAPP_PAT }}
