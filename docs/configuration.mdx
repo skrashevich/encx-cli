@@ -1,0 +1,222 @@
+---
+title: Конфигурация
+description: Справочник переменных окружения, флагов CLI, Docker-конфигурации и хранения сессий
+---
+
+## Переменные окружения
+
+Все основные параметры `encli` можно задать через переменные окружения. Это удобно для CI/CD, Docker и постоянной работы с одним доменом.
+
+### Основные параметры
+
+| Переменная | Флаг | Описание | По умолчанию |
+|---|---|---|---|
+| `ENCX_DOMAIN` | `-domain` | Домен Encounter | `tech.en.cx` |
+| `ENCX_LOGIN` | `-login` | Логин пользователя | — |
+| `ENCX_PASSWORD` | `-password` | Пароль пользователя | — |
+| `ENCX_GAME_ID` | `-game-id` | ID игры | — |
+| `ENCX_INSECURE` | `-insecure` | Пропустить проверку TLS (`1` или `true`) | `false` |
+| `ENCX_DEBUG` | `-debug` | Включить отладочный вывод (`1` или `true`) | `false` |
+
+### LLM-агент
+
+| Переменная | Алиас | Описание | По умолчанию |
+|---|---|---|---|
+| `LLM_API_KEY` | `OPENROUTER_API_KEY` | API-ключ для `--llm` и `-web` | — |
+| `LLM_MODEL` | `OPENROUTER_MODEL` | Модель агента | `openai/gpt-oss-120b:free` |
+| `LLM_BASE_URL` | `OPENROUTER_BASE_URL` | Base URL OpenAI-совместимого API | `https://openrouter.ai/api/v1` |
+| `LLM_FILES_ROOT` | — | Корень для локальных файлов агента | Текущая директория |
+
+### Web UI
+
+| Переменная | Флаг | Описание | По умолчанию |
+|---|---|---|---|
+| `ENCLI_WEB_ADDR` | `-web-addr` | Адрес и порт Web UI | `127.0.0.1:8787` |
+
+---
+
+## Приоритет конфигурации
+
+При наличии нескольких источников конфигурации приоритет следующий (от высшего к низшему):
+
+1. Флаги командной строки
+2. Переменные окружения
+3. Значения по умолчанию
+
+Для LLM-переменных: `LLM_*` имеет приоритет над `OPENROUTER_*`.
+
+---
+
+## Пример `.env` файла
+
+```sh
+# Encounter
+ENCX_DOMAIN=tech.en.cx
+ENCX_LOGIN=mylogin
+ENCX_PASSWORD=mypassword
+ENCX_GAME_ID=12345
+ENCX_INSECURE=1
+
+# LLM-агент
+LLM_API_KEY=sk-or-v1-...
+LLM_MODEL=anthropic/claude-sonnet-4
+
+# Web UI
+ENCLI_WEB_ADDR=127.0.0.1:8787
+```
+
+Загрузите перед запуском:
+
+```sh
+source .env
+encli status
+```
+
+---
+
+## Хранение сессий
+
+После успешной авторизации сессия сохраняется в файловой системе.
+
+### Расположение файлов
+
+```
+~/.config/encli/
+├── tech.en.cx.json          # Cookies сессии для домена tech.en.cx
+├── tech.en.cx.meta.json     # Метаданные (логин)
+├── en.cx.json
+└── web/
+    └── chats/               # История чатов Web UI
+        ├── <chat-id>.json
+        └── ...
+```
+
+### Права доступа
+
+Файлы сессий создаются с правами `0600` (доступны только владельцу). Директория `~/.config/encli/` создаётся с правами `0700`.
+
+### Управление сессиями
+
+```sh
+# Сохранить сессию (выполняется автоматически при login)
+encli login -domain tech.en.cx
+
+# Удалить сессию
+encli logout -domain tech.en.cx
+
+# Удалить вручную
+rm ~/.config/encli/tech.en.cx.json
+rm ~/.config/encli/tech.en.cx.meta.json
+```
+
+---
+
+## Docker-конфигурация
+
+В Docker сессия не сохраняется между запусками контейнера. Передавайте учётные данные через переменные окружения.
+
+### Базовый запуск
+
+```sh
+docker run --rm \
+  -e ENCX_DOMAIN=tech.en.cx \
+  -e ENCX_LOGIN=mylogin \
+  -e ENCX_PASSWORD=mypassword \
+  ghcr.io/skrashevich/encx-cli status -game-id 12345
+```
+
+### LLM-режим
+
+```sh
+docker run --rm \
+  -e ENCX_LOGIN=mylogin \
+  -e ENCX_PASSWORD=mypassword \
+  -e ENCX_GAME_ID=12345 \
+  -e LLM_API_KEY=sk-or-v1-... \
+  -e LLM_MODEL=anthropic/claude-sonnet-4 \
+  ghcr.io/skrashevich/encx-cli -game-id 12345 --llm "покажи уровни"
+```
+
+### Web UI с сохранением истории
+
+```sh
+docker run --rm -p 8787:8787 \
+  -v ~/.config/encli:/root/.config/encli \
+  -e LLM_API_KEY=sk-or-v1-... \
+  -e LLM_MODEL=anthropic/claude-sonnet-4 \
+  -e ENCLI_WEB_ADDR=0.0.0.0:8787 \
+  ghcr.io/skrashevich/encx-cli -web
+```
+
+### Docker Compose
+
+```yaml
+services:
+  encli:
+    image: ghcr.io/skrashevich/encx-cli
+    ports:
+      - "8787:8787"
+    volumes:
+      - encli-config:/root/.config/encli
+    environment:
+      ENCX_DOMAIN: tech.en.cx
+      LLM_API_KEY: ${LLM_API_KEY}
+      LLM_MODEL: anthropic/claude-sonnet-4
+      ENCLI_WEB_ADDR: 0.0.0.0:8787
+    command: ["-web"]
+
+volumes:
+  encli-config:
+```
+
+---
+
+## Режим отладки
+
+Флаг `-debug` (или `ENCX_DEBUG=1`) включает подробный вывод в `stderr`:
+
+- Разбор аргументов командной строки
+- Шаги LLM-агента и вызовы инструментов
+- HTTP-запросы с URL, методом, статусом и временем выполнения
+
+```sh
+encli -debug status -game-id 12345
+```
+
+```
+[debug 15:23:01.123] parsed command=status domain=tech.en.cx game_id=12345 insecure=false ...
+[debug 15:23:01.124] created encx client for domain=tech.en.cx
+[debug 15:23:01.125] encx http start: POST https://tech.en.cx/gameengines/encounter/play/12345
+[debug 15:23:01.456] encx http done: POST https://... status=200 duration=331ms content_type="application/json"
+```
+
+Вывод не обрезается — данные показываются целиком для полноценной диагностики.
+
+---
+
+## Поддерживаемые домены
+
+| Шаблон | Примеры |
+|---|---|
+| `*.en.cx` | `tech.en.cx`, `moscow.en.cx` |
+| `*.encounter.cx` | `spb.encounter.cx` |
+| `*.encounter.ru` | `ekb.encounter.ru` |
+
+<Note>
+  Домен `quest.ua` устарел. Используйте `{city}questua.en.cx` (например, `kharkovquestua.en.cx`).
+</Note>
+
+---
+
+## Тестовый домен
+
+`tech.en.cx` — специализированный домен для разработки и тестирования. Особенности:
+
+- Может использовать самоподписанный TLS-сертификат → используйте флаг `-insecure`.
+- Для получения прав создания игр напишите в [техподдержку](https://world.en.cx/UserDetails.aspx?uid=7).
+- Интеграционные тесты библиотеки `encx` работают именно с этим доменом.
+
+```sh
+# Запуск интеграционных тестов
+ENCX_INTEGRATION=1 go test ./encx/ -v -count=1
+```
