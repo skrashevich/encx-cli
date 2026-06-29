@@ -901,6 +901,14 @@ func requireAuth(ctx context.Context, cfg *config, client *encx.Client) {
 
 func requireAdminAuth(ctx context.Context, cfg *config, client *encx.Client) {
 	debugf("require admin auth: login_set=%v password_set=%v", cfg.login != "", cfg.password != "")
+	if cfg.login != "" && cfg.password != "" {
+		debugf("require admin auth: explicit credentials supplied, refreshing admin session for %s", cfg.login)
+		if err := client.LoginComplete(ctx, cfg.login, cfg.password); err != nil {
+			fatalEncx("Login failed", err)
+		}
+		saveSession(cfg, client)
+		return
+	}
 	if loadSession(cfg, client) {
 		if err := client.VerifyAdminSession(ctx); err == nil {
 			debugf("require admin auth: using saved session")
@@ -928,12 +936,15 @@ func cmdLogin(ctx context.Context, cfg *config, client *encx.Client) {
 		cfg.password = promptPassword("Password: ")
 	}
 	debugf("cmd login: attempting login for %s", cfg.login)
-	resp, err := client.Login(ctx, cfg.login, cfg.password)
-	if err != nil {
-		fatalEncx("Login failed", err)
-	}
-	if resp.Error != 0 {
-		fatal("Login error %d: %s", resp.Error, encx.LoginErrorText(resp.Error))
+	if err := client.LoginComplete(ctx, cfg.login, cfg.password); err != nil {
+		debugf("cmd login: complete/admin login failed, falling back to JSON login: %v", err)
+		resp, jsonErr := client.Login(ctx, cfg.login, cfg.password)
+		if jsonErr != nil {
+			fatalEncx("Login failed", jsonErr)
+		}
+		if resp.Error != 0 {
+			fatal("Login error %d: %s", resp.Error, encx.LoginErrorText(resp.Error))
+		}
 	}
 	debugf("cmd login: login successful for %s", cfg.login)
 	saveSession(cfg, client)

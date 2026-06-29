@@ -191,8 +191,28 @@ func (c *Client) AdminGetGames(ctx context.Context) ([]AdminGame, error) {
 // AdminGetLevels fetches the list of levels for a game from the admin panel.
 func (c *Client) AdminGetLevels(ctx context.Context, gameId int) ([]AdminLevel, error) {
 	u := fmt.Sprintf("%s/Administration/Games/LevelManager.aspx?gid=%d", c.baseURL(), gameId)
-	body, err := c.doGet(ctx, u)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u, nil)
 	if err != nil {
+		return nil, fmt.Errorf("encx: create admin get levels request: %w", err)
+	}
+	c.setHeaders(req)
+	statusCode, headers, bodyBytes, err := c.doRequestAndRead(req)
+	if err != nil {
+		return nil, fmt.Errorf("encx: admin get levels: %w", err)
+	}
+	if isRedirectStatus(statusCode) {
+		location := strings.TrimSpace(headers.Get("Location"))
+		if isLoginRedirect(location) {
+			return nil, fmt.Errorf("encx: admin get levels: session expired or access denied (redirect to login)")
+		}
+		return nil, fmt.Errorf("encx: admin get levels: unexpected redirect to %s (check game id and editor permissions)", location)
+	}
+	if statusCode != http.StatusOK {
+		return nil, fmt.Errorf("encx: admin get levels: HTTP %d", statusCode)
+	}
+
+	body := string(bodyBytes)
+	if err := guardAdminHTMLRequiresLogin(bodyBytes); err != nil {
 		return nil, fmt.Errorf("encx: admin get levels: %w", err)
 	}
 
@@ -206,8 +226,18 @@ func (c *Client) AdminGetLevels(ctx context.Context, gameId int) ([]AdminLevel, 
 			ID:     id,
 		})
 	}
+	if len(levels) == 0 && !looksLikeLevelManagerPage(body) {
+		return nil, fmt.Errorf("encx: admin get levels: level manager form not found (check game id and editor permissions)")
+	}
 
 	return levels, nil
+}
+
+func looksLikeLevelManagerPage(body string) bool {
+	return strings.Contains(body, "txtLevelName_") ||
+		strings.Contains(body, "ddlCreateLevelsNum") ||
+		strings.Contains(body, "levels=create") ||
+		strings.Contains(body, "level_names=update")
 }
 
 // AdminCreateLevels creates the specified number of new levels in the game.
@@ -218,6 +248,7 @@ func (c *Client) AdminCreateLevels(ctx context.Context, gameId, count int) error
 	if err != nil {
 		return fmt.Errorf("encx: admin create levels: %w", err)
 	}
+	c.adminDelay()
 	return nil
 }
 
@@ -229,6 +260,7 @@ func (c *Client) AdminDeleteLevel(ctx context.Context, gameId, levelNum int) err
 	if err != nil {
 		return fmt.Errorf("encx: admin delete level: %w", err)
 	}
+	c.adminDelay()
 	return nil
 }
 
@@ -245,6 +277,7 @@ func (c *Client) AdminRenameLevels(ctx context.Context, gameId int, names map[in
 	if err != nil {
 		return fmt.Errorf("encx: admin rename levels: %w", err)
 	}
+	c.adminDelay()
 	return nil
 }
 
@@ -269,6 +302,7 @@ func (c *Client) AdminUpdateAutopass(ctx context.Context, gameId, levelNum int, 
 	if err != nil {
 		return fmt.Errorf("encx: admin update autopass: %w", err)
 	}
+	c.adminDelay()
 	return nil
 }
 
@@ -288,6 +322,7 @@ func (c *Client) AdminUpdateAnswerBlock(ctx context.Context, gameId, levelNum in
 	if err != nil {
 		return fmt.Errorf("encx: admin update answer block: %w", err)
 	}
+	c.adminDelay()
 	return nil
 }
 
@@ -349,6 +384,7 @@ func (c *Client) AdminCreateBonus(ctx context.Context, gameId, levelNum int, b A
 	if err != nil {
 		return fmt.Errorf("encx: admin create bonus: %w", err)
 	}
+	c.adminDelay()
 	return nil
 }
 
@@ -360,6 +396,7 @@ func (c *Client) AdminDeleteBonus(ctx context.Context, gameId, levelNum, bonusId
 	if err != nil {
 		return fmt.Errorf("encx: admin delete bonus: %w", err)
 	}
+	c.adminDelay()
 	return nil
 }
 
@@ -371,6 +408,32 @@ func (c *Client) AdminCreateSector(ctx context.Context, gameId, levelNum int, s 
 	_, err := c.doPost(ctx, u, adminSectorForm(s))
 	if err != nil {
 		return fmt.Errorf("encx: admin create sector: %w", err)
+	}
+	c.adminDelay()
+	return nil
+}
+
+// AdminAddSectorAnswers appends answers to an existing sector without creating a new sector.
+func (c *Client) AdminAddSectorAnswers(ctx context.Context, gameId, levelNum, sectorId int, answers []string) error {
+	const maxAnswersPerRequest = 10
+	for start := 0; start < len(answers); start += maxAnswersPerRequest {
+		end := start + maxAnswersPerRequest
+		if end > len(answers) {
+			end = len(answers)
+		}
+		editBody, err := c.adminReadSectorEditPage(ctx, gameId, levelNum, sectorId)
+		if err != nil {
+			return fmt.Errorf("encx: admin add sector answers: %w", err)
+		}
+		form := adminAddSectorAnswersForm(editBody, sectorId, answers[start:end])
+		if len(form) == 0 {
+			continue
+		}
+		u := fmt.Sprintf("%s/Administration/Games/LevelEditor.aspx?gid=%d&level=%d", c.baseURL(), gameId, levelNum)
+		if _, err := c.doPost(ctx, u, form); err != nil {
+			return fmt.Errorf("encx: admin add sector answers: %w", err)
+		}
+		c.adminDelay()
 	}
 	return nil
 }
@@ -399,6 +462,36 @@ func adminSectorForm(s AdminSector) url.Values {
 			memberID = s.ForMemberID
 		}
 		form.Set(fmt.Sprintf("ddlAnswerFor_%d", i), memberID)
+	}
+	return form
+}
+
+func adminAddSectorAnswersForm(body string, sectorId int, answers []string) url.Values {
+	form := url.Values{}
+	if sectorId <= 0 {
+		return form
+	}
+	block := sectorAddAnswersFormBlock(body, sectorId)
+	form = parseHTMLHiddenFields(block)
+	form.Set("ddlSector", strconv.Itoa(sectorId))
+	form.Set("saveanswers", "1")
+	if submitName := firstImageSubmitName(block); submitName != "" {
+		form.Set(submitName+".x", "1")
+		form.Set(submitName+".y", "1")
+	}
+
+	next := 0
+	for _, ans := range answers {
+		ans = strings.TrimSpace(ans)
+		if ans == "" {
+			continue
+		}
+		form.Set(fmt.Sprintf("txtAnswer_%d", next), ans)
+		form.Set(fmt.Sprintf("ddlAnswerFor_%d", next), "0")
+		next++
+	}
+	if next == 0 {
+		return url.Values{}
 	}
 	return form
 }
@@ -512,6 +605,7 @@ func (c *Client) AdminCreateHint(ctx context.Context, gameId, levelNum int, h Ad
 	if err != nil {
 		return fmt.Errorf("encx: admin create hint: %w", err)
 	}
+	c.adminDelay()
 	return nil
 }
 
@@ -523,6 +617,7 @@ func (c *Client) AdminDeleteHint(ctx context.Context, gameId, levelNum, hintId i
 	if err != nil {
 		return fmt.Errorf("encx: admin delete hint: %w", err)
 	}
+	c.adminDelay()
 	return nil
 }
 
@@ -544,6 +639,7 @@ func (c *Client) AdminCreateTask(ctx context.Context, gameId, levelNum int, t Ad
 	if err != nil {
 		return fmt.Errorf("encx: admin create task: %w", err)
 	}
+	c.adminDelay()
 	return nil
 }
 
@@ -561,6 +657,7 @@ func (c *Client) AdminUpdateComment(ctx context.Context, gameId, levelNum int, n
 	if err != nil {
 		return fmt.Errorf("encx: admin update comment: %w", err)
 	}
+	c.adminDelay()
 	return nil
 }
 
@@ -849,6 +946,7 @@ func (c *Client) AdminDeleteTask(ctx context.Context, gameId, levelNum, taskId i
 	if err != nil {
 		return fmt.Errorf("encx: admin delete task: %w", err)
 	}
+	c.adminDelay()
 	return nil
 }
 
@@ -869,6 +967,7 @@ func (c *Client) AdminUpdateTask(ctx context.Context, gameId, levelNum, taskId i
 	if err != nil {
 		return fmt.Errorf("encx: admin update task: %w", err)
 	}
+	c.adminDelay()
 	return nil
 }
 
@@ -928,6 +1027,7 @@ func (c *Client) AdminUpdateBonus(ctx context.Context, gameId, levelNum, bonusId
 	if err != nil {
 		return fmt.Errorf("encx: admin update bonus: %w", err)
 	}
+	c.adminDelay()
 	return nil
 }
 
@@ -973,6 +1073,7 @@ func (c *Client) AdminUpdateHint(ctx context.Context, gameId, levelNum, hintId i
 	if err != nil {
 		return fmt.Errorf("encx: admin update hint: %w", err)
 	}
+	c.adminDelay()
 	return nil
 }
 

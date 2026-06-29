@@ -19,12 +19,13 @@ var (
 	sectorDeleteIDRE             = regexp.MustCompile(`(?i)[?&]delsector=(\d+)`)
 	listSectorAnswerRE           = regexp.MustCompile(`(?is)divAnswersView_(\d+)[^>]*>[\s\S]*?nonLatinChar[^>]*>([^<]*)</span>([^<]*)`)
 	sectorStartedDeleteMessageRE = regexp.MustCompile(`(?i)(?:Ошибка\.?\s*)?Сектор\s+не\s+может\s+быть\s+удален[^.]*начали\s+проходить\s+участник`)
-	sectorAnswerInputRE          = regexp.MustCompile(`(?i)<input[^>]*name="(txtAnswer[^"]*)"[^>]*value="([^"]*)"`)
 	sectorDeleteAnswerRE         = regexp.MustCompile(`(?i)name="(chkDeleteAnswer_\d+)"[^>]*value="(\d+)"`)
 	htmlInputTagRE               = regexp.MustCompile(`(?is)<input\b([^>/]*)(/?)>`)
 	htmlInputTypeAttrRE          = regexp.MustCompile(`(?is)\btype\s*=\s*["']([^"']*)["']`)
 	htmlInputNameAttrRE          = regexp.MustCompile(`(?is)\bname\s*=\s*["']([^"']*)["']`)
 	htmlInputValueAttrRE         = regexp.MustCompile(`(?is)\bvalue\s*=\s*["']([^"']*)["']`)
+	htmlFormOpenRE               = regexp.MustCompile(`(?is)<form\b[^>]*>`)
+	htmlFormBlockRE              = regexp.MustCompile(`(?is)<form\b[\s\S]*?</form>`)
 )
 
 func parseListPageSectorAnswersMap(body string) map[int][]string {
@@ -67,11 +68,16 @@ type sectorAnswerField struct {
 
 func parseSectorAnswerFields(body string) []sectorAnswerField {
 	var fields []sectorAnswerField
-	for _, m := range sectorAnswerInputRE.FindAllStringSubmatch(body, -1) {
+	for _, m := range htmlInputTagRE.FindAllStringSubmatch(body, -1) {
+		attrs := m[1]
+		name := htmlAttrValue(attrs, "name")
+		if !strings.HasPrefix(name, "txtAnswer") {
+			continue
+		}
 		fields = append(fields, sectorAnswerField{
-			AnswerName: m[1],
-			ForName:    strings.Replace(m[1], "txtAnswer", "ddlAnswerFor", 1),
-			Value:      html.UnescapeString(m[2]),
+			AnswerName: name,
+			ForName:    strings.Replace(name, "txtAnswer", "ddlAnswerFor", 1),
+			Value:      htmlAttrValue(attrs, "value"),
 		})
 	}
 	return fields
@@ -109,6 +115,47 @@ func parseHTMLHiddenFields(body string) url.Values {
 	return form
 }
 
+func sectorEditFormBlock(body string, sectorID int) string {
+	markerRe := regexp.MustCompile(fmt.Sprintf(`(?is)<input\b[^>]*\bname\s*=\s*["']updateanswers["'][^>]*\bvalue\s*=\s*["']%d["'][^>]*>`, sectorID))
+	loc := markerRe.FindStringIndex(body)
+	if loc == nil {
+		return body
+	}
+	start := 0
+	for _, formLoc := range htmlFormOpenRE.FindAllStringIndex(body[:loc[0]], -1) {
+		start = formLoc[0]
+	}
+	end := len(body)
+	if closeRel := strings.Index(strings.ToLower(body[loc[1]:]), "</form>"); closeRel >= 0 {
+		end = loc[1] + closeRel + len("</form>")
+	}
+	return body[start:end]
+}
+
+func sectorAddAnswersFormBlock(body string, sectorID int) string {
+	marker := fmt.Sprintf("divSectorsAddAnswersRows_%d", sectorID)
+	for _, loc := range htmlFormBlockRE.FindAllStringIndex(body, -1) {
+		block := body[loc[0]:loc[1]]
+		if strings.Contains(block, marker) {
+			return block
+		}
+	}
+	return body
+}
+
+func firstImageSubmitName(body string) string {
+	for _, m := range htmlInputTagRE.FindAllStringSubmatch(body, -1) {
+		attrs := m[1]
+		if !strings.EqualFold(htmlAttrValue(attrs, "type"), "image") {
+			continue
+		}
+		if name := htmlAttrValue(attrs, "name"); name != "" {
+			return name
+		}
+	}
+	return ""
+}
+
 func (c *Client) adminReadSectorEditPage(ctx context.Context, gameID, levelNum, sectorID int) (string, error) {
 	u := fmt.Sprintf("%s/Administration/Games/LevelEditor.aspx?level=%d&gid=%d&swanswers=1&editanswers=%d",
 		c.baseURL(), levelNum, gameID, sectorID)
@@ -120,53 +167,63 @@ func (c *Client) adminReadSectorEditPage(ctx context.Context, gameID, levelNum, 
 }
 
 func (c *Client) adminSaveSectorForm(ctx context.Context, gameID, levelNum, sectorID int, name string, answers []string) error {
-	editBody, err := c.adminReadSectorEditPage(ctx, gameID, levelNum, sectorID)
-	if err != nil {
-		return err
+	maxRounds := len(answers) + 2
+	if maxRounds < 2 {
+		maxRounds = 2
 	}
-	fields := parseSectorAnswerFields(editBody)
-	form := parseHTMLHiddenFields(editBody)
-	form.Set("ddlSector", strconv.Itoa(sectorID))
-	form.Set("updateanswers", strconv.Itoa(sectorID))
-	form.Set("txtSectorName", name)
-	form.Set("btnSaveSector.x", "1")
-	form.Set("btnSaveSector.y", "1")
+	for round := 0; round < maxRounds; round++ {
+		editBody, err := c.adminReadSectorEditPage(ctx, gameID, levelNum, sectorID)
+		if err != nil {
+			return err
+		}
+		editBody = sectorEditFormBlock(editBody, sectorID)
+		fields := parseSectorAnswerFields(editBody)
+		form := parseHTMLHiddenFields(editBody)
+		form.Set("ddlSector", strconv.Itoa(sectorID))
+		form.Set("updateanswers", strconv.Itoa(sectorID))
+		form.Set("txtSectorName", name)
+		form.Set("btnSaveSector.x", "1")
+		form.Set("btnSaveSector.y", "1")
 
-	for _, field := range fields {
-		form.Set(field.AnswerName, "")
-		form.Set(field.ForName, "0")
-	}
-	if len(answers) == 0 {
-		for _, m := range sectorDeleteAnswerRE.FindAllStringSubmatch(editBody, -1) {
-			form.Set(m[1], m[2])
-		}
-	} else {
-		targets := make([]sectorAnswerField, 0, len(fields))
 		for _, field := range fields {
-			if strings.TrimSpace(field.Value) != "" {
-				targets = append(targets, field)
+			form.Set(field.AnswerName, "")
+			form.Set(field.ForName, "0")
+		}
+		if len(answers) == 0 {
+			for _, m := range sectorDeleteAnswerRE.FindAllStringSubmatch(editBody, -1) {
+				form.Set(m[1], m[2])
+			}
+		} else {
+			targets := make([]sectorAnswerField, 0, len(fields))
+			for _, field := range fields {
+				if strings.TrimSpace(field.Value) != "" {
+					targets = append(targets, field)
+				}
+			}
+			for _, field := range fields {
+				if strings.TrimSpace(field.Value) == "" {
+					targets = append(targets, field)
+				}
+			}
+			for i, answer := range answers {
+				if i >= len(targets) {
+					break
+				}
+				form.Set(targets[i].AnswerName, answer)
 			}
 		}
-		for _, field := range fields {
-			if strings.TrimSpace(field.Value) == "" {
-				targets = append(targets, field)
-			}
-		}
-		for i, answer := range answers {
-			if i >= len(targets) {
-				break
-			}
-			form.Set(targets[i].AnswerName, answer)
-		}
-	}
 
-	u := fmt.Sprintf("%s/Administration/Games/LevelEditor.aspx?gid=%d&level=%d&swanswers=1&editanswers=%d",
-		c.baseURL(), gameID, levelNum, sectorID)
-	if _, err := c.doPost(ctx, u, form); err != nil {
-		return fmt.Errorf("encx: save sector %d form: %w", sectorID, err)
+		u := fmt.Sprintf("%s/Administration/Games/LevelEditor.aspx?gid=%d&level=%d&swanswers=1&editanswers=%d",
+			c.baseURL(), gameID, levelNum, sectorID)
+		if _, err := c.doPost(ctx, u, form); err != nil {
+			return fmt.Errorf("encx: save sector %d form: %w", sectorID, err)
+		}
+		c.adminDelay()
+		if len(answers) <= len(fields) {
+			return nil
+		}
 	}
-	c.adminDelay()
-	return nil
+	return fmt.Errorf("encx: save sector %d form: could not allocate %d answer fields", sectorID, len(answers))
 }
 
 func (c *Client) adminReadSectorAnswersList(ctx context.Context, gameID, levelNum int) (string, error) {

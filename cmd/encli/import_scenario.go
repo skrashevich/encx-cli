@@ -10,7 +10,6 @@ import (
 	"regexp"
 	"sort"
 	"strings"
-	"time"
 
 	"github.com/skrashevich/encx-cli/encx"
 	"github.com/skrashevich/encx-cli/encx/scenario"
@@ -30,6 +29,8 @@ type importSyncStats struct {
 	TasksCreated    int `json:"tasks_created"`
 	HintsDeleted    int `json:"hints_deleted,omitempty"`
 	HintsCreated    int `json:"hints_created"`
+	BonusesDeleted  int `json:"bonuses_deleted,omitempty"`
+	BonusesCreated  int `json:"bonuses_created"`
 	SectorsDeleted  int `json:"sectors_deleted,omitempty"`
 	SectorsCreated  int `json:"sectors_created"`
 }
@@ -83,10 +84,12 @@ func cmdImportScenario(ctx context.Context, cfg *config, client *encx.Client, ar
 
 	totalTasks := 0
 	totalHints := 0
+	totalBonuses := 0
 	totalSectors := 0
 	for _, lvl := range scenarioDoc.Levels {
 		totalTasks += len(lvl.Tasks)
 		totalHints += len(lvl.Hints)
+		totalBonuses += len(lvl.Bonuses)
 		totalSectors += len(lvl.SectorAnswers)
 	}
 
@@ -102,6 +105,7 @@ func cmdImportScenario(ctx context.Context, cfg *config, client *encx.Client, ar
 				"levels":          len(scenarioDoc.Levels),
 				"tasks":           totalTasks,
 				"hints":           totalHints,
+				"bonuses":         totalBonuses,
 				"sectors":         totalSectors,
 				"embedded_assets": scenarioDoc.EmbeddedAssets,
 				"missing_assets":  scenarioDoc.MissingAssets,
@@ -113,7 +117,7 @@ func cmdImportScenario(ctx context.Context, cfg *config, client *encx.Client, ar
 		if opts.SyncMissing {
 			action = "sync"
 		}
-		fmt.Printf("Dry-run: would %s game %d with %d level(s), %d task(s), %d hint(s), %d sector(s)\n", action, cfg.gameId, len(scenarioDoc.Levels), totalTasks, totalHints, totalSectors)
+		fmt.Printf("Dry-run: would %s game %d with %d level(s), %d task(s), %d hint(s), %d bonus(es), %d sector(s)\n", action, cfg.gameId, len(scenarioDoc.Levels), totalTasks, totalHints, totalBonuses, totalSectors)
 		fmt.Printf("Source: %s\n", scenarioDoc.SourcePath)
 		fmt.Printf("Embedded assets: %d\n", scenarioDoc.EmbeddedAssets)
 		if len(scenarioDoc.MissingAssets) > 0 {
@@ -146,10 +150,11 @@ func cmdImportScenario(ctx context.Context, cfg *config, client *encx.Client, ar
 			})
 			return
 		}
-		fmt.Printf("Scenario synced: levels+%d names~%d autopass~%d tasks-%d/+%d hints-%d/+%d sectors-%d/+%d\n",
+		fmt.Printf("Scenario synced: levels+%d names~%d autopass~%d tasks-%d/+%d hints-%d/+%d bonuses-%d/+%d sectors-%d/+%d\n",
 			stats.LevelsCreated, stats.NamesUpdated, stats.AutopassUpdated,
 			stats.TasksDeleted, stats.TasksCreated,
 			stats.HintsDeleted, stats.HintsCreated,
+			stats.BonusesDeleted, stats.BonusesCreated,
 			stats.SectorsDeleted, stats.SectorsCreated)
 		return
 	}
@@ -187,6 +192,11 @@ func cmdImportScenario(ctx context.Context, cfg *config, client *encx.Client, ar
 		}
 		created += batchSize
 		progress(fmt.Sprintf("Created level batch %d/%d (+%d, total %d/%d)", i+1, len(batches), batchSize, created, len(scenarioDoc.Levels)))
+	}
+
+	importLevels, err := readAdminLevelsByNumber(ctx, client, cfg.gameId)
+	if err != nil {
+		fatal("Failed to read created levels: %v", err)
 	}
 
 	for idx, lvl := range scenarioDoc.Levels {
@@ -252,6 +262,25 @@ func cmdImportScenario(ctx context.Context, cfg *config, client *encx.Client, ar
 			}
 		}
 
+		if len(lvl.Bonuses) > 0 {
+			levelID, ok := importLevels[levelNum]
+			if !ok || levelID == 0 {
+				fatal("Failed to resolve level ID for level %d while creating bonuses", levelNum)
+			}
+			for _, srcBonus := range lvl.Bonuses {
+				bonus, ok := scenarioBonusToAdminBonus(srcBonus, levelID)
+				if !ok {
+					continue
+				}
+				err := runWithAntiSpamRetry(fmt.Sprintf("create bonus on level %d", levelNum), func() error {
+					return client.AdminCreateBonus(ctx, cfg.gameId, levelNum, bonus)
+				})
+				if err != nil {
+					fatal("Failed to create bonus on level %d: %v", levelNum, err)
+				}
+			}
+		}
+
 		for sectorIdx, answers := range lvl.SectorAnswers {
 			if len(answers) == 0 {
 				continue
@@ -260,10 +289,7 @@ func cmdImportScenario(ctx context.Context, cfg *config, client *encx.Client, ar
 				Name:    fmt.Sprintf("Сектор %d", sectorIdx+1),
 				Answers: answers,
 			}
-			err := runWithAntiSpamRetry(fmt.Sprintf("create sector on level %d", levelNum), func() error {
-				return client.AdminCreateSector(ctx, cfg.gameId, levelNum, sector)
-			})
-			if err != nil {
+			if err := createScenarioSector(ctx, client, cfg.gameId, levelNum, sector); err != nil {
 				fatal("Failed to create sector on level %d: %v", levelNum, err)
 			}
 		}
@@ -279,6 +305,7 @@ func cmdImportScenario(ctx context.Context, cfg *config, client *encx.Client, ar
 			"levels":          len(scenarioDoc.Levels),
 			"tasks":           totalTasks,
 			"hints":           totalHints,
+			"bonuses":         totalBonuses,
 			"sectors":         totalSectors,
 			"embedded_assets": scenarioDoc.EmbeddedAssets,
 			"missing_assets":  scenarioDoc.MissingAssets,
@@ -286,7 +313,7 @@ func cmdImportScenario(ctx context.Context, cfg *config, client *encx.Client, ar
 		return
 	}
 
-	fmt.Printf("Scenario imported: %d levels, %d tasks, %d hints, %d sectors\n", len(scenarioDoc.Levels), totalTasks, totalHints, totalSectors)
+	fmt.Printf("Scenario imported: %d levels, %d tasks, %d hints, %d bonuses, %d sectors\n", len(scenarioDoc.Levels), totalTasks, totalHints, totalBonuses, totalSectors)
 }
 
 func importScenarioNeedsAdmin(cfg *config, args []string) bool {
@@ -419,6 +446,59 @@ func scenarioHintKeys(src scenario.Level) []string {
 		out = append(out, hintDelayTextKey(h.DelaySeconds, text))
 	}
 	return out
+}
+
+func scenarioBonusToAdminBonus(src scenario.Bonus, levelID int) (encx.AdminBonus, bool) {
+	name := strings.TrimSpace(src.Name)
+	task := strings.TrimSpace(src.Task)
+	answers := dedupeKeepOrder(src.Answers)
+	if name == "" && task == "" && len(answers) == 0 {
+		return encx.AdminBonus{}, false
+	}
+	h, m, s := splitSeconds(src.AwardSeconds)
+	return encx.AdminBonus{
+		Name:         name,
+		Task:         task,
+		LevelID:      levelID,
+		Answers:      answers,
+		AwardHours:   h,
+		AwardMinutes: m,
+		AwardSeconds: s,
+	}, true
+}
+
+func bonusComparableKey(b encx.AdminBonus) string {
+	return strings.Join([]string{
+		scenario.NormalizeComparableText(b.Name),
+		scenario.NormalizeComparableText(b.Task),
+		scenario.NormalizeComparableText(b.Hint),
+		fmt.Sprintf("%d:%d:%d:%t", b.AwardHours, b.AwardMinutes, b.AwardSeconds, b.Negative),
+		answerSetKey(b.Answers),
+	}, "\x00")
+}
+
+func scenarioBonusKeys(src scenario.Level, levelID int) []string {
+	out := make([]string, 0, len(src.Bonuses))
+	for _, bonus := range src.Bonuses {
+		adminBonus, ok := scenarioBonusToAdminBonus(bonus, levelID)
+		if !ok {
+			continue
+		}
+		out = append(out, bonusComparableKey(adminBonus))
+	}
+	return out
+}
+
+func bonusKeysMatch(a, b []string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
 }
 
 func normalizedAnswerSet(answers []string) map[string]struct{} {
@@ -644,6 +724,64 @@ func syncLevelHintsToScenario(ctx context.Context, client *encx.Client, gameID, 
 	return nil
 }
 
+func syncLevelBonusesToScenario(ctx context.Context, client *encx.Client, gameID, levelNum, levelID int, src scenario.Level, stats *importSyncStats) error {
+	want := scenarioBonusKeys(src, levelID)
+	var bonusIDs []int
+	err := runWithAntiSpamRetry(fmt.Sprintf("read level %d bonus IDs", levelNum), func() error {
+		var callErr error
+		bonusIDs, callErr = client.AdminGetBonusIds(ctx, gameID, levelNum)
+		return callErr
+	})
+	if err != nil {
+		return err
+	}
+
+	existing := make([]string, 0, len(bonusIDs))
+	for _, bonusID := range bonusIDs {
+		var bonus *encx.AdminBonus
+		id := bonusID
+		err := runWithAntiSpamRetry(fmt.Sprintf("read level %d bonus %d", levelNum, id), func() error {
+			var callErr error
+			bonus, callErr = client.AdminGetBonus(ctx, gameID, levelNum, id)
+			return callErr
+		})
+		if err != nil {
+			return err
+		}
+		if bonus != nil {
+			existing = append(existing, bonusComparableKey(*bonus))
+		}
+	}
+	if bonusKeysMatch(existing, want) {
+		return nil
+	}
+
+	for _, bonusID := range bonusIDs {
+		id := bonusID
+		err := runWithAntiSpamRetry(fmt.Sprintf("delete level %d bonus %d", levelNum, id), func() error {
+			return client.AdminDeleteBonus(ctx, gameID, levelNum, id)
+		})
+		if err != nil {
+			return err
+		}
+		stats.BonusesDeleted++
+	}
+	for _, srcBonus := range src.Bonuses {
+		bonus, ok := scenarioBonusToAdminBonus(srcBonus, levelID)
+		if !ok {
+			continue
+		}
+		err := runWithAntiSpamRetry(fmt.Sprintf("create bonus on level %d", levelNum), func() error {
+			return client.AdminCreateBonus(ctx, gameID, levelNum, bonus)
+		})
+		if err != nil {
+			return err
+		}
+		stats.BonusesCreated++
+	}
+	return nil
+}
+
 func syncLevelSectorsToScenario(ctx context.Context, client *encx.Client, gameID, levelNum int, src scenario.Level, stats *importSyncStats) error {
 	var sectors []encx.AdminSector
 	err := runWithAntiSpamRetry(fmt.Sprintf("read level %d sectors", levelNum), func() error {
@@ -671,10 +809,7 @@ func syncLevelSectorsToScenario(ctx context.Context, client *encx.Client, gameID
 			Name:    fmt.Sprintf("Сектор %d", i+1),
 			Answers: answers,
 		}
-		err := runWithAntiSpamRetry(fmt.Sprintf("create sector on level %d", levelNum), func() error {
-			return client.AdminCreateSector(ctx, gameID, levelNum, sector)
-		})
-		if err != nil {
+		if err := createScenarioSector(ctx, client, gameID, levelNum, sector); err != nil {
 			return fmt.Errorf("level %d: create sector %d: %w", levelNum, i+1, err)
 		}
 		stats.SectorsCreated++
@@ -693,6 +828,124 @@ func syncLevelSectorsToScenario(ctx context.Context, client *encx.Client, gameID
 			levelNum, formatAdminSectorsSummary(gameSectorsWithAnswers(sectors)))
 	}
 	return nil
+}
+
+func createScenarioSector(ctx context.Context, client *encx.Client, gameID, levelNum int, sector encx.AdminSector) error {
+	if len(sector.Answers) <= 1 {
+		return runWithAntiSpamRetry(fmt.Sprintf("create sector on level %d", levelNum), func() error {
+			return client.AdminCreateSector(ctx, gameID, levelNum, sector)
+		})
+	}
+
+	var before []encx.AdminSector
+	if err := runWithAntiSpamRetry(fmt.Sprintf("read level %d sectors before create", levelNum), func() error {
+		var callErr error
+		before, callErr = client.AdminGetSectorAnswers(ctx, gameID, levelNum)
+		return callErr
+	}); err != nil {
+		return err
+	}
+	beforeIDs := make(map[int]struct{}, len(before))
+	for _, sec := range before {
+		if sec.ID > 0 {
+			beforeIDs[sec.ID] = struct{}{}
+		}
+	}
+
+	initial := sector
+	if len(initial.Answers) > 1 {
+		initial.Answers = initial.Answers[:1]
+	}
+	if err := runWithAntiSpamRetry(fmt.Sprintf("create sector on level %d", levelNum), func() error {
+		return client.AdminCreateSector(ctx, gameID, levelNum, initial)
+	}); err != nil {
+		return err
+	}
+
+	created, err := findCreatedSector(ctx, client, gameID, levelNum, beforeIDs, sector.Name)
+	if err != nil {
+		return err
+	}
+	if created.ID <= 0 {
+		return fmt.Errorf("created sector %q has no ID", sector.Name)
+	}
+	if !answerSetsEqual(created.Answers, sector.Answers) {
+		remaining := remainingSectorAnswers(created.Answers, sector.Answers)
+		if len(remaining) == 0 {
+			return fmt.Errorf("sector %q answers differ after create: got %v, want %v", sector.Name, created.Answers, sector.Answers)
+		}
+		if err := runWithAntiSpamRetry(fmt.Sprintf("add %d answer(s) to sector %d on level %d", len(remaining), created.ID, levelNum), func() error {
+			return client.AdminAddSectorAnswers(ctx, gameID, levelNum, created.ID, remaining)
+		}); err != nil {
+			return err
+		}
+	}
+
+	var after []encx.AdminSector
+	if err := runWithAntiSpamRetry(fmt.Sprintf("read level %d sectors after update", levelNum), func() error {
+		var callErr error
+		after, callErr = client.AdminGetSectorAnswers(ctx, gameID, levelNum)
+		return callErr
+	}); err != nil {
+		return err
+	}
+	for _, sec := range after {
+		if sec.ID == created.ID {
+			if answerSetsEqual(sec.Answers, sector.Answers) {
+				return nil
+			}
+			return fmt.Errorf("sector %q answers differ after create: got %v, want %v", sector.Name, sec.Answers, sector.Answers)
+		}
+	}
+	return fmt.Errorf("created sector %q disappeared after update", sector.Name)
+}
+
+func findCreatedSector(ctx context.Context, client *encx.Client, gameID, levelNum int, beforeIDs map[int]struct{}, name string) (encx.AdminSector, error) {
+	var sectors []encx.AdminSector
+	if err := runWithAntiSpamRetry(fmt.Sprintf("read level %d sectors after create", levelNum), func() error {
+		var callErr error
+		sectors, callErr = client.AdminGetSectorAnswers(ctx, gameID, levelNum)
+		return callErr
+	}); err != nil {
+		return encx.AdminSector{}, err
+	}
+	for i := len(sectors) - 1; i >= 0; i-- {
+		sec := sectors[i]
+		if _, existed := beforeIDs[sec.ID]; existed {
+			continue
+		}
+		if strings.TrimSpace(sec.Name) == strings.TrimSpace(name) {
+			return sec, nil
+		}
+	}
+	for i := len(sectors) - 1; i >= 0; i-- {
+		sec := sectors[i]
+		if _, existed := beforeIDs[sec.ID]; !existed {
+			return sec, nil
+		}
+	}
+	return encx.AdminSector{}, fmt.Errorf("created sector %q was not found", name)
+}
+
+func remainingSectorAnswers(existing, want []string) []string {
+	existingSet := normalizedAnswerSet(existing)
+	var out []string
+	seen := map[string]struct{}{}
+	for _, answer := range want {
+		n := scenario.NormalizeComparableText(answer)
+		if n == "" {
+			continue
+		}
+		if _, ok := existingSet[n]; ok {
+			continue
+		}
+		if _, ok := seen[n]; ok {
+			continue
+		}
+		seen[n] = struct{}{}
+		out = append(out, strings.TrimSpace(answer))
+	}
+	return out
 }
 
 func formatAdminSectorsSummary(sectors []encx.AdminSector) string {
@@ -727,12 +980,27 @@ func dedupeKeepOrder(items []string) []string {
 	return out
 }
 
+func readAdminLevelsByNumber(ctx context.Context, client *encx.Client, gameID int) (map[int]int, error) {
+	var levels []encx.AdminLevel
+	err := runWithAntiSpamRetry("read levels", func() error {
+		var callErr error
+		levels, callErr = client.AdminGetLevels(ctx, gameID)
+		return callErr
+	})
+	if err != nil {
+		return nil, err
+	}
+	out := make(map[int]int, len(levels))
+	for _, level := range levels {
+		if level.Number > 0 && level.ID != 0 {
+			out[level.Number] = level.ID
+		}
+	}
+	return out, nil
+}
+
 func syncMissingScenario(ctx context.Context, cfg *config, client *encx.Client, doc *scenario.Document, progress func(string)) (importSyncStats, error) {
 	stats := importSyncStats{}
-
-	prevDelay := client.AdminDelay()
-	client.SetAdminDelay(350 * time.Millisecond)
-	defer client.SetAdminDelay(prevDelay)
 
 	var levels []encx.AdminLevel
 	err := runWithAntiSpamRetry("read existing levels", func() error {
@@ -757,6 +1025,16 @@ func syncMissingScenario(ctx context.Context, cfg *config, client *encx.Client, 
 			stats.LevelsCreated += batch
 		}
 		progress(fmt.Sprintf("Created %d missing level(s)", stats.LevelsCreated))
+		levels, err = client.AdminGetLevels(ctx, cfg.gameId)
+		if err != nil {
+			return stats, fmt.Errorf("re-read existing levels: %w", err)
+		}
+	}
+	levelIDs := make(map[int]int, len(levels))
+	for _, level := range levels {
+		if level.Number > 0 && level.ID != 0 {
+			levelIDs[level.Number] = level.ID
+		}
 	}
 
 	for idx, src := range doc.Levels {
@@ -816,6 +1094,13 @@ func syncMissingScenario(ctx context.Context, cfg *config, client *encx.Client, 
 		if err := syncLevelHintsToScenario(ctx, client, cfg.gameId, levelNum, src, &stats); err != nil {
 			return stats, err
 		}
+		levelID := levelIDs[levelNum]
+		if len(src.Bonuses) > 0 && levelID == 0 {
+			return stats, fmt.Errorf("level %d: missing admin level ID for bonus import", levelNum)
+		}
+		if err := syncLevelBonusesToScenario(ctx, client, cfg.gameId, levelNum, levelID, src, &stats); err != nil {
+			return stats, err
+		}
 		if err := syncLevelSectorsToScenario(ctx, client, cfg.gameId, levelNum, src, &stats); err != nil {
 			return stats, err
 		}
@@ -848,6 +1133,13 @@ func redactScenarioBinaryPayloads(levels []scenario.Level) []scenario.Level {
 			for j, hint := range level.Hints {
 				out[i].Hints[j] = hint
 				out[i].Hints[j].Text = redactBinaryPayloads(hint.Text)
+			}
+		}
+		if len(level.Bonuses) > 0 {
+			out[i].Bonuses = make([]scenario.Bonus, len(level.Bonuses))
+			for j, bonus := range level.Bonuses {
+				out[i].Bonuses[j] = bonus
+				out[i].Bonuses[j].Task = redactBinaryPayloads(bonus.Task)
 			}
 		}
 	}
@@ -894,6 +1186,19 @@ func printDryRunLevel(level scenario.Level) {
 				fmt.Printf("  [Hint %d] (delay %02d:%02d:%02d)\n", i+1, h, m, s)
 			}
 			fmt.Println(indentBlock(hint.Text, "    "))
+		}
+	}
+	if len(level.Bonuses) > 0 {
+		fmt.Printf("Bonuses (%d):\n", len(level.Bonuses))
+		for i, bonus := range level.Bonuses {
+			h, m, s := splitSeconds(bonus.AwardSeconds)
+			fmt.Printf("  [Bonus %d] #%d %s (award %02d:%02d:%02d)\n", i+1, bonus.Number, strings.TrimSpace(bonus.Name), h, m, s)
+			if strings.TrimSpace(bonus.Task) != "" {
+				fmt.Println(indentBlock(bonus.Task, "    Task: "))
+			}
+			if len(bonus.Answers) > 0 {
+				fmt.Printf("    Answers: %s\n", strings.Join(bonus.Answers, ", "))
+			}
 		}
 	}
 	if len(level.SectorAnswers) > 0 {
