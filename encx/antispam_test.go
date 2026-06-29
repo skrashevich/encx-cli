@@ -85,6 +85,21 @@ func TestExtractLoginURLFromNotHumanHTML(t *testing.T) {
 	}
 }
 
+func TestExtractLoginURLFromNotHumanHTMLKeepsSectorParam(t *testing.T) {
+	page := "https://tech.en.cx/NotHumanRequest.aspx?return=%2fALoader%2fLevelInfo.aspx%3fgid%3d82443%26level%3d10%26object%3d3%26sector%3d3496478"
+	body := []byte(`<html><body>
+		<a href="/Login.aspx?return=/ALoader/LevelInfo.aspx?gid=82443&level=10&object=3&sector=3496478">Войти</a>
+		</body></html>`)
+	got := ExtractLoginURLFromNotHumanHTML(page, body)
+	want := "https://tech.en.cx/Login.aspx?return=/ALoader/LevelInfo.aspx?gid=82443&level=10&object=3&sector=3496478"
+	if got != want {
+		t.Fatalf("got %q want %q", got, want)
+	}
+	if strings.Contains(got, "§or") {
+		t.Fatalf("sector parameter was decoded as HTML entity: %q", got)
+	}
+}
+
 func TestAntiSpamPageURL(t *testing.T) {
 	got := AntiSpamPageURL("tech.en.cx", "https", "/home/")
 	if !strings.HasPrefix(got, "https://tech.en.cx/NotHumanRequest.aspx") {

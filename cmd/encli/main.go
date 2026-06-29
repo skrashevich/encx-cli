@@ -1887,8 +1887,18 @@ func (g *antiSpamGuard) reset() {
 
 // handleAntiSpam tries API re-login once per manual cycle, then falls back to browser verification.
 func handleAntiSpam(ctx context.Context, cfg *config, client *encx.Client, guard *antiSpamGuard, url string) error {
-	if guard.takeReloginAttempt() && client != nil && tryAntiSpamReLogin(ctx, cfg, client, url) {
-		return nil
+	if client != nil {
+		if _, _, ok := antiSpamCredentials(cfg); ok {
+			if guard.takeReloginAttempt() && tryAntiSpamReLogin(ctx, cfg, client, url) {
+				return nil
+			}
+		} else {
+			debugf("anti-spam: skip auto re-login (login_set=%v password_set=%v)", cfg.login != "", cfg.password != "")
+			if msg := antiSpamAutoSignInSkipMessage(cfg); msg != "" {
+				fmt.Fprintln(os.Stderr)
+				fmt.Fprintf(os.Stderr, "Automatic sign-in skipped: %s\n", msg)
+			}
+		}
 	}
 	browserURL := resolveAntiSpamBrowserURL(ctx, client, url)
 	if guard.reloginWasTried() {
@@ -1925,6 +1935,26 @@ func antiSpamCredentials(cfg *config) (login, password string, ok bool) {
 		return "", "", false
 	}
 	return login, password, true
+}
+
+func antiSpamAutoSignInSkipMessage(cfg *config) string {
+	if cfg == nil {
+		return "credentials are not configured"
+	}
+	login := strings.TrimSpace(cfg.login)
+	if login == "" {
+		login = loadSessionLogin(cfg.domain)
+	}
+	switch {
+	case login == "" && cfg.password == "":
+		return "login and password are not available; pass -login/-password or set ENCX_LOGIN/ENCX_PASSWORD"
+	case login == "":
+		return "login is not available; pass -login or set ENCX_LOGIN"
+	case cfg.password == "":
+		return "password is not available; pass -password or set ENCX_PASSWORD"
+	default:
+		return ""
+	}
 }
 
 func tryAntiSpamReLogin(ctx context.Context, cfg *config, client *encx.Client, challengeURL string) bool {

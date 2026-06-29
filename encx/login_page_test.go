@@ -12,6 +12,8 @@ import (
 func TestParseLoginPageForm(t *testing.T) {
 	page := "https://tech.en.cx/Login.aspx?return=%2fhome%2f"
 	html := []byte(`<form id="formMain" method="post" action="/Login.aspx?return=%2fhome%2f">
+	<input type="hidden" name="__VIEWSTATE" value="state&amp;1"/>
+	<input type="hidden" name="__EVENTVALIDATION" value="event"/>
 	<input name="Login" type="text"/>
 	<input name="Password" type="password"/>
 	<select name="ddlNetwork"><option value="1" selected="selected">Encounter</option></select>
@@ -25,6 +27,12 @@ func TestParseLoginPageForm(t *testing.T) {
 	}
 	if form.Network != "1" {
 		t.Fatalf("network: %s", form.Network)
+	}
+	if got := form.Hidden.Get("__VIEWSTATE"); got != "state&1" {
+		t.Fatalf("__VIEWSTATE: %q", got)
+	}
+	if got := form.Hidden.Get("__EVENTVALIDATION"); got != "event" {
+		t.Fatalf("__EVENTVALIDATION: %q", got)
 	}
 }
 
@@ -94,5 +102,59 @@ func TestLoginViaLoginPageSuccess(t *testing.T) {
 	err := client.LoginViaLoginPage(context.Background(), "http://"+host+"/Login.aspx?return=%2fhome%2f", "user", "pass")
 	if err != nil {
 		t.Fatalf("LoginViaLoginPage: %v", err)
+	}
+}
+
+func TestLoginViaLoginPageKeepsHiddenFields(t *testing.T) {
+	var posted string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/Login.aspx":
+			_, _ = fmt.Fprintf(w, `<form id="formMain" method="post" action="/Login.aspx?return=%%2f">
+				<input type="hidden" name="__VIEWSTATE" value="state">
+				<input type="hidden" name="__EVENTVALIDATION" value="event">
+				<input name="Login"/><input name="Password"/></form>`)
+		case r.Method == http.MethodPost && r.URL.Path == "/Login.aspx":
+			posted = r.URL.RawQuery + " " + r.FormValue("__VIEWSTATE") + " " + r.FormValue("__EVENTVALIDATION")
+			http.Redirect(w, r, "/", http.StatusFound)
+		case r.Method == http.MethodGet && r.URL.Path == "/":
+			w.WriteHeader(http.StatusOK)
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer srv.Close()
+
+	host := srv.Listener.Addr().String()
+	client := New(host, WithHTTP())
+	if err := client.LoginViaLoginPage(context.Background(), "http://"+host+"/Login.aspx?return=%2f", "user", "pass"); err != nil {
+		t.Fatalf("LoginViaLoginPage: %v", err)
+	}
+	if !strings.Contains(posted, "state event") {
+		t.Fatalf("hidden fields were not posted: %q", posted)
+	}
+}
+
+func TestLoginViaLoginPageReportsAntiSpamRedirect(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/Login.aspx":
+			_, _ = fmt.Fprintf(w, `<form id="formMain" method="post" action="/Login.aspx?return=%%2f">
+				<input name="Login"/><input name="Password"/></form>`)
+		case r.Method == http.MethodPost && r.URL.Path == "/Login.aspx":
+			http.Redirect(w, r, "/NotHumanRequest.aspx?return=%2f", http.StatusFound)
+		case r.Method == http.MethodGet && r.URL.Path == "/NotHumanRequest.aspx":
+			_, _ = w.Write([]byte(`<html><body>Anti-spam</body></html>`))
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer srv.Close()
+
+	host := srv.Listener.Addr().String()
+	client := New(host, WithHTTP())
+	err := client.LoginViaLoginPage(context.Background(), "http://"+host+"/Login.aspx?return=%2f", "user", "pass")
+	if !IsAntiSpam(err) {
+		t.Fatalf("expected anti-spam error, got %v", err)
 	}
 }
