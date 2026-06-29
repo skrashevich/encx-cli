@@ -451,14 +451,16 @@ func scenarioHintKeys(src scenario.Level) []string {
 func scenarioBonusToAdminBonus(src scenario.Bonus, levelID int) (encx.AdminBonus, bool) {
 	name := strings.TrimSpace(src.Name)
 	task := strings.TrimSpace(src.Task)
+	hint := strings.TrimSpace(src.Hint)
 	answers := dedupeKeepOrder(src.Answers)
-	if name == "" && task == "" && len(answers) == 0 {
+	if name == "" && task == "" && hint == "" && len(answers) == 0 {
 		return encx.AdminBonus{}, false
 	}
 	h, m, s := splitSeconds(src.AwardSeconds)
 	return encx.AdminBonus{
 		Name:         name,
 		Task:         task,
+		Hint:         hint,
 		LevelID:      levelID,
 		Answers:      answers,
 		AwardHours:   h,
