@@ -32,15 +32,23 @@ type Bonus struct {
 	Answers      []string `json:"answers,omitempty"`
 }
 
+// Sector is a parsed answer sector from a GameScenario export.
+type Sector struct {
+	Name    string   `json:"name,omitempty"`
+	Answers []string `json:"answers,omitempty"`
+}
+
 // Level is one level block from a GameScenario export.
 type Level struct {
 	Number                int        `json:"number"`
 	Name                  string     `json:"name"`
 	AutopassSecond        int        `json:"autopass_seconds,omitempty"`
 	AutopassPenaltySecond int        `json:"autopass_penalty_seconds,omitempty"`
+	RequiredSectorsCount  int        `json:"required_sectors_count,omitempty"`
 	Comment               string     `json:"comment,omitempty"`
 	Tasks                 []string   `json:"tasks,omitempty"`
 	Hints                 []Hint     `json:"hints,omitempty"`
+	Sectors               []Sector   `json:"sectors,omitempty"`
 	SectorAnswers         [][]string `json:"sector_answers,omitempty"`
 	Bonuses               []Bonus    `json:"bonuses,omitempty"`
 }
@@ -69,6 +77,8 @@ var (
 	autopassRe         = regexp.MustCompile(`(?is)Автопереход:\s*через\s*([^<]+)`)
 	taskRe             = regexp.MustCompile(`(?is)<span[^>]*id="LevelsScenarioRepeater_ctl\d+_LevelTasksRepeater_ctl\d+_lblLevelTask"[^>]*>(.*?)</span>`)
 	hintPairRe         = regexp.MustCompile(`(?is)<span[^>]*id="LevelsScenarioRepeater_ctl\d+_LevelHelpsRepeater_ctl\d+_lblLevelHelpTitle"[^>]*>(.*?)</span>\s*<br\s*/?>\s*<span[^>]*id="LevelsScenarioRepeater_ctl\d+_LevelHelpsRepeater_ctl\d+_lblLevelHelp"[^>]*>(.*?)</span>`)
+	requiredSectorsRe  = regexp.MustCompile(`(?is)для\s+прохождения\s+задания\s+необходимо\s+выполнить\s+(все|\d+)\s+сектор`)
+	sectorNameRe       = regexp.MustCompile(`(?is)<div[^>]*id="LevelsScenarioRepeater_ctl\d+_SectorsRepeater_ctl(\d+)_divSectorName"[^>]*>(.*?)</div>`)
 	answerRe           = regexp.MustCompile(`(?is)<span[^>]*id="LevelsScenarioRepeater_ctl\d+_SectorsRepeater_ctl(\d+)_LevelAnswersRepeater_ctl\d+_lblLevelAnswer"[^>]*>(.*?)</span>\s*-\s*<span[^>]*id="LevelsScenarioRepeater_ctl\d+_SectorsRepeater_ctl\d+_LevelAnswersRepeater_ctl\d+_lblAnswerFor"`)
 	commentRe          = regexp.MustCompile(`(?is)<span[^>]*id="LevelsScenarioRepeater_ctl\d+_lblLevelComment"[^>]*>(.*?)</span>`)
 	bonusHeaderRe      = regexp.MustCompile(`(?is)<span[^>]*id="LevelsScenarioRepeater_ctl\d+_LevelBonusesRepeater_ctl\d+_lblBonusNum"[^>]*>(.*?)</span>`)
@@ -232,6 +242,12 @@ func parseLevelBlock(block string, state *assetRewriteState) (Level, bool) {
 		level.AutopassSecond, level.AutopassPenaltySecond = parseAutopassParts(m[1])
 	}
 
+	if m := requiredSectorsRe.FindStringSubmatch(block); len(m) >= 2 {
+		if !strings.EqualFold(strings.TrimSpace(m[1]), "все") {
+			level.RequiredSectorsCount, _ = strconv.Atoi(strings.TrimSpace(m[1]))
+		}
+	}
+
 	if m := commentRe.FindStringSubmatch(block); len(m) >= 2 {
 		level.Comment = normalizeHTMLFragment(m[1], state)
 	}
@@ -262,6 +278,20 @@ func parseLevelBlock(block string, state *assetRewriteState) (Level, bool) {
 		})
 	}
 
+	sectorNames := map[int]string{}
+	for _, nameMatch := range sectorNameRe.FindAllStringSubmatch(block, -1) {
+		if len(nameMatch) < 3 {
+			continue
+		}
+		sectorIdx, err := strconv.Atoi(nameMatch[1])
+		if err != nil {
+			continue
+		}
+		if name := cleanInlineText(nameMatch[2]); name != "" {
+			sectorNames[sectorIdx] = name
+		}
+	}
+
 	answersBySector := map[int][]string{}
 	for _, answerMatch := range answerRe.FindAllStringSubmatch(block, -1) {
 		if len(answerMatch) < 3 {
@@ -277,15 +307,28 @@ func parseLevelBlock(block string, state *assetRewriteState) (Level, bool) {
 		}
 		answersBySector[sectorIdx] = append(answersBySector[sectorIdx], answer)
 	}
-	if len(answersBySector) > 0 {
-		keys := make([]int, 0, len(answersBySector))
+	if len(answersBySector) > 0 || len(sectorNames) > 0 {
+		keySet := map[int]struct{}{}
 		for key := range answersBySector {
+			keySet[key] = struct{}{}
+		}
+		for key := range sectorNames {
+			keySet[key] = struct{}{}
+		}
+		keys := make([]int, 0, len(keySet))
+		for key := range keySet {
 			keys = append(keys, key)
 		}
 		sort.Ints(keys)
 		level.SectorAnswers = make([][]string, 0, len(keys))
+		level.Sectors = make([]Sector, 0, len(keys))
 		for _, key := range keys {
-			level.SectorAnswers = append(level.SectorAnswers, dedupeKeepOrder(answersBySector[key]))
+			answers := dedupeKeepOrder(answersBySector[key])
+			level.SectorAnswers = append(level.SectorAnswers, answers)
+			level.Sectors = append(level.Sectors, Sector{
+				Name:    sectorNames[key],
+				Answers: answers,
+			})
 		}
 	}
 

@@ -112,8 +112,29 @@ func (c *Client) AdminGetLevelSettings(ctx context.Context, gameId, levelNum int
 	if checked["rbApplyForPlayer"] {
 		s.ApplyForPlayer = 1
 	}
+	s.RequiredSectorsCount = parseRequiredSectorsCount(body, inputs)
 
 	return s, nil
+}
+
+func parseRequiredSectorsCount(body string, inputs map[string]string) int {
+	if checked := parseCheckedInputs(body); checked["rbCompleteCustom"] {
+		count, _ := strconv.Atoi(inputs["txtRequiredSectorsCount"])
+		return count
+	}
+	linkRe := regexp.MustCompile(`(?is)id="lnkSectorsSettings"[^>]*>(.*?)</a>`)
+	if m := linkRe.FindStringSubmatch(body); len(m) >= 2 {
+		text := strings.ToLower(html.UnescapeString(stripTags(m[1])))
+		if strings.Contains(text, "complete all") || strings.Contains(text, "все") {
+			return 0
+		}
+		numRe := regexp.MustCompile(`\d+`)
+		if n := numRe.FindString(text); n != "" {
+			count, _ := strconv.Atoi(n)
+			return count
+		}
+	}
+	return 0
 }
 
 // parseAutopassText extracts autopass time from the lnkAdjustAutopass link text.

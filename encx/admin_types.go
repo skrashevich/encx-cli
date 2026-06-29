@@ -28,6 +28,9 @@ type AdminLevelSettings struct {
 
 	// Apply for: 0=team, 1=player
 	ApplyForPlayer int `json:"apply_for_player"`
+
+	// Sectors completion: 0 means complete all sectors.
+	RequiredSectorsCount int `json:"required_sectors_count,omitempty"`
 }
 
 // AdminBonus holds the data for creating/editing a bonus in the admin panel.
