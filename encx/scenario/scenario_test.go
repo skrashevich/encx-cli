@@ -26,6 +26,8 @@ func TestParseFile(t *testing.T) {
   <span id="LevelsScenarioRepeater_ctl00_LevelTasksRepeater_ctl00_lblLevelTask">Текст<br><img src="./scenario_files/pic.png"></span>
   <span id="LevelsScenarioRepeater_ctl00_LevelHelpsRepeater_ctl00_lblLevelHelpTitle">Подсказка №1 для всех (1 час 5 минут)</span><br>
   <span id="LevelsScenarioRepeater_ctl00_LevelHelpsRepeater_ctl00_lblLevelHelp">Текст подсказки</span>
+  <div class="Text5">(для прохождения задания необходимо выполнить 1 сектор)</div>
+  <div id="LevelsScenarioRepeater_ctl00_SectorsRepeater_ctl00_divSectorName">Червы</div>
   <span id="LevelsScenarioRepeater_ctl00_SectorsRepeater_ctl00_LevelAnswersRepeater_ctl00_lblLevelAnswer"><span class="nonLatinChar">код1</span>66</span> - <span id="LevelsScenarioRepeater_ctl00_SectorsRepeater_ctl00_LevelAnswersRepeater_ctl00_lblAnswerFor">для всех</span>
   <span id="LevelsScenarioRepeater_ctl00_SectorsRepeater_ctl00_LevelAnswersRepeater_ctl01_lblLevelAnswer">код2</span> - <span id="LevelsScenarioRepeater_ctl00_SectorsRepeater_ctl00_LevelAnswersRepeater_ctl01_lblAnswerFor">для всех</span>
 </div>
@@ -61,6 +63,12 @@ func TestParseFile(t *testing.T) {
 	}
 	if len(l1.SectorAnswers) != 1 || len(l1.SectorAnswers[0]) != 2 {
 		t.Fatalf("unexpected sector answers: %+v", l1.SectorAnswers)
+	}
+	if l1.RequiredSectorsCount != 1 {
+		t.Fatalf("required sectors = %d, want 1", l1.RequiredSectorsCount)
+	}
+	if len(l1.Sectors) != 1 || l1.Sectors[0].Name != "Червы" || len(l1.Sectors[0].Answers) != 2 {
+		t.Fatalf("unexpected sectors: %+v", l1.Sectors)
 	}
 	if l1.SectorAnswers[0][0] != "код166" {
 		t.Fatalf("expected first code to preserve suffix, got %q", l1.SectorAnswers[0][0])

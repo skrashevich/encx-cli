@@ -22,17 +22,18 @@ type importScenarioOptions struct {
 }
 
 type importSyncStats struct {
-	LevelsCreated   int `json:"levels_created"`
-	NamesUpdated    int `json:"names_updated"`
-	AutopassUpdated int `json:"autopass_updated"`
-	TasksDeleted    int `json:"tasks_deleted,omitempty"`
-	TasksCreated    int `json:"tasks_created"`
-	HintsDeleted    int `json:"hints_deleted,omitempty"`
-	HintsCreated    int `json:"hints_created"`
-	BonusesDeleted  int `json:"bonuses_deleted,omitempty"`
-	BonusesCreated  int `json:"bonuses_created"`
-	SectorsDeleted  int `json:"sectors_deleted,omitempty"`
-	SectorsCreated  int `json:"sectors_created"`
+	LevelsCreated           int `json:"levels_created"`
+	NamesUpdated            int `json:"names_updated"`
+	AutopassUpdated         int `json:"autopass_updated"`
+	SectorCompletionUpdated int `json:"sector_completion_updated"`
+	TasksDeleted            int `json:"tasks_deleted,omitempty"`
+	TasksCreated            int `json:"tasks_created"`
+	HintsDeleted            int `json:"hints_deleted,omitempty"`
+	HintsCreated            int `json:"hints_created"`
+	BonusesDeleted          int `json:"bonuses_deleted,omitempty"`
+	BonusesCreated          int `json:"bonuses_created"`
+	SectorsDeleted          int `json:"sectors_deleted,omitempty"`
+	SectorsCreated          int `json:"sectors_created"`
 }
 
 var dataURIBlobRe = regexp.MustCompile(`(?i)data:([a-z0-9.+-]+/[a-z0-9.+-]+)?;base64,[a-z0-9+/=]+`)
@@ -282,16 +283,20 @@ func cmdImportScenario(ctx context.Context, cfg *config, client *encx.Client, ar
 			}
 		}
 
-		for sectorIdx, answers := range lvl.SectorAnswers {
-			if len(answers) == 0 {
+		for _, sector := range scenarioAdminSectors(lvl) {
+			if len(sector.Answers) == 0 {
 				continue
-			}
-			sector := encx.AdminSector{
-				Name:    fmt.Sprintf("Сектор %d", sectorIdx+1),
-				Answers: answers,
 			}
 			if err := createScenarioSector(ctx, client, cfg.gameId, levelNum, sector); err != nil {
 				fatal("Failed to create sector on level %d: %v", levelNum, err)
+			}
+		}
+		if lvl.RequiredSectorsCount > 0 {
+			err := runWithAntiSpamRetry(fmt.Sprintf("set sector completion for level %d", levelNum), func() error {
+				return client.AdminUpdateSectorCompletion(ctx, cfg.gameId, levelNum, lvl.RequiredSectorsCount)
+			})
+			if err != nil {
+				fatal("Failed to set sector completion for level %d: %v", levelNum, err)
 			}
 		}
 
@@ -399,13 +404,14 @@ func scenarioLevelSettings(lvl scenario.Level) encx.AdminLevelSettings {
 	h, m, s := splitSeconds(lvl.AutopassSecond)
 	ph, pm, ps := splitSeconds(lvl.AutopassPenaltySecond)
 	return encx.AdminLevelSettings{
-		AutopassHours:   h,
-		AutopassMinutes: m,
-		AutopassSeconds: s,
-		TimeoutPenalty:  lvl.AutopassPenaltySecond > 0,
-		PenaltyHours:    ph,
-		PenaltyMinutes:  pm,
-		PenaltySeconds:  ps,
+		AutopassHours:        h,
+		AutopassMinutes:      m,
+		AutopassSeconds:      s,
+		TimeoutPenalty:       lvl.AutopassPenaltySecond > 0,
+		PenaltyHours:         ph,
+		PenaltyMinutes:       pm,
+		PenaltySeconds:       ps,
+		RequiredSectorsCount: lvl.RequiredSectorsCount,
 	}
 }
 
@@ -544,12 +550,30 @@ func answerSetsEqual(a, b []string) bool {
 	return true
 }
 
-func nonEmptyScenarioSectorGroups(scenarioGroups [][]string) [][]string {
-	var out [][]string
-	for _, group := range scenarioGroups {
+func scenarioAdminSectors(src scenario.Level) []encx.AdminSector {
+	if len(src.Sectors) > 0 {
+		out := make([]encx.AdminSector, 0, len(src.Sectors))
+		for i, sector := range src.Sectors {
+			answers := dedupeKeepOrder(sector.Answers)
+			if len(answers) == 0 {
+				continue
+			}
+			name := strings.TrimSpace(sector.Name)
+			if name == "" {
+				name = fmt.Sprintf("Сектор %d", i+1)
+			}
+			out = append(out, encx.AdminSector{Name: name, Answers: answers})
+		}
+		return out
+	}
+	out := make([]encx.AdminSector, 0, len(src.SectorAnswers))
+	for i, group := range src.SectorAnswers {
 		answers := dedupeKeepOrder(group)
 		if len(answers) > 0 {
-			out = append(out, answers)
+			out = append(out, encx.AdminSector{
+				Name:    fmt.Sprintf("Сектор %d", i+1),
+				Answers: answers,
+			})
 		}
 	}
 	return out
@@ -602,17 +626,20 @@ func gameSectorsWithAnswers(sectors []encx.AdminSector) []encx.AdminSector {
 	return out
 }
 
-func sectorGroupsMatch(scenarioGroups [][]string, gameSectors []encx.AdminSector) bool {
-	groups := nonEmptyScenarioSectorGroups(scenarioGroups)
+func sectorGroupsMatch(src scenario.Level, gameSectors []encx.AdminSector) bool {
+	want := scenarioAdminSectors(src)
 	gameSectors = gameSectorsWithAnswers(gameSectors)
 	if gameSectorsAnomalous(gameSectors) {
 		return false
 	}
-	if len(groups) != len(gameSectors) {
+	if len(want) != len(gameSectors) {
 		return false
 	}
-	for i, group := range groups {
-		if !answerSetsEqual(group, gameSectors[i].Answers) {
+	for i, expected := range want {
+		if !strings.EqualFold(strings.TrimSpace(expected.Name), strings.TrimSpace(gameSectors[i].Name)) {
+			return false
+		}
+		if !answerSetsEqual(expected.Answers, gameSectors[i].Answers) {
 			return false
 		}
 	}
@@ -811,8 +838,8 @@ func syncLevelSectorsToScenario(ctx context.Context, client *encx.Client, gameID
 	if err != nil {
 		return err
 	}
-	wantGroups := nonEmptyScenarioSectorGroups(src.SectorAnswers)
-	if sectorGroupsMatch(src.SectorAnswers, sectors) {
+	wantSectors := scenarioAdminSectors(src)
+	if sectorGroupsMatch(src, sectors) {
 		return nil
 	}
 
@@ -823,11 +850,7 @@ func syncLevelSectorsToScenario(ctx context.Context, client *encx.Client, gameID
 	}
 	stats.SectorsDeleted += len(sectors)
 
-	for i, answers := range wantGroups {
-		sector := encx.AdminSector{
-			Name:    fmt.Sprintf("Сектор %d", i+1),
-			Answers: answers,
-		}
+	for i, sector := range wantSectors {
 		if err := createScenarioSector(ctx, client, gameID, levelNum, sector); err != nil {
 			return fmt.Errorf("level %d: create sector %d: %w", levelNum, i+1, err)
 		}
@@ -842,7 +865,7 @@ func syncLevelSectorsToScenario(ctx context.Context, client *encx.Client, gameID
 	if err != nil {
 		return err
 	}
-	if !sectorGroupsMatch(src.SectorAnswers, sectors) {
+	if !sectorGroupsMatch(src, sectors) {
 		return fmt.Errorf("level %d: sectors still differ after sync: %s",
 			levelNum, formatAdminSectorsSummary(gameSectorsWithAnswers(sectors)))
 	}
@@ -1110,6 +1133,27 @@ func syncMissingScenario(ctx context.Context, cfg *config, client *encx.Client, 
 			}
 		}
 
+		if len(src.Sectors) > 0 || len(src.SectorAnswers) > 0 {
+			var curSettings *encx.AdminLevelSettings
+			err := runWithAntiSpamRetry(fmt.Sprintf("read level %d sector completion", levelNum), func() error {
+				var callErr error
+				curSettings, callErr = client.AdminGetLevelSettings(ctx, cfg.gameId, levelNum)
+				return callErr
+			})
+			if err != nil {
+				return stats, err
+			}
+			if curSettings == nil || curSettings.RequiredSectorsCount != src.RequiredSectorsCount {
+				err := runWithAntiSpamRetry(fmt.Sprintf("update level %d sector completion", levelNum), func() error {
+					return client.AdminUpdateSectorCompletion(ctx, cfg.gameId, levelNum, src.RequiredSectorsCount)
+				})
+				if err != nil {
+					return stats, err
+				}
+				stats.SectorCompletionUpdated++
+			}
+		}
+
 		if err := syncLevelTasksToScenario(ctx, client, cfg.gameId, levelNum, src, &stats); err != nil {
 			return stats, err
 		}
@@ -1226,9 +1270,12 @@ func printDryRunLevel(level scenario.Level) {
 	}
 	if len(level.SectorAnswers) > 0 {
 		fmt.Printf("Sectors (%d):\n", len(level.SectorAnswers))
-		for i, answers := range level.SectorAnswers {
-			fmt.Printf("  [Sector %d]\n", i+1)
-			for _, answer := range answers {
+		if level.RequiredSectorsCount > 0 {
+			fmt.Printf("  Required to pass: %d\n", level.RequiredSectorsCount)
+		}
+		for _, sector := range scenarioAdminSectors(level) {
+			fmt.Printf("  [%s]\n", sector.Name)
+			for _, answer := range sector.Answers {
 				fmt.Printf("    - %s\n", answer)
 			}
 		}

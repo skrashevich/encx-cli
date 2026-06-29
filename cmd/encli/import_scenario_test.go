@@ -33,6 +33,7 @@ func TestParseScenarioFile(t *testing.T) {
   <span id="LevelsScenarioRepeater_ctl00_LevelTasksRepeater_ctl00_lblLevelTask">Текст<br><img src="./scenario_files/pic.png"></span>
   <span id="LevelsScenarioRepeater_ctl00_LevelHelpsRepeater_ctl00_lblLevelHelpTitle">Подсказка №1 для всех (1 час 5 минут)</span><br/>
   <span id="LevelsScenarioRepeater_ctl00_LevelHelpsRepeater_ctl00_lblLevelHelp">Текст подсказки</span>
+  <div id="LevelsScenarioRepeater_ctl00_SectorsRepeater_ctl00_divSectorName">Червы</div>
   <span id="LevelsScenarioRepeater_ctl00_SectorsRepeater_ctl00_LevelAnswersRepeater_ctl00_lblLevelAnswer"><span class="nonLatinChar">код1</span>66</span> - <span id="LevelsScenarioRepeater_ctl00_SectorsRepeater_ctl00_LevelAnswersRepeater_ctl00_lblAnswerFor">для всех</span>
   <span id="LevelsScenarioRepeater_ctl00_SectorsRepeater_ctl00_LevelAnswersRepeater_ctl01_lblLevelAnswer">код2</span> - <span id="LevelsScenarioRepeater_ctl00_SectorsRepeater_ctl00_LevelAnswersRepeater_ctl01_lblAnswerFor">для всех</span>
   <span id="LevelsScenarioRepeater_ctl00_lblLevelComment">Комментарий<br><img src="./scenario_files/pic.png"></span>
@@ -80,6 +81,9 @@ func TestParseScenarioFile(t *testing.T) {
 	}
 	if len(l1.SectorAnswers) != 1 || len(l1.SectorAnswers[0]) != 2 {
 		t.Fatalf("unexpected sector answers: %+v", l1.SectorAnswers)
+	}
+	if len(l1.Sectors) != 1 || l1.Sectors[0].Name != "Червы" || len(l1.Sectors[0].Answers) != 2 {
+		t.Fatalf("unexpected sectors: %+v", l1.Sectors)
 	}
 	if len(l1.Bonuses) != 1 || !l1.Bonuses[0].Negative || l1.Bonuses[0].AwardSeconds != 120 {
 		t.Fatalf("unexpected negative bonus parse: %+v", l1.Bonuses)
@@ -321,22 +325,29 @@ func TestRedactBinaryPayloads(t *testing.T) {
 }
 
 func TestSectorGroupsMatch(t *testing.T) {
-	scenario := [][]string{{"поехалистрадать66"}, {"другойкод"}}
+	scenarioLevel := scenario.Level{Sectors: []scenario.Sector{
+		{Name: "Сектор 1", Answers: []string{"поехалистрадать66"}},
+		{Name: "Сектор 2", Answers: []string{"другойкод"}},
+	}}
 	game := []encx.AdminSector{
-		{Answers: []string{"поехалистрадать"}},
-		{Answers: []string{"другойкод"}},
+		{Name: "Сектор 1", Answers: []string{"поехалистрадать"}},
+		{Name: "Сектор 2", Answers: []string{"другойкод"}},
 	}
-	if sectorGroupsMatch(scenario, game) {
+	if sectorGroupsMatch(scenarioLevel, game) {
 		t.Fatal("truncated answer must not match scenario")
 	}
 	game[0].Answers = []string{"поехалистрадать66"}
-	if !sectorGroupsMatch(scenario, game) {
+	if !sectorGroupsMatch(scenarioLevel, game) {
 		t.Fatal("expected match when sector answers equal scenario")
+	}
+	game[0].Name = "Другое имя"
+	if sectorGroupsMatch(scenarioLevel, game) {
+		t.Fatal("sector name mismatch must not match scenario")
 	}
 }
 
 func TestSectorGroupsMatchRejectsCombinedOrExtraAnswers(t *testing.T) {
-	want := [][]string{{"alpha", "beta"}}
+	want := scenario.Level{Sectors: []scenario.Sector{{Name: "Сектор 1", Answers: []string{"alpha", "beta"}}}}
 	if sectorGroupsMatch(want, []encx.AdminSector{{ID: 1, Answers: []string{"alpha beta"}}}) {
 		t.Fatal("combined answer must not satisfy strict scenario sync")
 	}
@@ -346,13 +357,13 @@ func TestSectorGroupsMatchRejectsCombinedOrExtraAnswers(t *testing.T) {
 }
 
 func TestSectorGroupsMatchIgnoresEmptyStartedSectors(t *testing.T) {
-	scenario := [][]string{{"поехалистрадать66"}}
+	scenarioLevel := scenario.Level{Sectors: []scenario.Sector{{Name: "Сектор 1 (import missing)", Answers: []string{"поехалистрадать66"}}}}
 	game := []encx.AdminSector{
 		{ID: 3486043, Name: "Сектор 1"},
 		{ID: 3486323, Name: "Сектор 1 (import missing)", Answers: []string{"поехалистрадать66"}},
 		{ID: 3486975, Name: "Сектор 3486043"},
 	}
-	if !sectorGroupsMatch(scenario, game) {
+	if !sectorGroupsMatch(scenarioLevel, game) {
 		t.Fatal("empty sectors left by started teams must not count as scenario answers")
 	}
 }
@@ -365,8 +376,8 @@ func TestGameSectorsAnomalous(t *testing.T) {
 	if !gameSectorsAnomalous(game) {
 		t.Fatal("duplicate sector names must be anomalous")
 	}
-	scenario := [][]string{{"поехалистрадать66"}}
-	if sectorGroupsMatch(scenario, game) {
+	scenarioLevel := scenario.Level{Sectors: []scenario.Sector{{Name: "Сектор 1", Answers: []string{"поехалистрадать66"}}}}
+	if sectorGroupsMatch(scenarioLevel, game) {
 		t.Fatal("anomalous game sectors must not match scenario")
 	}
 }

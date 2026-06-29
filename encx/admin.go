@@ -324,6 +324,31 @@ func (c *Client) AdminUpdateAnswerBlock(ctx context.Context, gameId, levelNum in
 	return nil
 }
 
+// AdminUpdateSectorCompletion updates how many sectors are required to pass a level.
+// requiredCount <= 0 means all sectors are required.
+func (c *Client) AdminUpdateSectorCompletion(ctx context.Context, gameId, levelNum, requiredCount int) error {
+	u := fmt.Sprintf("%s/Administration/Games/LevelEditor.aspx?gid=%d&level=%d", c.baseURL(), gameId, levelNum)
+
+	form := url.Values{}
+	form.Set("action", "upsecsett")
+	if requiredCount > 0 {
+		form.Set("rbSectorCompleteType", "2")
+		form.Set("txtRequiredSectorsCount", strconv.Itoa(requiredCount))
+	} else {
+		form.Set("rbSectorCompleteType", "1")
+		form.Set("txtRequiredSectorsCount", "0")
+	}
+	form.Set("pnlSettings_SectorsCompletionSettings_ctl00_btnSave.x", "1")
+	form.Set("pnlSettings_SectorsCompletionSettings_ctl00_btnSave.y", "1")
+
+	_, err := c.doPost(ctx, u, form)
+	if err != nil {
+		return fmt.Errorf("encx: admin update sector completion: %w", err)
+	}
+	c.adminDelay()
+	return nil
+}
+
 // --- Bonus Management ---
 
 // AdminCreateBonus creates a new bonus on the specified level.
