@@ -248,7 +248,6 @@ func (c *Client) AdminCreateLevels(ctx context.Context, gameId, count int) error
 	if err != nil {
 		return fmt.Errorf("encx: admin create levels: %w", err)
 	}
-	c.adminDelay()
 	return nil
 }
 
@@ -260,7 +259,6 @@ func (c *Client) AdminDeleteLevel(ctx context.Context, gameId, levelNum int) err
 	if err != nil {
 		return fmt.Errorf("encx: admin delete level: %w", err)
 	}
-	c.adminDelay()
 	return nil
 }
 
@@ -396,7 +394,6 @@ func (c *Client) AdminDeleteBonus(ctx context.Context, gameId, levelNum, bonusId
 	if err != nil {
 		return fmt.Errorf("encx: admin delete bonus: %w", err)
 	}
-	c.adminDelay()
 	return nil
 }
 
@@ -583,6 +580,10 @@ func (c *Client) AdminCreateHint(ctx context.Context, gameId, levelNum int, h Ad
 	form.Set("NewPromptTimeoutMinutes", strconv.Itoa(h.Minutes))
 	form.Set("NewPromptTimeoutSeconds", strconv.Itoa(h.Seconds))
 
+	if h.ReplaceNl {
+		form.Set("chkReplaceNlToBr", "on")
+	}
+
 	if h.PenaltyHours > 0 || h.PenaltyMinutes > 0 || h.PenaltySeconds > 0 {
 		form.Set("PenaltyPromptHours", strconv.Itoa(h.PenaltyHours))
 		form.Set("PenaltyPromptMinutes", strconv.Itoa(h.PenaltyMinutes))
@@ -617,7 +618,6 @@ func (c *Client) AdminDeleteHint(ctx context.Context, gameId, levelNum, hintId i
 	if err != nil {
 		return fmt.Errorf("encx: admin delete hint: %w", err)
 	}
-	c.adminDelay()
 	return nil
 }
 
@@ -946,7 +946,6 @@ func (c *Client) AdminDeleteTask(ctx context.Context, gameId, levelNum, taskId i
 	if err != nil {
 		return fmt.Errorf("encx: admin delete task: %w", err)
 	}
-	c.adminDelay()
 	return nil
 }
 
@@ -1050,6 +1049,10 @@ func (c *Client) AdminUpdateHint(ctx context.Context, gameId, levelNum, hintId i
 	form.Set("NewPromptTimeoutHours", strconv.Itoa(h.Hours))
 	form.Set("NewPromptTimeoutMinutes", strconv.Itoa(h.Minutes))
 	form.Set("NewPromptTimeoutSeconds", strconv.Itoa(h.Seconds))
+
+	if h.ReplaceNl {
+		form.Set("chkReplaceNlToBr", "on")
+	}
 
 	if h.PenaltyHours > 0 || h.PenaltyMinutes > 0 || h.PenaltySeconds > 0 {
 		form.Set("PenaltyPromptHours", strconv.Itoa(h.PenaltyHours))

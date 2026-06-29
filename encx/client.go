@@ -33,6 +33,7 @@ type Client struct {
 }
 
 const defaultAdminDelay = 1200 * time.Millisecond
+const defaultAdminGETDelay = 200 * time.Millisecond
 
 // Option configures the Client.
 type Option func(*Client)
@@ -91,8 +92,8 @@ func WithHARRecording(enabled bool) Option {
 	}
 }
 
-// WithAdminDelay sets the pause between admin panel requests (default 1200ms).
-// Pass 0 to disable throttling (e.g. httptest).
+// WithAdminDelay sets the pause between admin panel POST requests.
+// Pass 0 to disable admin throttling (e.g. httptest).
 func WithAdminDelay(d time.Duration) Option {
 	return func(c *Client) {
 		c.adminDelayDuration = d
@@ -100,18 +101,26 @@ func WithAdminDelay(d time.Duration) Option {
 	}
 }
 
-// SetAdminDelay overrides the pause between admin panel requests at runtime.
+// SetAdminDelay overrides the pause between admin panel POST requests at runtime.
 func (c *Client) SetAdminDelay(d time.Duration) {
 	c.adminDelayDuration = d
 	c.adminDelayConfigured = true
 }
 
-// AdminDelay returns the configured pause between admin panel requests.
+// AdminDelay returns the configured pause between admin panel POST requests.
 func (c *Client) AdminDelay() time.Duration {
 	if c.adminDelayConfigured {
 		return c.adminDelayDuration
 	}
 	return defaultAdminDelay
+}
+
+// AdminGETDelay returns the pause between admin panel GET requests.
+func (c *Client) AdminGETDelay() time.Duration {
+	if c.adminDelayConfigured && c.adminDelayDuration == 0 {
+		return 0
+	}
+	return defaultAdminGETDelay
 }
 
 // WithAntiSpamHandler sets a callback used when Encounter anti-spam challenge is detected.
@@ -328,6 +337,7 @@ func (c *Client) doRequestAndRead(req *http.Request) (int, http.Header, []byte, 
 		_ = resp.Body.Close()
 
 		if readErr == nil {
+			c.adminGETDelay(attemptReq)
 			if err := guardHTTPLoginRedirect(statusCode, headers, body); err != nil {
 				return statusCode, headers, body, err
 			}
@@ -341,4 +351,23 @@ func (c *Client) doRequestAndRead(req *http.Request) (int, http.Header, []byte, 
 		}
 		return statusCode, headers, nil, readErr
 	}
+}
+
+func (c *Client) adminGETDelay(req *http.Request) {
+	if req.Method != http.MethodGet || !isAdminGETDelayURL(req.URL) {
+		return
+	}
+	if d := c.AdminGETDelay(); d > 0 {
+		time.Sleep(d)
+	}
+}
+
+func isAdminGETDelayURL(u *url.URL) bool {
+	if u == nil {
+		return false
+	}
+	path := strings.ToLower(u.EscapedPath())
+	return strings.Contains(path, "/administration/") ||
+		strings.HasSuffix(path, "/aloader/levelinfo.aspx") ||
+		strings.HasSuffix(path, "/gamebonuspenaltytime.aspx")
 }

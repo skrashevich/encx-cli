@@ -86,11 +86,15 @@ func cmdImportScenario(ctx context.Context, cfg *config, client *encx.Client, ar
 	totalHints := 0
 	totalBonuses := 0
 	totalSectors := 0
+	totalComments := 0
 	for _, lvl := range scenarioDoc.Levels {
 		totalTasks += len(lvl.Tasks)
 		totalHints += len(lvl.Hints)
 		totalBonuses += len(lvl.Bonuses)
 		totalSectors += len(lvl.SectorAnswers)
+		if strings.TrimSpace(lvl.Comment) != "" {
+			totalComments++
+		}
 	}
 
 	if opts.DryRun {
@@ -107,6 +111,7 @@ func cmdImportScenario(ctx context.Context, cfg *config, client *encx.Client, ar
 				"hints":           totalHints,
 				"bonuses":         totalBonuses,
 				"sectors":         totalSectors,
+				"comments":        totalComments,
 				"embedded_assets": scenarioDoc.EmbeddedAssets,
 				"missing_assets":  scenarioDoc.MissingAssets,
 				"scenario":        redactedLevels,
@@ -117,7 +122,7 @@ func cmdImportScenario(ctx context.Context, cfg *config, client *encx.Client, ar
 		if opts.SyncMissing {
 			action = "sync"
 		}
-		fmt.Printf("Dry-run: would %s game %d with %d level(s), %d task(s), %d hint(s), %d bonus(es), %d sector(s)\n", action, cfg.gameId, len(scenarioDoc.Levels), totalTasks, totalHints, totalBonuses, totalSectors)
+		fmt.Printf("Dry-run: would %s game %d with %d level(s), %d task(s), %d hint(s), %d bonus(es), %d sector(s), %d comment(s)\n", action, cfg.gameId, len(scenarioDoc.Levels), totalTasks, totalHints, totalBonuses, totalSectors, totalComments)
 		fmt.Printf("Source: %s\n", scenarioDoc.SourcePath)
 		fmt.Printf("Embedded assets: %d\n", scenarioDoc.EmbeddedAssets)
 		if len(scenarioDoc.MissingAssets) > 0 {
@@ -204,19 +209,14 @@ func cmdImportScenario(ctx context.Context, cfg *config, client *encx.Client, ar
 		levelName := importLevelName(levelNum, lvl.Name)
 
 		err := runWithAntiSpamRetry(fmt.Sprintf("set name for level %d", levelNum), func() error {
-			return client.AdminUpdateComment(ctx, cfg.gameId, levelNum, levelName, "")
+			return client.AdminUpdateComment(ctx, cfg.gameId, levelNum, levelName, strings.TrimSpace(lvl.Comment))
 		})
 		if err != nil {
 			fatal("Failed to set name for level %d: %v", levelNum, err)
 		}
 
 		if lvl.AutopassSecond > 0 {
-			h, m, s := splitSeconds(lvl.AutopassSecond)
-			settings := encx.AdminLevelSettings{
-				AutopassHours:   h,
-				AutopassMinutes: m,
-				AutopassSeconds: s,
-			}
+			settings := scenarioLevelSettings(lvl)
 			err := runWithAntiSpamRetry(fmt.Sprintf("set autopass for level %d", levelNum), func() error {
 				return client.AdminUpdateAutopass(ctx, cfg.gameId, levelNum, settings)
 			})
@@ -249,10 +249,11 @@ func cmdImportScenario(ctx context.Context, cfg *config, client *encx.Client, ar
 			}
 			h, m, s := splitSeconds(hint.DelaySeconds)
 			payload := encx.AdminHint{
-				Text:    hintText,
-				Hours:   h,
-				Minutes: m,
-				Seconds: s,
+				Text:      hintText,
+				ReplaceNl: !strings.Contains(hintText, "<"),
+				Hours:     h,
+				Minutes:   m,
+				Seconds:   s,
 			}
 			err := runWithAntiSpamRetry(fmt.Sprintf("create hint on level %d", levelNum), func() error {
 				return client.AdminCreateHint(ctx, cfg.gameId, levelNum, payload)
@@ -307,13 +308,14 @@ func cmdImportScenario(ctx context.Context, cfg *config, client *encx.Client, ar
 			"hints":           totalHints,
 			"bonuses":         totalBonuses,
 			"sectors":         totalSectors,
+			"comments":        totalComments,
 			"embedded_assets": scenarioDoc.EmbeddedAssets,
 			"missing_assets":  scenarioDoc.MissingAssets,
 		})
 		return
 	}
 
-	fmt.Printf("Scenario imported: %d levels, %d tasks, %d hints, %d bonuses, %d sectors\n", len(scenarioDoc.Levels), totalTasks, totalHints, totalBonuses, totalSectors)
+	fmt.Printf("Scenario imported: %d levels, %d tasks, %d hints, %d bonuses, %d sectors, %d comments\n", len(scenarioDoc.Levels), totalTasks, totalHints, totalBonuses, totalSectors, totalComments)
 }
 
 func importScenarioNeedsAdmin(cfg *config, args []string) bool {
@@ -393,6 +395,20 @@ func splitSeconds(total int) (h, m, s int) {
 	return
 }
 
+func scenarioLevelSettings(lvl scenario.Level) encx.AdminLevelSettings {
+	h, m, s := splitSeconds(lvl.AutopassSecond)
+	ph, pm, ps := splitSeconds(lvl.AutopassPenaltySecond)
+	return encx.AdminLevelSettings{
+		AutopassHours:   h,
+		AutopassMinutes: m,
+		AutopassSeconds: s,
+		TimeoutPenalty:  lvl.AutopassPenaltySecond > 0,
+		PenaltyHours:    ph,
+		PenaltyMinutes:  pm,
+		PenaltySeconds:  ps,
+	}
+}
+
 func splitIntoBatches(total, maxBatch int) []int {
 	if total <= 0 || maxBatch <= 0 {
 		return nil
@@ -466,6 +482,7 @@ func scenarioBonusToAdminBonus(src scenario.Bonus, levelID int) (encx.AdminBonus
 		AwardHours:   h,
 		AwardMinutes: m,
 		AwardSeconds: s,
+		Negative:     src.Negative,
 	}, true
 }
 
@@ -714,7 +731,7 @@ func syncLevelHintsToScenario(ctx context.Context, client *encx.Client, gameID, 
 			continue
 		}
 		h, m, s := splitSeconds(srcHint.DelaySeconds)
-		payload := encx.AdminHint{Text: text, Hours: h, Minutes: m, Seconds: s}
+		payload := encx.AdminHint{Text: text, ReplaceNl: !strings.Contains(text, "<"), Hours: h, Minutes: m, Seconds: s}
 		err := runWithAntiSpamRetry(fmt.Sprintf("create hint on level %d", levelNum), func() error {
 			return client.AdminCreateHint(ctx, gameID, levelNum, payload)
 		})
@@ -1053,9 +1070,10 @@ func syncMissingScenario(ctx context.Context, cfg *config, client *encx.Client, 
 		if err != nil {
 			return stats, err
 		}
-		if strings.TrimSpace(curName) != levelName {
+		targetComment := strings.TrimSpace(src.Comment)
+		if strings.TrimSpace(curName) != levelName || strings.TrimSpace(curComment) != targetComment {
 			err := runWithAntiSpamRetry(fmt.Sprintf("update level %d name", levelNum), func() error {
-				return client.AdminUpdateComment(ctx, cfg.gameId, levelNum, levelName, curComment)
+				return client.AdminUpdateComment(ctx, cfg.gameId, levelNum, levelName, targetComment)
 			})
 			if err != nil {
 				return stats, err
@@ -1073,13 +1091,15 @@ func syncMissingScenario(ctx context.Context, cfg *config, client *encx.Client, 
 			if err != nil {
 				return stats, err
 			}
-			targetH, targetM, targetS := splitSeconds(src.AutopassSecond)
-			if curSettings == nil || curSettings.AutopassHours != targetH || curSettings.AutopassMinutes != targetM || curSettings.AutopassSeconds != targetS {
-				settings := encx.AdminLevelSettings{
-					AutopassHours:   targetH,
-					AutopassMinutes: targetM,
-					AutopassSeconds: targetS,
-				}
+			settings := scenarioLevelSettings(src)
+			if curSettings == nil ||
+				curSettings.AutopassHours != settings.AutopassHours ||
+				curSettings.AutopassMinutes != settings.AutopassMinutes ||
+				curSettings.AutopassSeconds != settings.AutopassSeconds ||
+				curSettings.TimeoutPenalty != settings.TimeoutPenalty ||
+				curSettings.PenaltyHours != settings.PenaltyHours ||
+				curSettings.PenaltyMinutes != settings.PenaltyMinutes ||
+				curSettings.PenaltySeconds != settings.PenaltySeconds {
 				err := runWithAntiSpamRetry(fmt.Sprintf("update level %d autopass", levelNum), func() error {
 					return client.AdminUpdateAutopass(ctx, cfg.gameId, levelNum, settings)
 				})
@@ -1124,6 +1144,7 @@ func redactScenarioBinaryPayloads(levels []scenario.Level) []scenario.Level {
 	out := make([]scenario.Level, len(levels))
 	for i, level := range levels {
 		out[i] = level
+		out[i].Comment = redactBinaryPayloads(level.Comment)
 		if len(level.Tasks) > 0 {
 			out[i].Tasks = make([]string, len(level.Tasks))
 			for j, task := range level.Tasks {
