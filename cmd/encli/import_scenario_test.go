@@ -29,12 +29,18 @@ func TestParseScenarioFile(t *testing.T) {
 <a id="LevelsScenarioRepeater_ctl00_lnkLevelAnchorPoint" name="1"></a>
 Уровень №1 "Бриф"
 <div class="scenarioBlock border_dark">
-  <div class="white bold">Автопереход: через 3 минуты<br><br></div>
+  <div class="white bold">Автопереход: через 3 минуты, штраф 15 секунд<br><br></div>
   <span id="LevelsScenarioRepeater_ctl00_LevelTasksRepeater_ctl00_lblLevelTask">Текст<br><img src="./scenario_files/pic.png"></span>
-  <span id="LevelsScenarioRepeater_ctl00_LevelHelpsRepeater_ctl00_lblLevelHelpTitle">Подсказка №1 для всех (1 час 5 минут)</span><br>
+  <span id="LevelsScenarioRepeater_ctl00_LevelHelpsRepeater_ctl00_lblLevelHelpTitle">Подсказка №1 для всех (1 час 5 минут)</span><br/>
   <span id="LevelsScenarioRepeater_ctl00_LevelHelpsRepeater_ctl00_lblLevelHelp">Текст подсказки</span>
   <span id="LevelsScenarioRepeater_ctl00_SectorsRepeater_ctl00_LevelAnswersRepeater_ctl00_lblLevelAnswer"><span class="nonLatinChar">код1</span>66</span> - <span id="LevelsScenarioRepeater_ctl00_SectorsRepeater_ctl00_LevelAnswersRepeater_ctl00_lblAnswerFor">для всех</span>
   <span id="LevelsScenarioRepeater_ctl00_SectorsRepeater_ctl00_LevelAnswersRepeater_ctl01_lblLevelAnswer">код2</span> - <span id="LevelsScenarioRepeater_ctl00_SectorsRepeater_ctl00_LevelAnswersRepeater_ctl01_lblAnswerFor">для всех</span>
+  <span id="LevelsScenarioRepeater_ctl00_lblLevelComment">Комментарий<br><img src="./scenario_files/pic.png"></span>
+  <span id="LevelsScenarioRepeater_ctl00_LevelBonusesRepeater_ctl00_lblBonusNum">Бонус №1 "Штрафной код" для всех</span>
+  <span>Штрафное время: 2 минуты</span>
+  <span class="green">Задание</span><br/><span class="white">Штрафное задание</span>
+  <span class="green">Подсказка</span><br/><span class="white">Штрафная подсказка</span>
+  <span id="LevelsScenarioRepeater_ctl00_LevelBonusesRepeater_ctl00_BonusAnswersRepeater_ctl00_lblBonusAnswer">минус1</span>
 </div>
 <a id="LevelsScenarioRepeater_ctl01_lnkLevelAnchorPoint" name="2"></a>
 Уровень №2 "Финиш"
@@ -63,11 +69,20 @@ func TestParseScenarioFile(t *testing.T) {
 	if l1.AutopassSecond != 180 {
 		t.Fatalf("expected autopass 180s, got %d", l1.AutopassSecond)
 	}
+	if l1.AutopassPenaltySecond != 15 {
+		t.Fatalf("expected autopass penalty 15s, got %d", l1.AutopassPenaltySecond)
+	}
 	if len(l1.Hints) != 1 || l1.Hints[0].DelaySeconds != 3900 {
 		t.Fatalf("unexpected hint parse: %+v", l1.Hints)
 	}
+	if l1.Comment == "" || !strings.Contains(l1.Comment, "Комментарий") || !strings.Contains(l1.Comment, "data:image/png;base64,") {
+		t.Fatalf("unexpected comment parse: %q", l1.Comment)
+	}
 	if len(l1.SectorAnswers) != 1 || len(l1.SectorAnswers[0]) != 2 {
 		t.Fatalf("unexpected sector answers: %+v", l1.SectorAnswers)
+	}
+	if len(l1.Bonuses) != 1 || !l1.Bonuses[0].Negative || l1.Bonuses[0].AwardSeconds != 120 {
+		t.Fatalf("unexpected negative bonus parse: %+v", l1.Bonuses)
 	}
 	if l1.SectorAnswers[0][0] != "код166" {
 		t.Fatalf("expected first code to preserve suffix, got %q", l1.SectorAnswers[0][0])
@@ -77,6 +92,19 @@ func TestParseScenarioFile(t *testing.T) {
 	}
 	if len(l1.Tasks) == 0 || !strings.Contains(l1.Tasks[0], "data:image/png;base64,") {
 		t.Fatalf("expected embedded data URL in task, got: %q", strings.Join(l1.Tasks, "\n"))
+	}
+}
+
+func TestScenarioLevelSettingsIncludesAutopassPenalty(t *testing.T) {
+	got := scenarioLevelSettings(scenario.Level{
+		AutopassSecond:        90*60 + 2,
+		AutopassPenaltySecond: 4*60 + 30,
+	})
+	if got.AutopassHours != 1 || got.AutopassMinutes != 30 || got.AutopassSeconds != 2 {
+		t.Fatalf("unexpected autopass split: %+v", got)
+	}
+	if !got.TimeoutPenalty || got.PenaltyHours != 0 || got.PenaltyMinutes != 4 || got.PenaltySeconds != 30 {
+		t.Fatalf("unexpected penalty split: %+v", got)
 	}
 }
 
@@ -143,8 +171,27 @@ func TestScenarioBonusToAdminBonus(t *testing.T) {
 	if got.AwardHours != 0 || got.AwardMinutes != 3 || got.AwardSeconds != 5 {
 		t.Fatalf("unexpected award split: %+v", got)
 	}
+	if got.Negative {
+		t.Fatalf("unexpected negative flag: %+v", got)
+	}
 	if len(got.Answers) != 2 || got.Answers[0] != "кон3" || got.Answers[1] != "рим8" {
 		t.Fatalf("unexpected answers: %+v", got.Answers)
+	}
+}
+
+func TestScenarioBonusToAdminBonusPreservesNegative(t *testing.T) {
+	got, ok := scenarioBonusToAdminBonus(scenario.Bonus{
+		Name:         "Штрафной код",
+		AwardSeconds: 125,
+		Negative:     true,
+		Task:         "task",
+		Answers:      []string{"bad"},
+	}, 12345)
+	if !ok {
+		t.Fatal("expected bonus to be importable")
+	}
+	if !got.Negative || got.AwardHours != 0 || got.AwardMinutes != 2 || got.AwardSeconds != 5 {
+		t.Fatalf("unexpected negative bonus mapping: %+v", got)
 	}
 }
 

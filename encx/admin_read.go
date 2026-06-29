@@ -323,6 +323,9 @@ func (c *Client) adminGetHintFromURL(ctx context.Context, gameId, levelNum, hint
 
 	// Check chkRequestPenaltyConfirm
 	checked := parseCheckedInputs(body)
+	if checked["chkReplaceNlToBr"] {
+		h.ReplaceNl = true
+	}
 	if checked["chkRequestPenaltyConfirm"] {
 		h.RequestConfirm = true
 		h.IsPenalty = true
@@ -490,7 +493,6 @@ func (c *Client) AdminGetSectorAnswers(ctx context.Context, gameId, levelNum int
 
 	if len(opts) == 0 {
 		// No named sectors — try reading direct answers from object=2
-		c.adminDelay()
 		return c.adminGetDirectAnswers(ctx, gameId, levelNum)
 	}
 
@@ -509,7 +511,6 @@ func (c *Client) AdminGetSectorAnswers(ctx context.Context, gameId, levelNum int
 		// Fetch answers for this sector
 		ansURL := fmt.Sprintf("%s/ALoader/LevelInfo.aspx?gid=%d&level=%d&object=3&sector=%s",
 			c.baseURL(), gameId, levelNum, sectorVal)
-		c.adminDelay()
 		ansBody, err := c.doGet(ctx, ansURL)
 		if err != nil {
 			continue
@@ -537,7 +538,6 @@ func (c *Client) fillSectorAnswersFromListPage(ctx context.Context, gameId, leve
 	if !needList {
 		return sectors, nil
 	}
-	c.adminDelay()
 	listBody, err := c.adminReadSectorAnswersList(ctx, gameId, levelNum)
 	if err != nil {
 		return sectors, err
@@ -585,7 +585,6 @@ func (c *Client) adminGetDirectAnswers(ctx context.Context, gameId, levelNum int
 
 		editURL := fmt.Sprintf("%s/Administration/Games/LevelEditor.aspx?level=%d&gid=%d&swanswers=1&editanswers=%s",
 			c.baseURL(), levelNum, gameId, editId)
-		c.adminDelay()
 		editBody, err := c.doGet(ctx, editURL)
 		if err != nil {
 			continue
@@ -649,7 +648,6 @@ func (c *Client) AdminWipeGame(ctx context.Context, gameId int, progress func(st
 		if err == nil && len(bonusIds) > 0 {
 			for _, bid := range bonusIds {
 				c.AdminDeleteBonus(ctx, gameId, lvl.Number, bid)
-				c.adminDelay()
 			}
 			progress(fmt.Sprintf("  Level %d: %d bonuses deleted", lvl.Number, len(bonusIds)))
 		}
@@ -658,7 +656,6 @@ func (c *Client) AdminWipeGame(ctx context.Context, gameId int, progress func(st
 	// Delete levels in reverse order
 	for i := len(levels) - 1; i >= 0; i-- {
 		c.AdminDeleteLevel(ctx, gameId, levels[i].Number)
-		c.adminDelay()
 	}
 	progress(fmt.Sprintf("  %d levels deleted", len(levels)))
 
@@ -668,7 +665,6 @@ func (c *Client) AdminWipeGame(ctx context.Context, gameId int, progress func(st
 		for _, corr := range corrections {
 			if corr.ID != "" {
 				c.AdminDeleteCorrection(ctx, gameId, corr.ID)
-				c.adminDelay()
 			}
 		}
 		progress(fmt.Sprintf("  %d corrections deleted", len(corrections)))

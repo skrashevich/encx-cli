@@ -9,7 +9,6 @@ import (
 	"sort"
 	"strconv"
 	"strings"
-	"sync"
 	"testing"
 	"time"
 )
@@ -130,17 +129,14 @@ func TestAdminClearLevelSectorsRemovesEmptyShells(t *testing.T) {
 	}
 }
 
-func TestAdminGetSectorAnswersPacesSectorReads(t *testing.T) {
-	var mu sync.Mutex
+func TestAdminGetSectorAnswersPacesGETReads(t *testing.T) {
 	var sectorHits []time.Time
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch {
 		case strings.Contains(r.URL.Path, "ALoader/LevelInfo.aspx") && r.URL.Query().Get("object") == "3" && r.URL.Query().Get("sector") == "":
 			_, _ = w.Write([]byte(`<option value="101">A</option><option value="102">B</option>`))
 		case strings.Contains(r.URL.Path, "ALoader/LevelInfo.aspx") && r.URL.Query().Get("object") == "3" && r.URL.Query().Get("sector") != "":
-			mu.Lock()
 			sectorHits = append(sectorHits, time.Now())
-			mu.Unlock()
 			_, _ = w.Write([]byte(`<input name="txtAnswer_1" value="ok">`))
 		default:
 			w.WriteHeader(http.StatusNotFound)
@@ -149,7 +145,8 @@ func TestAdminGetSectorAnswersPacesSectorReads(t *testing.T) {
 	defer srv.Close()
 
 	host := strings.TrimPrefix(srv.URL, "http://")
-	client := New(host, WithHTTP(), WithAdminDelay(25*time.Millisecond))
+	client := New(host, WithHTTP())
+	start := time.Now()
 	sectors, err := client.AdminGetSectorAnswers(context.Background(), 1, 1)
 	if err != nil {
 		t.Fatalf("AdminGetSectorAnswers: %v", err)
@@ -158,13 +155,11 @@ func TestAdminGetSectorAnswersPacesSectorReads(t *testing.T) {
 		t.Fatalf("sectors = %d, want 2", len(sectors))
 	}
 
-	mu.Lock()
-	defer mu.Unlock()
 	if len(sectorHits) != 2 {
 		t.Fatalf("sector hits = %d, want 2", len(sectorHits))
 	}
-	if gap := sectorHits[1].Sub(sectorHits[0]); gap < 20*time.Millisecond {
-		t.Fatalf("sector requests were not paced, gap=%s", gap)
+	if elapsed := time.Since(start); elapsed < 250*time.Millisecond {
+		t.Fatalf("GET sector reads were not paced, elapsed=%s", elapsed)
 	}
 }
 
