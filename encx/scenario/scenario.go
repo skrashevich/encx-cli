@@ -27,6 +27,7 @@ type Bonus struct {
 	Name         string   `json:"name,omitempty"`
 	AwardSeconds int      `json:"award_seconds,omitempty"`
 	Task         string   `json:"task,omitempty"`
+	Hint         string   `json:"hint,omitempty"`
 	Answers      []string `json:"answers,omitempty"`
 }
 
@@ -43,12 +44,12 @@ type Level struct {
 
 // Document is a parsed GameScenario.aspx HTML export.
 type Document struct {
-	SourcePath     string  `json:"source_path"`
-	GameID         int     `json:"game_id,omitempty"`
-	GameNum        int     `json:"game_num,omitempty"`
-	GameTitle      string  `json:"game_title,omitempty"`
-	Levels         []Level `json:"levels"`
-	EmbeddedAssets int     `json:"embedded_assets"`
+	SourcePath     string   `json:"source_path"`
+	GameID         int      `json:"game_id,omitempty"`
+	GameNum        int      `json:"game_num,omitempty"`
+	GameTitle      string   `json:"game_title,omitempty"`
+	Levels         []Level  `json:"levels"`
+	EmbeddedAssets int      `json:"embedded_assets"`
 	MissingAssets  []string `json:"missing_assets,omitempty"`
 }
 
@@ -60,24 +61,23 @@ type assetRewriteState struct {
 }
 
 var (
-	levelAnchorRe = regexp.MustCompile(`(?is)<a id="LevelsScenarioRepeater_ctl\d+_lnkLevelAnchorPoint" name="\d+"></a>`)
-	levelTitleRe  = regexp.MustCompile(`(?is)Уровень №\s*(\d+)\s*(?:"([^"]*)")?`)
-	autopassRe    = regexp.MustCompile(`(?is)Автопереход:\s*через\s*([^<]+)`)
-	taskRe        = regexp.MustCompile(`(?is)<span[^>]*id="LevelsScenarioRepeater_ctl\d+_LevelTasksRepeater_ctl\d+_lblLevelTask"[^>]*>(.*?)</span>`)
-	hintPairRe    = regexp.MustCompile(`(?is)<span[^>]*id="LevelsScenarioRepeater_ctl\d+_LevelHelpsRepeater_ctl\d+_lblLevelHelpTitle"[^>]*>(.*?)</span>\s*<br>\s*<span[^>]*id="LevelsScenarioRepeater_ctl\d+_LevelHelpsRepeater_ctl\d+_lblLevelHelp"[^>]*>(.*?)</span>`)
-	answerRe      = regexp.MustCompile(`(?is)<span[^>]*id="LevelsScenarioRepeater_ctl\d+_SectorsRepeater_ctl(\d+)_LevelAnswersRepeater_ctl\d+_lblLevelAnswer"[^>]*>(.*?)</span>\s*-\s*<span[^>]*id="LevelsScenarioRepeater_ctl\d+_SectorsRepeater_ctl\d+_LevelAnswersRepeater_ctl\d+_lblAnswerFor"`)
-	bonusHeaderRe = regexp.MustCompile(`(?is)<span[^>]*id="LevelsScenarioRepeater_ctl\d+_LevelBonusesRepeater_ctl\d+_lblBonusNum"[^>]*>(.*?)</span>`)
-	bonusTitleRe  = regexp.MustCompile(`(?is)Бонус\s*№\s*(\d+)\s*"([^"]*)"`)
-	bonusAwardRe  = regexp.MustCompile(`(?is)Бонусное\s+время:\s*([^<]+)`)
-	bonusTaskRe   = regexp.MustCompile(`(?is)<span\s+class="green">Задание</span><br>\s*(.*?)\s*<br><br>\s*<span\s+class="green">Ответы</span>`)
-	bonusAnswerOpenRe = regexp.MustCompile(`(?is)<span[^>]*id="LevelsScenarioRepeater_ctl\d+_LevelBonusesRepeater_ctl\d+_BonusAnswersRepeater_ctl\d+_lblBonusAnswer"[^>]*>`)
-	bonusAnswerTailRe = regexp.MustCompile(`(?is)^\s*(?:<br|</div>|<span[^>]*BonusAnswersRepeater_ctl\d+_lblBonusAnswer|<span[^>]*lblBonusNum|$)`)
-	hintDelayRe   = regexp.MustCompile(`\(([^()]*)\)\s*$`)
-	durationRe    = regexp.MustCompile(`(?i)(\d+)\s*(день|дня|дней|час(?:а|ов)?|минут(?:а|ы)?|секунд(?:а|ы)?)`)
-	assetAttrRe   = regexp.MustCompile(`(?i)\b(src|href)\s*=\s*"([^"]+)"`)
-	gameTitleRe   = regexp.MustCompile(`(?is)id="lnkGameInfo"[^>]*>([^<]+)</a>`)
-	gameIDRe      = regexp.MustCompile(`(?is)id="lblGameId"[^>]*>(\d+)`)
-	gameNumRe     = regexp.MustCompile(`(?is)id="lblGameNumber"[^>]*>(\d+)`)
+	levelAnchorRe      = regexp.MustCompile(`(?is)<a id="LevelsScenarioRepeater_ctl\d+_lnkLevelAnchorPoint" name="\d+"></a>`)
+	levelTitleRe       = regexp.MustCompile(`(?is)Уровень №\s*(\d+)\s*(?:"([^"]*)")?`)
+	autopassRe         = regexp.MustCompile(`(?is)Автопереход:\s*через\s*([^<]+)`)
+	taskRe             = regexp.MustCompile(`(?is)<span[^>]*id="LevelsScenarioRepeater_ctl\d+_LevelTasksRepeater_ctl\d+_lblLevelTask"[^>]*>(.*?)</span>`)
+	hintPairRe         = regexp.MustCompile(`(?is)<span[^>]*id="LevelsScenarioRepeater_ctl\d+_LevelHelpsRepeater_ctl\d+_lblLevelHelpTitle"[^>]*>(.*?)</span>\s*<br>\s*<span[^>]*id="LevelsScenarioRepeater_ctl\d+_LevelHelpsRepeater_ctl\d+_lblLevelHelp"[^>]*>(.*?)</span>`)
+	answerRe           = regexp.MustCompile(`(?is)<span[^>]*id="LevelsScenarioRepeater_ctl\d+_SectorsRepeater_ctl(\d+)_LevelAnswersRepeater_ctl\d+_lblLevelAnswer"[^>]*>(.*?)</span>\s*-\s*<span[^>]*id="LevelsScenarioRepeater_ctl\d+_SectorsRepeater_ctl\d+_LevelAnswersRepeater_ctl\d+_lblAnswerFor"`)
+	bonusHeaderRe      = regexp.MustCompile(`(?is)<span[^>]*id="LevelsScenarioRepeater_ctl\d+_LevelBonusesRepeater_ctl\d+_lblBonusNum"[^>]*>(.*?)</span>`)
+	bonusAwardRe       = regexp.MustCompile(`(?is)Бонусное\s+время:\s*([^<]+)`)
+	bonusAnswerOpenRe  = regexp.MustCompile(`(?is)<span[^>]*id="LevelsScenarioRepeater_ctl\d+_LevelBonusesRepeater_ctl\d+_BonusAnswersRepeater_ctl\d+_lblBonusAnswer"[^>]*>`)
+	bonusAnswerTailRe  = regexp.MustCompile(`(?is)^\s*(?:<br|</div>|<span[^>]*BonusAnswersRepeater_ctl\d+_lblBonusAnswer|<span[^>]*lblBonusNum|$)`)
+	bonusTitleNumberRe = regexp.MustCompile(`(?is)Бонус\s*№\s*(\d+)`)
+	hintDelayRe        = regexp.MustCompile(`\(([^()]*)\)\s*$`)
+	durationRe         = regexp.MustCompile(`(?i)(\d+)\s*(день|дня|дней|час(?:а|ов)?|минут(?:а|ы)?|секунд(?:а|ы)?)`)
+	assetAttrRe        = regexp.MustCompile(`(?i)\b(src|href)\s*=\s*"([^"]+)"`)
+	gameTitleRe        = regexp.MustCompile(`(?is)id="lnkGameInfo"[^>]*>([^<]+)</a>`)
+	gameIDRe           = regexp.MustCompile(`(?is)id="lblGameId"[^>]*>(\d+)`)
+	gameNumRe          = regexp.MustCompile(`(?is)id="lblGameNumber"[^>]*>(\d+)`)
 )
 
 // ParseFile reads and parses a GameScenario HTML export.
@@ -302,33 +302,59 @@ func parseBonuses(block string, state *assetRewriteState) []Bonus {
 		body := block[bodyStart:bodyEnd]
 
 		titleText := cleanInlineText(titleHTML)
-		m := bonusTitleRe.FindStringSubmatch(titleText)
-		if len(m) < 3 {
+		num, name, ok := parseBonusTitle(titleText)
+		if !ok {
 			continue
 		}
-		num, _ := strconv.Atoi(strings.TrimSpace(m[1]))
-		name := strings.TrimSpace(m[2])
 
 		award := 0
 		if am := bonusAwardRe.FindStringSubmatch(body); len(am) >= 2 {
 			award = ParseRuDuration(html.UnescapeString(strings.TrimSpace(am[1])))
 		}
 
-		task := ""
-		if tm := bonusTaskRe.FindStringSubmatch(body); len(tm) >= 2 {
-			task = normalizeHTMLFragment(tm[1], state)
-		}
+		task := extractBonusWhiteField(body, "Задание", state)
+		hint := extractBonusWhiteField(body, "Подсказка", state)
 
 		bonuses = append(bonuses, Bonus{
 			Number:       num,
 			Name:         name,
 			AwardSeconds: award,
 			Task:         task,
+			Hint:         hint,
 			Answers:      dedupeKeepOrder(parseBonusAnswers(body)),
 		})
 	}
 	sort.Slice(bonuses, func(i, j int) bool { return bonuses[i].Number < bonuses[j].Number })
 	return bonuses
+}
+
+func parseBonusTitle(titleText string) (int, string, bool) {
+	m := bonusTitleNumberRe.FindStringSubmatchIndex(titleText)
+	if len(m) < 4 {
+		return 0, "", false
+	}
+	num, err := strconv.Atoi(strings.TrimSpace(titleText[m[2]:m[3]]))
+	if err != nil {
+		return 0, "", false
+	}
+	rest := strings.TrimSpace(titleText[m[1]:])
+	if !strings.HasPrefix(rest, `"`) {
+		return num, "", true
+	}
+	end := strings.LastIndex(rest, `"`)
+	if end <= 0 {
+		return num, "", true
+	}
+	return num, strings.TrimSpace(rest[1:end]), true
+}
+
+func extractBonusWhiteField(body, label string, state *assetRewriteState) string {
+	re := regexp.MustCompile(`(?is)<span\s+class="green">\s*` + regexp.QuoteMeta(label) + `\s*</span>\s*<br\s*/?>\s*<span\s+class="white"\s*>(.*?)</span>`)
+	m := re.FindStringSubmatch(body)
+	if len(m) < 2 {
+		return ""
+	}
+	return normalizeHTMLFragment(m[1], state)
 }
 
 func parseBonusAnswers(body string) []string {

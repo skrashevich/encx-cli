@@ -128,6 +128,7 @@ func TestScenarioBonusToAdminBonus(t *testing.T) {
 		Name:         " глаз 19 ",
 		AwardSeconds: 185,
 		Task:         " <b>task</b> ",
+		Hint:         " <i>hint</i> ",
 		Answers:      []string{" кон3 ", "кон3", "рим8"},
 	}, 12345)
 	if !ok {
@@ -135,6 +136,9 @@ func TestScenarioBonusToAdminBonus(t *testing.T) {
 	}
 	if got.Name != "глаз 19" || got.Task != "<b>task</b>" || got.LevelID != 12345 {
 		t.Fatalf("unexpected bonus fields: %+v", got)
+	}
+	if got.Hint != "<i>hint</i>" {
+		t.Fatalf("unexpected bonus hint: %+v", got)
 	}
 	if got.AwardHours != 0 || got.AwardMinutes != 3 || got.AwardSeconds != 5 {
 		t.Fatalf("unexpected award split: %+v", got)
