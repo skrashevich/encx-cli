@@ -14,7 +14,7 @@ import (
 
 func TestParseSectorAnswerFields(t *testing.T) {
 	body := `<input name="txtAnswer_0" value="">
-	<input name="txtAnswer_6588020" value="поехалистрадать">
+	<input value="поехалистрадать" class="answer" name='txtAnswer_6588020'>
 	<select name="ddlAnswerFor_6588020"><option value="0" selected></select>`
 	fields := parseSectorAnswerFields(body)
 	if len(fields) != 2 {
@@ -46,6 +46,40 @@ func TestParseListPageSectorAnswersMap(t *testing.T) {
 	got := parseListPageSectorAnswersMap(body)
 	if len(got[3486043]) != 1 || got[3486043][0] != "answer66" {
 		t.Fatalf("unexpected answers: %v", got)
+	}
+}
+
+func TestAdminAddSectorAnswersFormTargetsExistingSector(t *testing.T) {
+	body := `<form method="post" class="noPadMarg" action="/Administration/Games/LevelEditor.aspx?level=4&gid=82443">
+		<div id='divSectorsAddAnswersRows_3495771'></div>
+		<input type="image" name="AnswersTable_ctl00_ctl06_SectorsRepeater_ctl00_pnlNewAnswers_btnSave" />
+		<input type="hidden" name="ddlSector" value="3495771"/>
+		<input type="hidden" name="saveanswers" value="1"/>
+	</form>`
+	form := adminAddSectorAnswersForm(body, 3495771, []string{"ok", "  ", "ок"})
+	if got := form.Get("ddlSector"); got != "3495771" {
+		t.Fatalf("ddlSector = %q, want 3495771", got)
+	}
+	if got := form.Get("txtSectorName"); got != "" {
+		t.Fatalf("txtSectorName = %q, want empty", got)
+	}
+	if got := form.Get("savesector"); got != "" {
+		t.Fatalf("savesector = %q, want empty", got)
+	}
+	if got := form.Get("saveanswers"); got != "1" {
+		t.Fatalf("saveanswers = %q, want 1", got)
+	}
+	if got := form.Get("AnswersTable_ctl00_ctl06_SectorsRepeater_ctl00_pnlNewAnswers_btnSave.x"); got != "1" {
+		t.Fatalf("pnlNewAnswers submit x = %q, want 1", got)
+	}
+	if got := form.Get("txtAnswer_0"); got != "ok" {
+		t.Fatalf("txtAnswer_0 = %q, want ok", got)
+	}
+	if got := form.Get("txtAnswer_1"); got != "ок" {
+		t.Fatalf("txtAnswer_1 = %q, want ок", got)
+	}
+	if got := form.Get("ddlAnswerFor_1"); got != "0" {
+		t.Fatalf("ddlAnswerFor_1 = %q, want 0", got)
 	}
 }
 
@@ -190,5 +224,61 @@ func TestAdminClearLevelSectorsReturnsStartedError(t *testing.T) {
 	err := client.AdminClearLevelSectors(context.Background(), 1, 1)
 	if !errors.Is(err, ErrSectorStarted) {
 		t.Fatalf("got %v, want ErrSectorStarted", err)
+	}
+}
+
+func TestAdminUpdateSectorGrowsAnswerFields(t *testing.T) {
+	var saved []string
+	var postCount int
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodPost {
+			if err := r.ParseForm(); err != nil {
+				t.Fatalf("ParseForm: %v", err)
+			}
+			postCount++
+			saved = saved[:0]
+			for i := 0; ; i++ {
+				name := fmt.Sprintf("txtAnswer_%d", i)
+				if _, ok := r.Form[name]; !ok {
+					break
+				}
+				if answer := strings.TrimSpace(r.Form.Get(name)); answer != "" {
+					saved = append(saved, answer)
+				}
+			}
+			_, _ = w.Write([]byte(`ok`))
+			return
+		}
+
+		fieldCount := len(saved) + 1
+		if fieldCount < 1 {
+			fieldCount = 1
+		}
+		var b strings.Builder
+		for i := 0; i < fieldCount; i++ {
+			value := ""
+			if i < len(saved) {
+				value = saved[i]
+			}
+			fmt.Fprintf(&b, `<input name="txtAnswer_%d" value="%s">`, i, value)
+			fmt.Fprintf(&b, `<select name="ddlAnswerFor_%d"><option selected value="0">all</option></select>`, i)
+		}
+		_, _ = w.Write([]byte(b.String()))
+	}))
+	defer srv.Close()
+
+	client := New(strings.TrimPrefix(srv.URL, "http://"), WithHTTP(), WithAdminDelay(0))
+	err := client.AdminUpdateSector(context.Background(), 1, 1, 10, AdminSector{
+		Name:    "Сектор 1",
+		Answers: []string{"one", "two", "three"},
+	})
+	if err != nil {
+		t.Fatalf("AdminUpdateSector: %v", err)
+	}
+	if postCount != 3 {
+		t.Fatalf("postCount = %d, want 3", postCount)
+	}
+	if strings.Join(saved, ",") != "one,two,three" {
+		t.Fatalf("saved answers = %v", saved)
 	}
 }

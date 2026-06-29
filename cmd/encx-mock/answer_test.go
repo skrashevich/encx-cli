@@ -81,6 +81,38 @@ func TestProcessScenarioBonusAnswer(t *testing.T) {
 	}
 }
 
+func TestProcessScenarioBonusAnswerAcceptsAnyVariant(t *testing.T) {
+	s := &server{
+		scenario: &scenario.Document{
+			Levels: []scenario.Level{
+				{
+					Number: 3,
+					Name:   "Eyes",
+					Bonuses: []scenario.Bonus{
+						{Number: 19, Name: "глаз 19", AwardSeconds: 180, Answers: []string{"кон3", "рим8"}},
+					},
+				},
+			},
+		},
+	}
+	st := &sessionState{
+		Login:           "demo",
+		CurrentIdx:      0,
+		Passed:          []bool{false},
+		SectorPassed:    [][]bool{{false}},
+		AnsweredBonuses: make(map[int]bool),
+		BonusAnswers:    make(map[int]string),
+	}
+
+	if !s.processScenarioAnswer(st, "рим8") {
+		t.Fatal("expected alternate bonus code to be accepted")
+	}
+	bonusID := scenarioBonusID(0, 19)
+	if st.BonusAnswers[bonusID] != "рим8" {
+		t.Fatalf("bonus answer = %q", st.BonusAnswers[bonusID])
+	}
+}
+
 func TestProcessScenarioAnswerDoesNotAcceptDefaultLevelCode(t *testing.T) {
 	s := &server{
 		scenario: &scenario.Document{

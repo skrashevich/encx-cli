@@ -2,6 +2,8 @@ package main
 
 import (
 	"context"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
@@ -117,6 +119,67 @@ func TestParseImportScenarioArgs(t *testing.T) {
 	}
 	if _, err := parseImportScenarioArgs([]string{}); err == nil {
 		t.Fatalf("expected error for missing path")
+	}
+}
+
+func TestScenarioBonusToAdminBonus(t *testing.T) {
+	got, ok := scenarioBonusToAdminBonus(scenario.Bonus{
+		Number:       19,
+		Name:         " глаз 19 ",
+		AwardSeconds: 185,
+		Task:         " <b>task</b> ",
+		Answers:      []string{" кон3 ", "кон3", "рим8"},
+	}, 12345)
+	if !ok {
+		t.Fatal("expected bonus to be importable")
+	}
+	if got.Name != "глаз 19" || got.Task != "<b>task</b>" || got.LevelID != 12345 {
+		t.Fatalf("unexpected bonus fields: %+v", got)
+	}
+	if got.AwardHours != 0 || got.AwardMinutes != 3 || got.AwardSeconds != 5 {
+		t.Fatalf("unexpected award split: %+v", got)
+	}
+	if len(got.Answers) != 2 || got.Answers[0] != "кон3" || got.Answers[1] != "рим8" {
+		t.Fatalf("unexpected answers: %+v", got.Answers)
+	}
+}
+
+func TestCreateScenarioSectorSingleAnswerUsesSingleCreate(t *testing.T) {
+	var posts int
+	var gets int
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.Method {
+		case http.MethodPost:
+			posts++
+			if r.URL.Path != "/Administration/Games/LevelEditor.aspx" {
+				t.Fatalf("unexpected POST path: %s", r.URL.String())
+			}
+			if err := r.ParseForm(); err != nil {
+				t.Fatalf("ParseForm: %v", err)
+			}
+			if got := r.Form.Get("txtAnswer_0"); got != "solo" {
+				t.Fatalf("txtAnswer_0 = %q, want solo", got)
+			}
+			_, _ = w.Write([]byte("ok"))
+		case http.MethodGet:
+			gets++
+			t.Fatalf("unexpected GET during single-answer sector create: %s", r.URL.String())
+		default:
+			t.Fatalf("unexpected method: %s", r.Method)
+		}
+	}))
+	defer srv.Close()
+
+	client := encx.New(strings.TrimPrefix(srv.URL, "http://"), encx.WithHTTP(), encx.WithAdminDelay(0))
+	err := createScenarioSector(context.Background(), client, 1, 2, encx.AdminSector{
+		Name:    "Сектор 1",
+		Answers: []string{"solo"},
+	})
+	if err != nil {
+		t.Fatalf("createScenarioSector: %v", err)
+	}
+	if posts != 1 || gets != 0 {
+		t.Fatalf("posts=%d gets=%d, want posts=1 gets=0", posts, gets)
 	}
 }
 

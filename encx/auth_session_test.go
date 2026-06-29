@@ -62,3 +62,34 @@ func TestLoginCompleteUsesLoginPage(t *testing.T) {
 		t.Fatalf("expected 1 login form POST, got %d", formPosts)
 	}
 }
+
+func TestAdminGetLevelsRejectsGamesManagerRedirect(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, "/Administration/GamesManager.aspx", http.StatusFound)
+	}))
+	defer srv.Close()
+
+	client := New(strings.TrimPrefix(srv.URL, "http://"), WithHTTP())
+	_, err := client.AdminGetLevels(context.Background(), 82442)
+	if err == nil || !strings.Contains(err.Error(), "unexpected redirect") {
+		t.Fatalf("expected redirect error, got %v", err)
+	}
+}
+
+func TestAdminGetLevelsAllowsRealEmptyLevelManager(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = fmt.Fprintf(w, `<form action="LevelManager.aspx?levels=create">
+			<select name="ddlCreateLevelsNum"><option value="1">1</option></select>
+		</form>`)
+	}))
+	defer srv.Close()
+
+	client := New(strings.TrimPrefix(srv.URL, "http://"), WithHTTP())
+	levels, err := client.AdminGetLevels(context.Background(), 82442)
+	if err != nil {
+		t.Fatalf("AdminGetLevels: %v", err)
+	}
+	if len(levels) != 0 {
+		t.Fatalf("levels = %v, want empty", levels)
+	}
+}
