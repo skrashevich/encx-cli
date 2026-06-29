@@ -490,6 +490,7 @@ func (c *Client) AdminGetSectorAnswers(ctx context.Context, gameId, levelNum int
 
 	if len(opts) == 0 {
 		// No named sectors — try reading direct answers from object=2
+		c.adminDelay()
 		return c.adminGetDirectAnswers(ctx, gameId, levelNum)
 	}
 
@@ -508,6 +509,7 @@ func (c *Client) AdminGetSectorAnswers(ctx context.Context, gameId, levelNum int
 		// Fetch answers for this sector
 		ansURL := fmt.Sprintf("%s/ALoader/LevelInfo.aspx?gid=%d&level=%d&object=3&sector=%s",
 			c.baseURL(), gameId, levelNum, sectorVal)
+		c.adminDelay()
 		ansBody, err := c.doGet(ctx, ansURL)
 		if err != nil {
 			continue
@@ -535,6 +537,7 @@ func (c *Client) fillSectorAnswersFromListPage(ctx context.Context, gameId, leve
 	if !needList {
 		return sectors, nil
 	}
+	c.adminDelay()
 	listBody, err := c.adminReadSectorAnswersList(ctx, gameId, levelNum)
 	if err != nil {
 		return sectors, err
@@ -582,6 +585,7 @@ func (c *Client) adminGetDirectAnswers(ctx context.Context, gameId, levelNum int
 
 		editURL := fmt.Sprintf("%s/Administration/Games/LevelEditor.aspx?level=%d&gid=%d&swanswers=1&editanswers=%s",
 			c.baseURL(), levelNum, gameId, editId)
+		c.adminDelay()
 		editBody, err := c.doGet(ctx, editURL)
 		if err != nil {
 			continue
