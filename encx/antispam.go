@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"html"
 	"io"
 	"net/http"
 	"net/url"
@@ -96,7 +95,7 @@ func ExtractLoginURLFromNotHumanHTML(pageURL string, body []byte) string {
 		if len(m) < 2 {
 			continue
 		}
-		ref := strings.TrimSpace(html.UnescapeString(m[1]))
+		ref := strings.TrimSpace(decodeURLAttr(m[1]))
 		if ref == "" {
 			continue
 		}
@@ -109,6 +108,20 @@ func ExtractLoginURLFromNotHumanHTML(pageURL string, body []byte) string {
 		}
 	}
 	return best
+}
+
+func decodeURLAttr(s string) string {
+	replacer := strings.NewReplacer(
+		"&amp;", "&",
+		"&#38;", "&",
+		"&#x26;", "&",
+		"&#X26;", "&",
+		"&quot;", `"`,
+		"&#34;", `"`,
+		"&apos;", "'",
+		"&#39;", "'",
+	)
+	return replacer.Replace(s)
 }
 
 func resolveRefURL(base *url.URL, ref string) string {

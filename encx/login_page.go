@@ -17,6 +17,10 @@ var (
 	loginNetworkSelectedRE = regexp.MustCompile(`(?is)<option[^>]*value="(\d+)"[^>]*selected`)
 	loginPageErrorRE       = regexp.MustCompile(`(?is)<span[^>]*id="lblDBMessage"[^>]*>([^<]*)</span>`)
 	loginPageFieldsRE      = regexp.MustCompile(`(?is)name="Login"`)
+	inputTagRE             = regexp.MustCompile(`(?is)<input\b[^>]*>`)
+	inputTypeRE            = regexp.MustCompile(`(?is)\btype\s*=\s*["']?([^"'\s>]+)`)
+	inputNameRE            = regexp.MustCompile(`(?is)\bname\s*=\s*["']([^"']+)["']`)
+	inputValueRE           = regexp.MustCompile(`(?is)\bvalue\s*=\s*["']([^"']*)["']`)
 )
 
 type loginPageForm struct {
@@ -42,7 +46,7 @@ func parseLoginPageForm(pageURL string, pageHTML []byte) (loginPageForm, error) 
 	}
 	postURL := pageURL
 	if action != "" {
-		if resolved := resolveRefURL(base, strings.TrimSpace(html.UnescapeString(action))); resolved != "" {
+		if resolved := resolveRefURL(base, strings.TrimSpace(decodeURLAttr(action))); resolved != "" {
 			postURL = resolved
 		}
 	}
@@ -53,6 +57,27 @@ func parseLoginPageForm(pageURL string, pageHTML []byte) (loginPageForm, error) 
 	}
 
 	hidden := url.Values{}
+	for _, input := range inputTagRE.FindAll(pageHTML, -1) {
+		inputType := ""
+		if m := inputTypeRE.FindSubmatch(input); len(m) >= 2 {
+			inputType = strings.ToLower(strings.TrimSpace(string(m[1])))
+		}
+		if inputType != "hidden" {
+			continue
+		}
+		name := ""
+		if m := inputNameRE.FindSubmatch(input); len(m) >= 2 {
+			name = strings.TrimSpace(html.UnescapeString(string(m[1])))
+		}
+		if name == "" {
+			continue
+		}
+		value := ""
+		if m := inputValueRE.FindSubmatch(input); len(m) >= 2 {
+			value = html.UnescapeString(string(m[1]))
+		}
+		hidden.Add(name, value)
+	}
 	hidden.Set("socialAssign", "0")
 	return loginPageForm{PostURL: postURL, Network: network, Hidden: hidden}, nil
 }
@@ -85,6 +110,9 @@ func isLoginFailureRedirect(location string) bool {
 }
 
 func (c *Client) completeLoginPageFlow(ctx context.Context, status int, headers http.Header, respBody []byte, loginPageURL string) error {
+	if err := guardAntiSpam(c.domain, c.scheme, &http.Response{StatusCode: status, Header: headers}, respBody); err != nil {
+		return err
+	}
 	if msg := loginPageFailureMessage(respBody); msg != "" {
 		return fmt.Errorf("encx: login page: %s", msg)
 	}
@@ -112,6 +140,9 @@ func (c *Client) completeLoginPageFlow(ctx context.Context, status int, headers 
 		st, hdr, body, err := c.doRequestRaw(ctx, http.MethodGet, currentURL, nil)
 		if err != nil {
 			return fmt.Errorf("encx: follow login redirect: %w", err)
+		}
+		if err := guardAntiSpam(c.domain, c.scheme, &http.Response{StatusCode: st, Header: hdr}, body); err != nil {
+			return err
 		}
 		if msg := loginPageFailureMessage(body); msg != "" {
 			return fmt.Errorf("encx: login page: %s", msg)
@@ -142,8 +173,15 @@ func (c *Client) completeLoginPageFlow(ctx context.Context, status int, headers 
 	}
 
 	retPath := returnPathFromLoginURL(loginPageURL)
-	if _, err := c.doGetRaw(ctx, c.baseURL()+retPath); err != nil {
+	st, hdr, body, err := c.doRequestRaw(ctx, http.MethodGet, c.baseURL()+retPath, nil)
+	if err != nil {
 		return fmt.Errorf("encx: follow return after login: %w", err)
+	}
+	if err := guardAntiSpam(c.domain, c.scheme, &http.Response{StatusCode: st, Header: hdr}, body); err != nil {
+		return err
+	}
+	if st >= 400 {
+		return fmt.Errorf("encx: follow return after login: HTTP %d", st)
 	}
 	return nil
 }
