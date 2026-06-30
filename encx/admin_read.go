@@ -168,6 +168,16 @@ func parseTimeText(text string) (h, m, s int) {
 	return
 }
 
+// GetGameScenarioHTML reads the GameScenario export page visible to the current session.
+func (c *Client) GetGameScenarioHTML(ctx context.Context, gameId int) (string, error) {
+	u := fmt.Sprintf("%s/GameScenario.aspx?gid=%d", c.baseURL(), gameId)
+	body, err := c.doGet(ctx, u)
+	if err != nil {
+		return "", fmt.Errorf("encx: get game scenario: %w", err)
+	}
+	return body, nil
+}
+
 // AdminGetBonusIds returns the list of bonus IDs on a level.
 func (c *Client) AdminGetBonusIds(ctx context.Context, gameId, levelNum int) ([]int, error) {
 	u := fmt.Sprintf("%s/Administration/Games/LevelEditor.aspx?level=%d&gid=%d", c.baseURL(), levelNum, gameId)

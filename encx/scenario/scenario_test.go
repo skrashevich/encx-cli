@@ -81,6 +81,32 @@ func TestParseFile(t *testing.T) {
 	}
 }
 
+func TestParseFileDoesNotReportExternalSchemesAsMissingAssets(t *testing.T) {
+	dir := t.TempDir()
+	htmlDoc := `
+<a id="LevelsScenarioRepeater_ctl00_lnkLevelAnchorPoint" name="1"></a>
+Уровень №1 "Links"
+<div class="scenarioBlock border_dark">
+  <span id="LevelsScenarioRepeater_ctl00_LevelTasksRepeater_ctl00_lblLevelTask">
+    <a href="geo:59.424826,56.778814">point</a>
+    <a href="tel:+1234567890">phone</a>
+  </span>
+</div>
+`
+	docPath := filepath.Join(dir, "game scenario.html")
+	if err := os.WriteFile(docPath, []byte(htmlDoc), 0o644); err != nil {
+		t.Fatalf("write scenario: %v", err)
+	}
+
+	scenarioDoc, err := ParseFile(docPath)
+	if err != nil {
+		t.Fatalf("ParseFile error: %v", err)
+	}
+	if len(scenarioDoc.MissingAssets) != 0 {
+		t.Fatalf("external URI schemes must not be reported as missing assets: %+v", scenarioDoc.MissingAssets)
+	}
+}
+
 func TestParseRuDuration(t *testing.T) {
 	tests := map[string]int{
 		"3 минуты":              180,

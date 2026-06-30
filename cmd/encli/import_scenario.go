@@ -526,6 +526,48 @@ func bonusKeysMatch(a, b []string) bool {
 	return true
 }
 
+func bonusDeleteCreatePlan(src scenario.Level, current scenario.Level, bonusIDs []int, levelID int) ([]int, []encx.AdminBonus, bool) {
+	currentKeys := scenarioBonusKeys(current, levelID)
+	if len(currentKeys) != len(bonusIDs) {
+		return nil, nil, false
+	}
+
+	wantCounts := make(map[string]int, len(src.Bonuses))
+	wantBonuses := make([]encx.AdminBonus, 0, len(src.Bonuses))
+	wantKeys := make([]string, 0, len(src.Bonuses))
+	for _, srcBonus := range src.Bonuses {
+		bonus, ok := scenarioBonusToAdminBonus(srcBonus, levelID)
+		if !ok {
+			continue
+		}
+		key := bonusComparableKey(bonus)
+		wantCounts[key]++
+		wantBonuses = append(wantBonuses, bonus)
+		wantKeys = append(wantKeys, key)
+	}
+
+	deleteIDs := make([]int, 0)
+	keptCounts := make(map[string]int, len(currentKeys))
+	for i, key := range currentKeys {
+		if wantCounts[key] > 0 {
+			wantCounts[key]--
+			keptCounts[key]++
+			continue
+		}
+		deleteIDs = append(deleteIDs, bonusIDs[i])
+	}
+
+	createBonuses := make([]encx.AdminBonus, 0)
+	for i, key := range wantKeys {
+		if keptCounts[key] > 0 {
+			keptCounts[key]--
+			continue
+		}
+		createBonuses = append(createBonuses, wantBonuses[i])
+	}
+	return deleteIDs, createBonuses, true
+}
+
 func normalizedAnswerSet(answers []string) map[string]struct{} {
 	set := make(map[string]struct{}, len(answers))
 	for _, ans := range answers {
@@ -646,8 +688,11 @@ func sectorGroupsMatch(src scenario.Level, gameSectors []encx.AdminSector) bool 
 	return true
 }
 
-func syncLevelTasksToScenario(ctx context.Context, client *encx.Client, gameID, levelNum int, src scenario.Level, stats *importSyncStats) error {
+func syncLevelTasksToScenario(ctx context.Context, client *encx.Client, gameID, levelNum int, src scenario.Level, current *scenario.Level, stats *importSyncStats) error {
 	want := scenarioTaskNorms(src)
+	if current != nil && taskNormsMatch(scenarioTaskNorms(*current), want) {
+		return nil
+	}
 	var taskIDs []int
 	err := runWithAntiSpamRetry(fmt.Sprintf("read level %d task IDs", levelNum), func() error {
 		var callErr error
@@ -657,25 +702,27 @@ func syncLevelTasksToScenario(ctx context.Context, client *encx.Client, gameID, 
 	if err != nil {
 		return err
 	}
-	var existing []string
-	for _, taskID := range taskIDs {
-		var task *encx.AdminTask
-		err := runWithAntiSpamRetry(fmt.Sprintf("read level %d task %d", levelNum, taskID), func() error {
-			var callErr error
-			task, callErr = client.AdminGetTask(ctx, gameID, levelNum, taskID)
-			return callErr
-		})
-		if err != nil {
-			return err
-		}
-		if task != nil {
-			if n := scenario.NormalizeComparableText(task.Text); n != "" {
-				existing = append(existing, n)
+	if current == nil {
+		var existing []string
+		for _, taskID := range taskIDs {
+			var task *encx.AdminTask
+			err := runWithAntiSpamRetry(fmt.Sprintf("read level %d task %d", levelNum, taskID), func() error {
+				var callErr error
+				task, callErr = client.AdminGetTask(ctx, gameID, levelNum, taskID)
+				return callErr
+			})
+			if err != nil {
+				return err
+			}
+			if task != nil {
+				if n := scenario.NormalizeComparableText(task.Text); n != "" {
+					existing = append(existing, n)
+				}
 			}
 		}
-	}
-	if taskNormsMatch(existing, want) {
-		return nil
+		if taskNormsMatch(existing, want) {
+			return nil
+		}
 	}
 	for _, taskID := range taskIDs {
 		id := taskID
@@ -707,8 +754,11 @@ func syncLevelTasksToScenario(ctx context.Context, client *encx.Client, gameID, 
 	return nil
 }
 
-func syncLevelHintsToScenario(ctx context.Context, client *encx.Client, gameID, levelNum int, src scenario.Level, stats *importSyncStats) error {
+func syncLevelHintsToScenario(ctx context.Context, client *encx.Client, gameID, levelNum int, src scenario.Level, current *scenario.Level, stats *importSyncStats) error {
 	want := scenarioHintKeys(src)
+	if current != nil && taskNormsMatch(scenarioHintKeys(*current), want) {
+		return nil
+	}
 	var hintIDs []int
 	err := runWithAntiSpamRetry(fmt.Sprintf("read level %d hint IDs", levelNum), func() error {
 		var callErr error
@@ -718,29 +768,31 @@ func syncLevelHintsToScenario(ctx context.Context, client *encx.Client, gameID, 
 	if err != nil {
 		return err
 	}
-	var existing []string
-	for _, hintID := range hintIDs {
-		var hint *encx.AdminHint
-		err := runWithAntiSpamRetry(fmt.Sprintf("read level %d hint %d", levelNum, hintID), func() error {
-			var callErr error
-			hint, callErr = client.AdminGetHint(ctx, gameID, levelNum, hintID)
-			return callErr
-		})
-		if err != nil {
-			return err
+	if current == nil {
+		var existing []string
+		for _, hintID := range hintIDs {
+			var hint *encx.AdminHint
+			err := runWithAntiSpamRetry(fmt.Sprintf("read level %d hint %d", levelNum, hintID), func() error {
+				var callErr error
+				hint, callErr = client.AdminGetHint(ctx, gameID, levelNum, hintID)
+				return callErr
+			})
+			if err != nil {
+				return err
+			}
+			if hint == nil {
+				continue
+			}
+			sec := hint.Hours*3600 + hint.Minutes*60 + hint.Seconds
+			text := strings.TrimSpace(hint.Text)
+			if text == "" {
+				continue
+			}
+			existing = append(existing, hintDelayTextKey(sec, text))
 		}
-		if hint == nil {
-			continue
+		if taskNormsMatch(existing, want) {
+			return nil
 		}
-		sec := hint.Hours*3600 + hint.Minutes*60 + hint.Seconds
-		text := strings.TrimSpace(hint.Text)
-		if text == "" {
-			continue
-		}
-		existing = append(existing, hintDelayTextKey(sec, text))
-	}
-	if taskNormsMatch(existing, want) {
-		return nil
 	}
 	for _, hintID := range hintIDs {
 		id := hintID
@@ -770,8 +822,11 @@ func syncLevelHintsToScenario(ctx context.Context, client *encx.Client, gameID, 
 	return nil
 }
 
-func syncLevelBonusesToScenario(ctx context.Context, client *encx.Client, gameID, levelNum, levelID int, src scenario.Level, stats *importSyncStats) error {
+func syncLevelBonusesToScenario(ctx context.Context, client *encx.Client, gameID, levelNum, levelID int, src scenario.Level, current *scenario.Level, stats *importSyncStats) error {
 	want := scenarioBonusKeys(src, levelID)
+	if current != nil && bonusKeysMatch(scenarioBonusKeys(*current, levelID), want) {
+		return nil
+	}
 	var bonusIDs []int
 	err := runWithAntiSpamRetry(fmt.Sprintf("read level %d bonus IDs", levelNum), func() error {
 		var callErr error
@@ -782,27 +837,27 @@ func syncLevelBonusesToScenario(ctx context.Context, client *encx.Client, gameID
 		return err
 	}
 
-	existing := make([]string, 0, len(bonusIDs))
-	for _, bonusID := range bonusIDs {
-		var bonus *encx.AdminBonus
-		id := bonusID
-		err := runWithAntiSpamRetry(fmt.Sprintf("read level %d bonus %d", levelNum, id), func() error {
-			var callErr error
-			bonus, callErr = client.AdminGetBonus(ctx, gameID, levelNum, id)
-			return callErr
-		})
-		if err != nil {
-			return err
-		}
-		if bonus != nil {
-			existing = append(existing, bonusComparableKey(*bonus))
+	deleteIDs := bonusIDs
+	createBonuses := make([]encx.AdminBonus, 0, len(src.Bonuses))
+	plannedFromSnapshot := false
+	if current != nil {
+		if plannedDeleteIDs, plannedCreateBonuses, ok := bonusDeleteCreatePlan(src, *current, bonusIDs, levelID); ok {
+			deleteIDs = plannedDeleteIDs
+			createBonuses = plannedCreateBonuses
+			plannedFromSnapshot = true
 		}
 	}
-	if bonusKeysMatch(existing, want) {
-		return nil
+	if !plannedFromSnapshot {
+		for _, srcBonus := range src.Bonuses {
+			bonus, ok := scenarioBonusToAdminBonus(srcBonus, levelID)
+			if !ok {
+				continue
+			}
+			createBonuses = append(createBonuses, bonus)
+		}
 	}
 
-	for _, bonusID := range bonusIDs {
+	for _, bonusID := range deleteIDs {
 		id := bonusID
 		err := runWithAntiSpamRetry(fmt.Sprintf("delete level %d bonus %d", levelNum, id), func() error {
 			return client.AdminDeleteBonus(ctx, gameID, levelNum, id)
@@ -812,11 +867,7 @@ func syncLevelBonusesToScenario(ctx context.Context, client *encx.Client, gameID
 		}
 		stats.BonusesDeleted++
 	}
-	for _, srcBonus := range src.Bonuses {
-		bonus, ok := scenarioBonusToAdminBonus(srcBonus, levelID)
-		if !ok {
-			continue
-		}
+	for _, bonus := range createBonuses {
 		err := runWithAntiSpamRetry(fmt.Sprintf("create bonus on level %d", levelNum), func() error {
 			return client.AdminCreateBonus(ctx, gameID, levelNum, bonus)
 		})
@@ -1041,6 +1092,29 @@ func readAdminLevelsByNumber(ctx context.Context, client *encx.Client, gameID in
 	return out, nil
 }
 
+func readCurrentScenarioLevelsByNumber(ctx context.Context, client *encx.Client, gameID int) (map[int]scenario.Level, error) {
+	var body string
+	err := runWithAntiSpamRetry("read current game scenario", func() error {
+		var callErr error
+		body, callErr = client.GetGameScenarioHTML(ctx, gameID)
+		return callErr
+	})
+	if err != nil {
+		return nil, err
+	}
+	doc, err := scenario.ParseString(body, fmt.Sprintf("GameScenario.aspx?gid=%d", gameID))
+	if err != nil {
+		return nil, err
+	}
+	out := make(map[int]scenario.Level, len(doc.Levels))
+	for _, level := range doc.Levels {
+		if level.Number > 0 {
+			out[level.Number] = level
+		}
+	}
+	return out, nil
+}
+
 func syncMissingScenario(ctx context.Context, cfg *config, client *encx.Client, doc *scenario.Document, progress func(string)) (importSyncStats, error) {
 	stats := importSyncStats{}
 
@@ -1079,9 +1153,15 @@ func syncMissingScenario(ctx context.Context, cfg *config, client *encx.Client, 
 		}
 	}
 
+	currentLevels, _ := readCurrentScenarioLevelsByNumber(ctx, client, cfg.gameId)
+
 	for idx, src := range doc.Levels {
 		levelNum := idx + 1
 		levelName := importLevelName(levelNum, src.Name)
+		var current *scenario.Level
+		if cur, ok := currentLevels[levelNum]; ok {
+			current = &cur
+		}
 
 		var curName string
 		var curComment string
@@ -1154,17 +1234,17 @@ func syncMissingScenario(ctx context.Context, cfg *config, client *encx.Client, 
 			}
 		}
 
-		if err := syncLevelTasksToScenario(ctx, client, cfg.gameId, levelNum, src, &stats); err != nil {
+		if err := syncLevelTasksToScenario(ctx, client, cfg.gameId, levelNum, src, current, &stats); err != nil {
 			return stats, err
 		}
-		if err := syncLevelHintsToScenario(ctx, client, cfg.gameId, levelNum, src, &stats); err != nil {
+		if err := syncLevelHintsToScenario(ctx, client, cfg.gameId, levelNum, src, current, &stats); err != nil {
 			return stats, err
 		}
 		levelID := levelIDs[levelNum]
 		if len(src.Bonuses) > 0 && levelID == 0 {
 			return stats, fmt.Errorf("level %d: missing admin level ID for bonus import", levelNum)
 		}
-		if err := syncLevelBonusesToScenario(ctx, client, cfg.gameId, levelNum, levelID, src, &stats); err != nil {
+		if err := syncLevelBonusesToScenario(ctx, client, cfg.gameId, levelNum, levelID, src, current, &stats); err != nil {
 			return stats, err
 		}
 		if err := syncLevelSectorsToScenario(ctx, client, cfg.gameId, levelNum, src, &stats); err != nil {

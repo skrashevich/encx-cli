@@ -111,7 +111,21 @@ func ParseFile(path string) (*Document, error) {
 		missingSet: make(map[string]struct{}),
 	}
 
-	levels, err := parseLevels(string(raw), state)
+	return parseDocument(string(raw), absPath, state)
+}
+
+// ParseString parses a GameScenario HTML export already loaded in memory.
+func ParseString(raw, sourcePath string) (*Document, error) {
+	state := &assetRewriteState{
+		baseDir:    "",
+		cache:      make(map[string]string),
+		missingSet: make(map[string]struct{}),
+	}
+	return parseDocument(raw, sourcePath, state)
+}
+
+func parseDocument(raw, sourcePath string, state *assetRewriteState) (*Document, error) {
+	levels, err := parseLevels(raw, state)
 	if err != nil {
 		return nil, err
 	}
@@ -122,18 +136,18 @@ func ParseFile(path string) (*Document, error) {
 	sort.Strings(missing)
 
 	doc := &Document{
-		SourcePath:     absPath,
+		SourcePath:     sourcePath,
 		Levels:         levels,
 		EmbeddedAssets: state.embeddedCount,
 		MissingAssets:  missing,
 	}
-	if m := gameTitleRe.FindStringSubmatch(string(raw)); len(m) >= 2 {
+	if m := gameTitleRe.FindStringSubmatch(raw); len(m) >= 2 {
 		doc.GameTitle = strings.TrimSpace(html.UnescapeString(m[1]))
 	}
-	if m := gameIDRe.FindStringSubmatch(string(raw)); len(m) >= 2 {
+	if m := gameIDRe.FindStringSubmatch(raw); len(m) >= 2 {
 		doc.GameID, _ = strconv.Atoi(m[1])
 	}
-	if m := gameNumRe.FindStringSubmatch(string(raw)); len(m) >= 2 {
+	if m := gameNumRe.FindStringSubmatch(raw); len(m) >= 2 {
 		doc.GameNum, _ = strconv.Atoi(m[1])
 	}
 	return doc, nil
@@ -450,8 +464,17 @@ func normalizeHTMLFragment(fragment string, state *assetRewriteState) string {
 	out := strings.TrimSpace(fragment)
 	out = strings.ReplaceAll(out, "\r\n", "\n")
 	out = strings.ReplaceAll(out, "\r", "\n")
+	out = normalizeBRAdjacentNewlines(out)
 	out = embedLocalAssets(out, state)
 	return strings.TrimSpace(out)
+}
+
+func normalizeBRAdjacentNewlines(fragment string) string {
+	beforeBR := regexp.MustCompile(`(?is)\n[ \t]*(<br\s*/?>)`)
+	afterBR := regexp.MustCompile(`(?is)(<br\s*/?>)\s*\n\s*`)
+	fragment = beforeBR.ReplaceAllString(fragment, "$1")
+	fragment = afterBR.ReplaceAllString(fragment, "$1")
+	return fragment
 }
 
 func cleanInlineText(v string) string {
@@ -535,7 +558,9 @@ func skipAssetEmbedding(pathValue string) bool {
 	return strings.HasPrefix(lower, "http://") ||
 		strings.HasPrefix(lower, "https://") ||
 		strings.HasPrefix(lower, "data:") ||
+		strings.HasPrefix(lower, "geo:") ||
 		strings.HasPrefix(lower, "mailto:") ||
+		strings.HasPrefix(lower, "tel:") ||
 		strings.HasPrefix(lower, "#") ||
 		strings.HasPrefix(lower, "//")
 }

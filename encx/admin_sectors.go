@@ -242,14 +242,14 @@ func sectorPresent(body string, sectorID int) bool {
 }
 
 func (c *Client) adminDeleteSector(ctx context.Context, gameID, levelNum, sectorID int) error {
-	listURL := c.adminLevelEditorAnswersListURL(gameID, levelNum)
-	deleteBody, err := c.adminDeleteSectorURL(ctx, fmt.Sprintf("%s&delsector=%d", listURL, sectorID), listURL)
+	deleteBody, err := c.adminDeleteSectorAndReadList(ctx, gameID, levelNum, sectorID)
 	if err != nil {
 		return err
 	}
-	if sectorStartedDeleteMessageRE.MatchString(html.UnescapeString(deleteBody)) {
-		return ErrSectorStarted
+	if !sectorPresent(deleteBody, sectorID) {
+		return nil
 	}
+
 	listBody, err := c.adminReadSectorAnswersList(ctx, gameID, levelNum)
 	if err != nil {
 		return err
@@ -260,14 +260,26 @@ func (c *Client) adminDeleteSector(ctx context.Context, gameID, levelNum, sector
 	return nil
 }
 
+func (c *Client) adminDeleteSectorAndReadList(ctx context.Context, gameID, levelNum, sectorID int) (string, error) {
+	listURL := c.adminLevelEditorAnswersListURL(gameID, levelNum)
+	deleteBody, err := c.adminDeleteSectorURL(ctx, fmt.Sprintf("%s&delsector=%d", listURL, sectorID), listURL)
+	if err != nil {
+		return "", err
+	}
+	if sectorStartedDeleteMessageRE.MatchString(html.UnescapeString(deleteBody)) {
+		return "", ErrSectorStarted
+	}
+	return deleteBody, nil
+}
+
 // AdminClearLevelSectors deletes all sectors exposed by the level editor.
 func (c *Client) AdminClearLevelSectors(ctx context.Context, gameID, levelNum int) error {
 	const maxRounds = 3
+	body, err := c.adminReadSectorAnswersList(ctx, gameID, levelNum)
+	if err != nil {
+		return err
+	}
 	for range maxRounds {
-		body, err := c.adminReadSectorAnswersList(ctx, gameID, levelNum)
-		if err != nil {
-			return err
-		}
 		ids := parseSectorDeleteIDs(body)
 		if len(ids) == 0 {
 			return nil
@@ -276,13 +288,15 @@ func (c *Client) AdminClearLevelSectors(ctx context.Context, gameID, levelNum in
 		deleted := 0
 		var startedErr error
 		for _, id := range ids {
-			if err := c.adminDeleteSector(ctx, gameID, levelNum, id); err != nil {
+			nextBody, err := c.adminDeleteSectorAndReadList(ctx, gameID, levelNum, id)
+			if err != nil {
 				if errors.Is(err, ErrSectorStarted) {
 					startedErr = err
 					continue
 				}
 				return fmt.Errorf("encx: delete sector %d: %w", id, err)
 			}
+			body = nextBody
 			deleted++
 		}
 		if deleted == 0 {

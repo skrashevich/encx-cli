@@ -87,6 +87,7 @@ func TestAdminAddSectorAnswersFormTargetsExistingSector(t *testing.T) {
 func TestAdminClearLevelSectorsRemovesEmptyShells(t *testing.T) {
 	alive := map[int]bool{1: true, 2: true, 3: true}
 	var deleted []int
+	listReads := 0
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch {
 		case strings.Contains(r.URL.Path, "ALoader/LevelInfo.aspx") && r.URL.Query().Get("object") == "3" && r.URL.Query().Get("sector") == "":
@@ -100,6 +101,7 @@ func TestAdminClearLevelSectorsRemovesEmptyShells(t *testing.T) {
 		case strings.Contains(r.URL.Path, "ALoader/LevelInfo.aspx") && r.URL.Query().Get("sector") != "":
 			_, _ = w.Write([]byte(``))
 		case strings.Contains(r.URL.Path, "LevelEditor.aspx") && r.URL.Query().Get("swanswers") == "1" && r.URL.Query().Get("delsector") == "":
+			listReads++
 			var b strings.Builder
 			for id := range alive {
 				if alive[id] {
@@ -126,6 +128,9 @@ func TestAdminClearLevelSectorsRemovesEmptyShells(t *testing.T) {
 	sort.Ints(deleted)
 	if len(deleted) != 3 {
 		t.Fatalf("expected all sector IDs deleted, got %v", deleted)
+	}
+	if listReads != 4 {
+		t.Fatalf("level editor list reads = %d, want 4", listReads)
 	}
 }
 

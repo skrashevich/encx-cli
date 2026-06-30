@@ -99,6 +99,41 @@ func TestParseScenarioFile(t *testing.T) {
 	}
 }
 
+func TestParseScenarioFileNormalizesNewlinesAroundBR(t *testing.T) {
+	dir := t.TempDir()
+	htmlDoc := `
+<a id="LevelsScenarioRepeater_ctl00_lnkLevelAnchorPoint" name="1"></a>
+Уровень №1 "HTML"
+<div class="scenarioBlock border_dark">
+  <span id="LevelsScenarioRepeater_ctl00_LevelTasksRepeater_ctl00_lblLevelTask"><div>Первая
+<br/>
+Вторая</div></span>
+  <span id="LevelsScenarioRepeater_ctl00_LevelHelpsRepeater_ctl00_lblLevelHelpTitle">Подсказка №1 для всех (1 минута)</span><br/>
+  <span id="LevelsScenarioRepeater_ctl00_LevelHelpsRepeater_ctl00_lblLevelHelp"><div>Третья
+<br/>Четвертая</div></span>
+</div>
+`
+	docPath := filepath.Join(dir, "game scenario.html")
+	if err := os.WriteFile(docPath, []byte(htmlDoc), 0o644); err != nil {
+		t.Fatalf("write scenario: %v", err)
+	}
+
+	scenarioDoc, err := scenario.ParseFile(docPath)
+	if err != nil {
+		t.Fatalf("ParseFile error: %v", err)
+	}
+	if got := scenarioDoc.Levels[0].Tasks[0]; strings.Contains(got, "\n<br") || strings.Contains(got, "<br/>\n") || strings.Contains(got, "<br/><br/>") {
+		t.Fatalf("task still has doubled or newline-adjacent br: %q", got)
+	} else if !strings.Contains(got, "Первая<br/>Вторая") {
+		t.Fatalf("task br normalization changed content unexpectedly: %q", got)
+	}
+	if got := scenarioDoc.Levels[0].Hints[0].Text; strings.Contains(got, "\n<br") || strings.Contains(got, "<br/>\n") || strings.Contains(got, "<br/><br/>") {
+		t.Fatalf("hint still has doubled or newline-adjacent br: %q", got)
+	} else if !strings.Contains(got, "Третья<br/>Четвертая") {
+		t.Fatalf("hint br normalization changed content unexpectedly: %q", got)
+	}
+}
+
 func TestScenarioLevelSettingsIncludesAutopassPenalty(t *testing.T) {
 	got := scenarioLevelSettings(scenario.Level{
 		AutopassSecond:        90*60 + 2,
@@ -196,6 +231,164 @@ func TestScenarioBonusToAdminBonusPreservesNegative(t *testing.T) {
 	}
 	if !got.Negative || got.AwardHours != 0 || got.AwardMinutes != 2 || got.AwardSeconds != 5 {
 		t.Fatalf("unexpected negative bonus mapping: %+v", got)
+	}
+}
+
+func TestSyncLevelBonusesSkipsDetailReadsWhenCountsDiffer(t *testing.T) {
+	var editReads int
+	var deleted int
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case strings.Contains(r.URL.Path, "LevelEditor.aspx"):
+			_, _ = w.Write([]byte(`<a data-bonusid="101"></a><a data-bonusid="102"></a>`))
+		case strings.Contains(r.URL.Path, "BonusEdit.aspx") && r.URL.Query().Get("action") == "edit":
+			editReads++
+			_, _ = w.Write([]byte(`<input name="txtBonusName" value="stale">`))
+		case strings.Contains(r.URL.Path, "BonusEdit.aspx") && r.URL.Query().Get("action") == "delete":
+			deleted++
+			_, _ = w.Write([]byte(`ok`))
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer srv.Close()
+
+	client := encx.New(strings.TrimPrefix(srv.URL, "http://"), encx.WithHTTP(), encx.WithAdminDelay(0))
+	stats := &importSyncStats{}
+	if err := syncLevelBonusesToScenario(context.Background(), client, 1, 2, 22, scenario.Level{}, nil, stats); err != nil {
+		t.Fatalf("syncLevelBonusesToScenario: %v", err)
+	}
+	if editReads != 0 {
+		t.Fatalf("edit reads = %d, want 0", editReads)
+	}
+	if deleted != 2 || stats.BonusesDeleted != 2 {
+		t.Fatalf("deleted = %d stats = %d, want 2", deleted, stats.BonusesDeleted)
+	}
+}
+
+func TestSyncLevelBonusesSkipsDetailReadsWithoutSnapshot(t *testing.T) {
+	var editReads int
+	var deleted int
+	var created int
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case strings.Contains(r.URL.Path, "LevelEditor.aspx"):
+			_, _ = w.Write([]byte(`<a data-bonusid="101"></a><a data-bonusid="102"></a>`))
+		case strings.Contains(r.URL.Path, "BonusEdit.aspx") && r.URL.Query().Get("action") == "edit":
+			editReads++
+			_, _ = w.Write([]byte(`<input name="txtBonusName" value="stale">`))
+		case strings.Contains(r.URL.Path, "BonusEdit.aspx") && r.URL.Query().Get("action") == "delete":
+			deleted++
+			_, _ = w.Write([]byte(`ok`))
+		case strings.Contains(r.URL.Path, "BonusEdit.aspx") && r.URL.Query().Get("action") == "save":
+			created++
+			_, _ = w.Write([]byte(`ok`))
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer srv.Close()
+
+	client := encx.New(strings.TrimPrefix(srv.URL, "http://"), encx.WithHTTP(), encx.WithAdminDelay(0))
+	stats := &importSyncStats{}
+	src := scenario.Level{Bonuses: []scenario.Bonus{
+		{Name: "fresh 1", AwardSeconds: 60, Answers: []string{"a"}},
+		{Name: "fresh 2", AwardSeconds: 120, Answers: []string{"b"}},
+	}}
+	if err := syncLevelBonusesToScenario(context.Background(), client, 1, 2, 22, src, nil, stats); err != nil {
+		t.Fatalf("syncLevelBonusesToScenario: %v", err)
+	}
+	if editReads != 0 {
+		t.Fatalf("edit reads = %d, want 0", editReads)
+	}
+	if deleted != 2 || created != 2 {
+		t.Fatalf("deleted = %d created = %d, want 2/2", deleted, created)
+	}
+}
+
+func TestSyncLevelBonusesUsesCurrentScenarioSnapshot(t *testing.T) {
+	var editReads int
+	var deleted int
+	var created int
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case strings.Contains(r.URL.Path, "LevelEditor.aspx"):
+			_, _ = w.Write([]byte(`<a data-bonusid="101"></a><a data-bonusid="102"></a>`))
+		case strings.Contains(r.URL.Path, "BonusEdit.aspx") && r.URL.Query().Get("action") == "edit":
+			editReads++
+			_, _ = w.Write([]byte(`<input name="txtBonusName" value="stale">`))
+		case strings.Contains(r.URL.Path, "BonusEdit.aspx") && r.URL.Query().Get("action") == "delete":
+			deleted++
+			_, _ = w.Write([]byte(`ok`))
+		case strings.Contains(r.URL.Path, "BonusEdit.aspx") && r.URL.Query().Get("action") == "save":
+			created++
+			_, _ = w.Write([]byte(`ok`))
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer srv.Close()
+
+	client := encx.New(strings.TrimPrefix(srv.URL, "http://"), encx.WithHTTP(), encx.WithAdminDelay(0))
+	stats := &importSyncStats{}
+	current := scenario.Level{Bonuses: []scenario.Bonus{
+		{Name: "stale 1", AwardSeconds: 60, Answers: []string{"a"}},
+		{Name: "stale 2", AwardSeconds: 120, Answers: []string{"b"}},
+	}}
+	src := scenario.Level{Bonuses: []scenario.Bonus{
+		{Name: "fresh 1", AwardSeconds: 60, Answers: []string{"a"}},
+		{Name: "fresh 2", AwardSeconds: 120, Answers: []string{"b"}},
+	}}
+	if err := syncLevelBonusesToScenario(context.Background(), client, 1, 2, 22, src, &current, stats); err != nil {
+		t.Fatalf("syncLevelBonusesToScenario: %v", err)
+	}
+	if editReads != 0 {
+		t.Fatalf("edit reads = %d, want 0", editReads)
+	}
+	if deleted != 2 || created != 2 {
+		t.Fatalf("deleted = %d created = %d, want 2/2", deleted, created)
+	}
+}
+
+func TestSyncLevelBonusesDiffsCurrentScenarioSnapshot(t *testing.T) {
+	var deleted []string
+	var created int
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case strings.Contains(r.URL.Path, "LevelEditor.aspx"):
+			_, _ = w.Write([]byte(`<a data-bonusid="101"></a><a data-bonusid="102"></a>`))
+		case strings.Contains(r.URL.Path, "BonusEdit.aspx") && r.URL.Query().Get("action") == "edit":
+			t.Fatalf("unexpected bonus detail read: %s", r.URL.String())
+		case strings.Contains(r.URL.Path, "BonusEdit.aspx") && r.URL.Query().Get("action") == "delete":
+			deleted = append(deleted, r.URL.Query().Get("bonus"))
+			_, _ = w.Write([]byte(`ok`))
+		case strings.Contains(r.URL.Path, "BonusEdit.aspx") && r.URL.Query().Get("action") == "save":
+			created++
+			_, _ = w.Write([]byte(`ok`))
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer srv.Close()
+
+	client := encx.New(strings.TrimPrefix(srv.URL, "http://"), encx.WithHTTP(), encx.WithAdminDelay(0))
+	stats := &importSyncStats{}
+	current := scenario.Level{Bonuses: []scenario.Bonus{
+		{Name: "keep", AwardSeconds: 60, Answers: []string{"a"}},
+		{Name: "delete", AwardSeconds: 120, Answers: []string{"b"}},
+	}}
+	src := scenario.Level{Bonuses: []scenario.Bonus{
+		{Name: "keep", AwardSeconds: 60, Answers: []string{"a"}},
+		{Name: "create", AwardSeconds: 180, Answers: []string{"c"}},
+	}}
+	if err := syncLevelBonusesToScenario(context.Background(), client, 1, 2, 22, src, &current, stats); err != nil {
+		t.Fatalf("syncLevelBonusesToScenario: %v", err)
+	}
+	if len(deleted) != 1 || deleted[0] != "102" {
+		t.Fatalf("deleted = %v, want [102]", deleted)
+	}
+	if created != 1 {
+		t.Fatalf("created = %d, want 1", created)
 	}
 }
 
