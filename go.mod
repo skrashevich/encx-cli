@@ -4,7 +4,7 @@ go 1.26
 
 require (
 	golang.org/x/mobile v0.0.0-20260611195102-4dd8f1dbf5d2
-	golang.org/x/term v0.43.0
+	golang.org/x/term v0.44.0
 )
 
 require (
