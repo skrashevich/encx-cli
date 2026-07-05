@@ -2,6 +2,11 @@ package encxmobile
 
 import (
 	"encoding/json"
+	"net/http"
+	"net/http/httptest"
+	"sort"
+	"strings"
+	"sync"
 	"testing"
 	"time"
 )
@@ -130,5 +135,71 @@ func TestSetCodeSendTimeoutSeconds(t *testing.T) {
 	c.SetCodeSendTimeoutSeconds(0)
 	if c.codeSendTimeout != defaultCodeSendTimeout {
 		t.Fatalf("reset codeSendTimeout = %v, want default", c.codeSendTimeout)
+	}
+}
+
+func TestSetGameRequestMinIntervalMillis(t *testing.T) {
+	c := NewClient("tech.en.cx", true)
+	if c.gameRequestMinInterval != defaultGameRequestMinInterval {
+		t.Fatalf("gameRequestMinInterval = %v, want %v", c.gameRequestMinInterval, defaultGameRequestMinInterval)
+	}
+
+	c.SetGameRequestMinIntervalMillis(25)
+	if c.gameRequestMinInterval != 25*time.Millisecond {
+		t.Fatalf("gameRequestMinInterval = %v, want 25ms", c.gameRequestMinInterval)
+	}
+
+	c.SetGameRequestMinIntervalMillis(0)
+	if c.gameRequestMinInterval != 0 {
+		t.Fatalf("gameRequestMinInterval = %v, want disabled", c.gameRequestMinInterval)
+	}
+}
+
+func TestGameRequestsArePacedAcrossConcurrentCalls(t *testing.T) {
+	var mu sync.Mutex
+	var starts []time.Time
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/gameengines/encounter/play/42" {
+			http.NotFound(w, r)
+			return
+		}
+		mu.Lock()
+		starts = append(starts, time.Now())
+		mu.Unlock()
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"GameId":42}`))
+	}))
+	defer srv.Close()
+
+	c := NewClientWithOptions(strings.TrimPrefix(srv.URL, "http://"), false, true, 5, "")
+	c.SetGameRequestMinIntervalMillis(50)
+
+	ready := make(chan struct{})
+	errs := make(chan error, 2)
+	for i := 0; i < 2; i++ {
+		go func() {
+			<-ready
+			_, err := c.GetGameModel(42)
+			errs <- err
+		}()
+	}
+	close(ready)
+
+	for i := 0; i < 2; i++ {
+		if err := <-errs; err != nil {
+			t.Fatalf("GetGameModel: %v", err)
+		}
+	}
+
+	mu.Lock()
+	got := append([]time.Time(nil), starts...)
+	mu.Unlock()
+	if len(got) != 2 {
+		t.Fatalf("request count = %d, want 2", len(got))
+	}
+	sort.Slice(got, func(i, j int) bool { return got[i].Before(got[j]) })
+	if gap := got[1].Sub(got[0]); gap < 45*time.Millisecond {
+		t.Fatalf("game requests gap = %v, want at least 45ms", gap)
 	}
 }

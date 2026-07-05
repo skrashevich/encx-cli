@@ -24,7 +24,11 @@ func (c *EncClient) LoginWithCaptcha(login, password, magicNumbers string) (stri
 
 // GetGameModel returns the current game state as GameModel JSON.
 func (c *EncClient) GetGameModel(gameID int64) (string, error) {
-	model, err := c.client.GetGameModel(c.bg(), int(gameID))
+	ctx := c.bg()
+	if err := c.paceGameRequest(ctx); err != nil {
+		return "", err
+	}
+	model, err := c.client.GetGameModel(ctx, int(gameID))
 	if err != nil {
 		return "", err
 	}
@@ -33,7 +37,11 @@ func (c *EncClient) GetGameModel(gameID int64) (string, error) {
 
 // GetGameModelLevel returns the state for a specific level number in storm sequence games.
 func (c *EncClient) GetGameModelLevel(gameID, levelNumber int64) (string, error) {
-	model, err := c.client.GetGameModelLevel(c.bg(), int(gameID), int(levelNumber))
+	ctx := c.bg()
+	if err := c.paceGameRequest(ctx); err != nil {
+		return "", err
+	}
+	model, err := c.client.GetGameModelLevel(ctx, int(gameID), int(levelNumber))
 	if err != nil {
 		return "", err
 	}
@@ -44,6 +52,9 @@ func (c *EncClient) GetGameModelLevel(gameID, levelNumber int64) (string, error)
 func (c *EncClient) PingGame(gameID int64) (string, error) {
 	ctx, cancel := c.codeSendCtx()
 	defer cancel()
+	if err := c.paceGameRequest(ctx); err != nil {
+		return "", err
+	}
 	model, err := c.client.GetGameModel(ctx, int(gameID))
 	if err != nil {
 		return "", err
@@ -55,6 +66,9 @@ func (c *EncClient) PingGame(gameID int64) (string, error) {
 func (c *EncClient) SendCode(gameID, levelID, levelNumber int64, code string) (string, error) {
 	ctx, cancel := c.codeSendCtx()
 	defer cancel()
+	if err := c.paceGameRequest(ctx); err != nil {
+		return "", err
+	}
 	model, err := c.client.SendCode(ctx, int(gameID), int(levelID), int(levelNumber), code)
 	if err != nil {
 		return "", err
@@ -66,6 +80,9 @@ func (c *EncClient) SendCode(gameID, levelID, levelNumber int64, code string) (s
 func (c *EncClient) SendBonusCode(gameID, levelID, levelNumber int64, code string) (string, error) {
 	ctx, cancel := c.codeSendCtx()
 	defer cancel()
+	if err := c.paceGameRequest(ctx); err != nil {
+		return "", err
+	}
 	model, err := c.client.SendBonusCode(ctx, int(gameID), int(levelID), int(levelNumber), code)
 	if err != nil {
 		return "", err
@@ -75,7 +92,11 @@ func (c *EncClient) SendBonusCode(gameID, levelID, levelNumber int64, code strin
 
 // GetPenaltyHint requests a penalty hint. Returns updated GameModel JSON.
 func (c *EncClient) GetPenaltyHint(gameID, penaltyID int64) (string, error) {
-	model, err := c.client.GetPenaltyHint(c.bg(), int(gameID), int(penaltyID))
+	ctx := c.bg()
+	if err := c.paceGameRequest(ctx); err != nil {
+		return "", err
+	}
+	model, err := c.client.GetPenaltyHint(ctx, int(gameID), int(penaltyID))
 	if err != nil {
 		return "", err
 	}
@@ -117,7 +138,11 @@ func (c *EncClient) GetGameStatistics(gameID int64) (string, error) {
 
 // GetTimeoutToGame returns seconds until game start, or -1 if no counter is present.
 func (c *EncClient) GetTimeoutToGame(gameID int64) (int64, error) {
-	val, err := c.client.GetTimeoutToGame(c.bg(), int(gameID))
+	ctx := c.bg()
+	if err := c.paceGameRequest(ctx); err != nil {
+		return 0, err
+	}
+	val, err := c.client.GetTimeoutToGame(ctx, int(gameID))
 	if err != nil {
 		return 0, err
 	}
