@@ -6,7 +6,7 @@ import (
 
 // Login authenticates on the Encounter domain. Returns LoginResponse JSON.
 func (c *EncClient) Login(login, password string) (string, error) {
-	resp, err := c.client.Login(c.bg(), login, password)
+	resp, err := c.client.Login(c.pacedBG(), login, password)
 	if err != nil {
 		return "", err
 	}
@@ -15,7 +15,7 @@ func (c *EncClient) Login(login, password string) (string, error) {
 
 // LoginWithCaptcha authenticates with CAPTCHA digits when Login returns Error==1.
 func (c *EncClient) LoginWithCaptcha(login, password, magicNumbers string) (string, error) {
-	resp, err := c.client.Login(c.bg(), login, password, encx.LoginOptions{MagicNumbers: magicNumbers})
+	resp, err := c.client.Login(c.pacedBG(), login, password, encx.LoginOptions{MagicNumbers: magicNumbers})
 	if err != nil {
 		return "", err
 	}
@@ -108,9 +108,9 @@ func (c *EncClient) GetGameList(page int64) (string, error) {
 	var list *encx.GameListResponse
 	var err error
 	if page > 0 {
-		list, err = c.client.GetGameList(c.bg(), int(page))
+		list, err = c.client.GetGameList(c.pacedBG(), int(page))
 	} else {
-		list, err = c.client.GetGameList(c.bg())
+		list, err = c.client.GetGameList(c.pacedBG())
 	}
 	if err != nil {
 		return "", err
@@ -120,7 +120,7 @@ func (c *EncClient) GetGameList(page int64) (string, error) {
 
 // GetDomainGames returns games parsed from the domain main page as JSON array.
 func (c *EncClient) GetDomainGames() (string, error) {
-	games, err := c.client.GetDomainGames(c.bg())
+	games, err := c.client.GetDomainGames(c.pacedBG())
 	if err != nil {
 		return "", err
 	}
@@ -129,7 +129,7 @@ func (c *EncClient) GetDomainGames() (string, error) {
 
 // GetGameStatistics returns full game statistics as JSON.
 func (c *EncClient) GetGameStatistics(gameID int64) (string, error) {
-	stats, err := c.client.GetGameStatistics(c.bg(), int(gameID))
+	stats, err := c.client.GetGameStatistics(c.pacedBG(), int(gameID))
 	if err != nil {
 		return "", err
 	}
@@ -154,17 +154,17 @@ func (c *EncClient) GetTimeoutToGame(gameID int64) (int64, error) {
 
 // EnterGame registers the player in a game. Returns raw server response.
 func (c *EncClient) EnterGame(gameID int64) (string, error) {
-	return c.client.EnterGame(c.bg(), int(gameID))
+	return c.client.EnterGame(c.pacedBG(), int(gameID))
 }
 
 // GetGameDetails returns the game details page HTML.
 func (c *EncClient) GetGameDetails(gameID int64) (string, error) {
-	return c.client.GetGameDetails(c.bg(), int(gameID))
+	return c.client.GetGameDetails(c.pacedBG(), int(gameID))
 }
 
 // GetProfile returns the current user profile as JSON.
 func (c *EncClient) GetProfile() (string, error) {
-	profile, err := c.client.GetProfile(c.bg())
+	profile, err := c.client.GetProfile(c.pacedBG())
 	if err != nil {
 		return "", err
 	}
@@ -173,17 +173,17 @@ func (c *EncClient) GetProfile() (string, error) {
 
 // GetTeamDetails returns team details page HTML.
 func (c *EncClient) GetTeamDetails(teamID int64) (string, error) {
-	return c.client.GetTeamDetails(c.bg(), int(teamID))
+	return c.client.GetTeamDetails(c.pacedBG(), int(teamID))
 }
 
 // GetMyTeamDetails returns the current user's team page HTML.
 func (c *EncClient) GetMyTeamDetails() (string, error) {
-	return c.client.GetMyTeamDetails(c.bg())
+	return c.client.GetMyTeamDetails(c.pacedBG())
 }
 
 // GetTeamManagementInfo returns parsed team management info as JSON.
 func (c *EncClient) GetTeamManagementInfo(teamID int64) (string, error) {
-	info, err := c.client.GetTeamManagementInfo(c.bg(), int(teamID))
+	info, err := c.client.GetTeamManagementInfo(c.pacedBG(), int(teamID))
 	if err != nil {
 		return "", err
 	}
@@ -192,7 +192,7 @@ func (c *EncClient) GetTeamManagementInfo(teamID int64) (string, error) {
 
 // GetTeamInvitations returns team invitations addressed to the current user as JSON.
 func (c *EncClient) GetTeamInvitations() (string, error) {
-	invitations, err := c.client.GetTeamInvitations(c.bg())
+	invitations, err := c.client.GetTeamInvitations(c.pacedBG())
 	if err != nil {
 		return "", err
 	}
@@ -201,47 +201,47 @@ func (c *EncClient) GetTeamInvitations() (string, error) {
 
 // AcceptTeamInvitation accepts a team invitation.
 func (c *EncClient) AcceptTeamInvitation(teamID int64) error {
-	return c.client.AcceptTeamInvitation(c.bg(), int(teamID))
+	return c.client.AcceptTeamInvitation(c.pacedBG(), int(teamID))
 }
 
 // RejectTeamInvitation rejects a team invitation.
 func (c *EncClient) RejectTeamInvitation(teamID int64) error {
-	return c.client.RejectTeamInvitation(c.bg(), int(teamID))
+	return c.client.RejectTeamInvitation(c.pacedBG(), int(teamID))
 }
 
 // RequestTeamMembership sends a request to join a team by name.
 func (c *EncClient) RequestTeamMembership(teamName string) error {
-	return c.client.RequestTeamMembership(c.bg(), teamName)
+	return c.client.RequestTeamMembership(c.pacedBG(), teamName)
 }
 
 // InviteTeamMember invites a user login into a team.
 func (c *EncClient) InviteTeamMember(teamID int64, login string) error {
-	return c.client.InviteTeamMember(c.bg(), int(teamID), login)
+	return c.client.InviteTeamMember(c.pacedBG(), int(teamID), login)
 }
 
 // RemoveTeamInvitation removes a pending invitation sent by a team.
 func (c *EncClient) RemoveTeamInvitation(teamID, userID int64) error {
-	return c.client.RemoveTeamInvitation(c.bg(), int(teamID), int(userID))
+	return c.client.RemoveTeamInvitation(c.pacedBG(), int(teamID), int(userID))
 }
 
 // LeaveTeam leaves a team when TeamDetails.aspx exposes a leave action.
 func (c *EncClient) LeaveTeam(teamID int64) error {
-	return c.client.LeaveTeam(c.bg(), int(teamID))
+	return c.client.LeaveTeam(c.pacedBG(), int(teamID))
 }
 
 // RenameTeam renames a team.
 func (c *EncClient) RenameTeam(teamID int64, name string) error {
-	return c.client.RenameTeam(c.bg(), int(teamID), name)
+	return c.client.RenameTeam(c.pacedBG(), int(teamID), name)
 }
 
 // SetTeamSite updates the team website URL.
 func (c *EncClient) SetTeamSite(teamID int64, site string) error {
-	return c.client.SetTeamSite(c.bg(), int(teamID), site)
+	return c.client.SetTeamSite(c.pacedBG(), int(teamID), site)
 }
 
 // SetTeamForum updates the team external forum URL.
 func (c *EncClient) SetTeamForum(teamID int64, forum string) error {
-	return c.client.SetTeamForum(c.bg(), int(teamID), forum)
+	return c.client.SetTeamForum(c.pacedBG(), int(teamID), forum)
 }
 
 // ParseTeamLinks extracts team IDs and names from HTML. Returns JSON array of TeamInfo.

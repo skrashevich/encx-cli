@@ -138,6 +138,33 @@ func TestSetCodeSendTimeoutSeconds(t *testing.T) {
 	}
 }
 
+func TestPacedBGThrottlesNonGameRequests(t *testing.T) {
+	c := NewClient("tech.en.cx", true)
+	c.SetGameRequestMinIntervalMillis(60)
+
+	// First call establishes the timestamp with no wait; the second must be held back
+	// by at least the configured interval. pacedBG shares the game-request pacer, so
+	// non-game server calls (login, team, stats, profile) are throttled on the same stream.
+	_ = c.pacedBG()
+	start := time.Now()
+	_ = c.pacedBG()
+	if gap := time.Since(start); gap < 55*time.Millisecond {
+		t.Fatalf("pacedBG gap = %v, want at least ~60ms", gap)
+	}
+}
+
+func TestPacedBGDisabledWhenIntervalZero(t *testing.T) {
+	c := NewClient("tech.en.cx", true)
+	c.SetGameRequestMinIntervalMillis(0)
+
+	_ = c.pacedBG()
+	start := time.Now()
+	_ = c.pacedBG()
+	if gap := time.Since(start); gap > 20*time.Millisecond {
+		t.Fatalf("pacedBG gap = %v, want no throttling when disabled", gap)
+	}
+}
+
 func TestSetGameRequestMinIntervalMillis(t *testing.T) {
 	c := NewClient("tech.en.cx", true)
 	if c.gameRequestMinInterval != defaultGameRequestMinInterval {

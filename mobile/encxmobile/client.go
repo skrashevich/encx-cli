@@ -94,6 +94,15 @@ func (c *EncClient) bg() context.Context {
 	return context.Background()
 }
 
+// pacedBG returns a background context after enforcing the inter-request pacing floor.
+// It is the throttled counterpart of bg() for server-hitting calls that are not on the
+// timed code-send path. The background context never cancels, so pacing cannot fail here.
+func (c *EncClient) pacedBG() context.Context {
+	ctx := c.bg()
+	_ = c.paceGameRequest(ctx)
+	return ctx
+}
+
 func (c *EncClient) codeSendCtx() (context.Context, context.CancelFunc) {
 	d := c.codeSendTimeout
 	if d <= 0 {
