@@ -27,35 +27,40 @@ const (
 	networkDropCode     = "PZDC"
 	networkDropDuration = time.Minute
 	networkDropHangMax  = 2 * time.Second
+
+	mockDomain = "mock.en.cx"
 )
 
 var version = "dev"
 
 type server struct {
-	mu          sync.Mutex
-	fixtures    *fixtureSet
-	scenario    *scenario.Document
-	sessions    map[string]*sessionState
-	authStates  map[string]*sessionState
-	silentUntil map[string]time.Time
-	nextSID     uint64
+	mu                    sync.Mutex
+	fixtures              *fixtureSet
+	scenario              *scenario.Document
+	sessions              map[string]*sessionState
+	authStates            map[string]*sessionState
+	silentUntil           map[string]time.Time
+	antiBotAnswerAttempts map[int]bool
+	nextSID               uint64
 }
 
 type sessionState struct {
-	mu              sync.Mutex
-	AuthKey         string
-	Login           string
-	CurrentIdx      int
-	Completed       bool
-	Passed          []bool
-	SectorPassed    [][]bool
-	SectorAnswers   [][]string
-	LevelStartedAt  []time.Time
-	AnsweredBonuses map[int]bool
-	BonusAnswers    map[int]string
-	Actions         []encx.CodeAction
-	LastAction      *encx.EngineAction
-	UpdatedAt       time.Time
+	mu                sync.Mutex
+	AuthKey           string
+	Login             string
+	CurrentIdx        int
+	Completed         bool
+	Passed            []bool
+	SectorPassed      [][]bool
+	SectorAnswers     [][]string
+	LevelStartedAt    []time.Time
+	AnsweredBonuses   map[int]bool
+	BonusAnswers      map[int]string
+	Actions           []encx.CodeAction
+	LastAction        *encx.EngineAction
+	UpdatedAt         time.Time
+	PendingTransition int
+	AnswerAttempts    int
 }
 
 func main() {
@@ -89,11 +94,12 @@ func main() {
 	}
 
 	s := &server{
-		fixtures:    fixtures,
-		scenario:    scenarioDoc,
-		sessions:    make(map[string]*sessionState),
-		authStates:  make(map[string]*sessionState),
-		silentUntil: make(map[string]time.Time),
+		fixtures:              fixtures,
+		scenario:              scenarioDoc,
+		sessions:              make(map[string]*sessionState),
+		authStates:            make(map[string]*sessionState),
+		silentUntil:           make(map[string]time.Time),
+		antiBotAnswerAttempts: antiBotAnswerAttemptsFromEnv(),
 	}
 
 	mux := http.NewServeMux()
@@ -138,6 +144,7 @@ func withCommonHeaders(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Cache-Control", "no-cache")
 		w.Header().Set("Pragma", "no-cache")
+		w.Header().Set("Expires", time.Unix(1, 0).UTC().Format(http.TimeFormat))
 		next.ServeHTTP(w, r)
 	})
 }
@@ -225,17 +232,18 @@ func setMockAuthCookies(w http.ResponseWriter, sessionID, login string) {
 		HttpOnly: true,
 		SameSite: http.SameSiteLaxMode,
 	})
-	http.SetCookie(w, &http.Cookie{
-		Name:  "stoken",
-		Value: "mock-stoken",
-		Path:  "/",
-	})
+	setProtocolCookies(w)
 	http.SetCookie(w, &http.Cookie{
 		Name:     "atoken",
 		Value:    fmt.Sprintf("uid%%3d101%%26iss%%3d0%%26iscd%%3d1%%26tkn%%3dmock-%s", login),
 		Path:     "/",
 		HttpOnly: true,
 	})
+}
+
+func setProtocolCookies(w http.ResponseWriter) {
+	http.SetCookie(w, &http.Cookie{Name: "Domain", Value: mockDomain, Path: "/"})
+	http.SetCookie(w, &http.Cookie{Name: "stoken", Value: "mock-stoken", Path: "/"})
 }
 
 func (s *server) handleUserDetails(w http.ResponseWriter, r *http.Request) {
@@ -502,6 +510,7 @@ func (s *server) handleGamePlayGET(w http.ResponseWriter, r *http.Request) {
 	}
 	st.UpdatedAt = time.Now()
 	s.writeGameModel(w, st)
+	st.LastAction = nil
 }
 
 func (s *server) handleGamePlayPOST(w http.ResponseWriter, r *http.Request) {
@@ -520,11 +529,21 @@ func (s *server) handleGamePlayPOST(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	levelAnswer := strings.TrimSpace(r.Form.Get("LevelAction.Answer"))
-	bonusAnswer := strings.TrimSpace(r.Form.Get("BonusAction.Answer"))
-	answer := levelAnswer
+	levelAnswer := r.Form.Get("LevelAction.Answer")
+	bonusAnswer := r.Form.Get("BonusAction.Answer")
+	_, hasLevelAnswer := r.Form["LevelAction.Answer"]
+	_, hasBonusAnswer := r.Form["BonusAction.Answer"]
+	if !hasLevelAnswer && !hasBonusAnswer {
+		st.mu.Lock()
+		defer st.mu.Unlock()
+		st.UpdatedAt = time.Now()
+		s.writeGameModel(w, st)
+		st.LastAction = nil
+		return
+	}
+	answer := strings.TrimSpace(levelAnswer)
 	if answer == "" {
-		answer = bonusAnswer
+		answer = strings.TrimSpace(bonusAnswer)
 	}
 	if strings.EqualFold(answer, networkDropCode) {
 		st.mu.Lock()
@@ -537,17 +556,85 @@ func (s *server) handleGamePlayPOST(w http.ResponseWriter, r *http.Request) {
 
 	st.mu.Lock()
 	defer st.mu.Unlock()
-	if levelAnswer != "" {
-		s.processAnswer(st, levelAnswer)
-	} else if bonusAnswer != "" {
-		s.processAnswer(st, answer)
+	if s.shouldInjectAntiBot(st) {
+		w.Header().Set("Location", "/NotHumanRequest.aspx?return=redacted")
+		w.WriteHeader(http.StatusFound)
+		return
 	}
+	levelID, levelIDSet, err := formInt(r, "LevelId")
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid level identity"})
+		return
+	}
+	levelNumber, levelNumberSet, err := formInt(r, "LevelNumber")
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid level identity"})
+		return
+	}
+	if (levelIDSet && levelID != currentLevelID(st)) || (levelNumberSet && levelNumber != currentLevelNum(st)) {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "contradictory level identity"})
+		return
+	}
+	if strings.TrimSpace(levelAnswer) != "" && strings.TrimSpace(bonusAnswer) != "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "multiple action types"})
+		return
+	}
+	previousLevel := st.CurrentIdx
+	wasCompleted := st.Completed
+	if levelAnswer != "" {
+		s.processLevelAnswer(st, levelID, levelNumber, levelAnswer)
+	} else if bonusAnswer != "" {
+		s.processBonusAnswer(st, levelID, levelNumber, bonusAnswer)
+	}
+	currentLevel := st.CurrentIdx
+	isCompleted := st.Completed
+	stateTransitioned := currentLevel != previousLevel || (!wasCompleted && isCompleted)
 
 	st.UpdatedAt = time.Now()
-	s.writeGameModel(w, st)
+	actionKind := "level-action"
+	if strings.TrimSpace(bonusAnswer) != "" {
+		actionKind = "bonus-action"
+	}
+	s.writeGameModelWithTransition(w, st, s.profileTransitionEvent(actionKind, stateTransitioned))
+	st.LastAction = nil
+}
+
+func formInt(r *http.Request, name string) (int, bool, error) {
+	raw, ok := r.Form[name]
+	if !ok {
+		return 0, false, nil
+	}
+	if len(raw) != 1 || strings.TrimSpace(raw[0]) == "" {
+		return 0, false, errors.New("invalid form value")
+	}
+	value, err := strconv.Atoi(strings.TrimSpace(raw[0]))
+	if err != nil {
+		return 0, false, err
+	}
+	return value, true, nil
 }
 
 func (s *server) writeGameModel(w http.ResponseWriter, st *sessionState) {
+	if st.PendingTransition != 0 {
+		event := st.PendingTransition
+		st.PendingTransition = 0
+		writeJSON(w, http.StatusOK, map[string]any{
+			"Level":        nil,
+			"Levels":       []any{},
+			"Event":        event,
+			"EngineAction": engineActionToMap(st.LastAction, mockGameID),
+		})
+		return
+	}
+	s.writeGameModelWithTransition(w, st, 0)
+}
+
+func (s *server) writeGameModelWithTransition(w http.ResponseWriter, st *sessionState, event int) {
+	if event != 0 {
+		st.PendingTransition = event
+		s.writeGameModel(w, st)
+		return
+	}
 	now := time.Now()
 	if s.scenario != nil {
 		s.applyScenarioAutopass(st, now)
@@ -558,6 +645,18 @@ func (s *server) writeGameModel(w http.ResponseWriter, st *sessionState) {
 		return
 	}
 	writeJSON(w, http.StatusOK, model)
+}
+
+func (s *server) profileTransitionEvent(actionKind string, stateAdvanced bool) int {
+	if !stateAdvanced || s.fixtures == nil || s.fixtures.profile == nil {
+		return 0
+	}
+	for _, record := range s.fixtures.profile.Records {
+		if record.Kind == actionKind && record.Variant == "transition" && record.Event != 0 {
+			return record.Event
+		}
+	}
+	return 0
 }
 
 func (s *server) handleNotHuman(w http.ResponseWriter, _ *http.Request) {
@@ -577,6 +676,7 @@ func (s *server) requireSessionJSON(w http.ResponseWriter, r *http.Request) (*se
 	if s.dropIfSilent(r, sessionAuthKey(st)) {
 		return nil, false
 	}
+	setProtocolCookies(w)
 	return st, true
 }
 
@@ -591,7 +691,24 @@ func (s *server) requireSessionHTML(w http.ResponseWriter, r *http.Request) (*se
 	if s.dropIfSilent(r, sessionAuthKey(st)) {
 		return nil, false
 	}
+	setProtocolCookies(w)
 	return st, true
+}
+
+func antiBotAnswerAttemptsFromEnv() map[int]bool {
+	attempts := make(map[int]bool)
+	for _, raw := range strings.Split(os.Getenv("ENCX_MOCK_ANTIBOT_ATTEMPTS"), ",") {
+		attempt, err := strconv.Atoi(strings.TrimSpace(raw))
+		if err == nil && attempt > 0 {
+			attempts[attempt] = true
+		}
+	}
+	return attempts
+}
+
+func (s *server) shouldInjectAntiBot(st *sessionState) bool {
+	st.AnswerAttempts++
+	return s.antiBotAnswerAttempts[st.AnswerAttempts]
 }
 
 func (s *server) sessionFromRequest(r *http.Request) (*sessionState, error) {

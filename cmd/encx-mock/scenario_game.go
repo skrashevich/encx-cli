@@ -36,6 +36,9 @@ func (s *server) levelCount() int {
 	if s.scenario != nil {
 		return len(s.scenario.Levels)
 	}
+	if s.fixtures != nil && s.fixtures.profile != nil && s.fixtures.profile.LevelCount() != 0 {
+		return s.fixtures.profile.LevelCount()
+	}
 	return mockLevelCount
 }
 
@@ -75,11 +78,36 @@ func (s *server) sectorCount(levelIdx int) int {
 	if s.scenario != nil && levelIdx >= 0 && levelIdx < len(s.scenario.Levels) {
 		return s.scenario.Levels[levelIdx].SectorCount()
 	}
+	if topology, ok := s.profileLevel(levelIdx); ok {
+		return topology.SectorCount
+	}
 	return mockSectorsPerLevel
 }
 
+func (s *server) requiredSectorCount(levelIdx int) int {
+	if topology, ok := s.profileLevel(levelIdx); ok && topology.RequiredSectorCount > 0 {
+		return topology.RequiredSectorCount
+	}
+	return s.sectorCount(levelIdx)
+}
+
+func (s *server) profileLevel(levelIdx int) (levelTopology, bool) {
+	if s.scenario != nil || s.fixtures == nil || s.fixtures.profile == nil || levelIdx < 0 || levelIdx >= len(s.fixtures.profile.Levels) {
+		return levelTopology{}, false
+	}
+	return s.fixtures.profile.Levels[levelIdx], true
+}
+
 func (s *server) newSessionPassedState() []bool {
-	return make([]bool, s.levelCount())
+	passed := make([]bool, s.levelCount())
+	if s.scenario == nil {
+		for i := range passed {
+			if topology, ok := s.profileLevel(i); ok {
+				passed[i] = topology.Passed
+			}
+		}
+	}
+	return passed
 }
 
 func (s *server) buildGameModelResponse(st *sessionState, now time.Time) (map[string]any, error) {
@@ -135,7 +163,7 @@ func (s *server) buildGameModelFromScenario(st *sessionState, now time.Time) (ma
 	for i := 0; i < sectorCount; i++ {
 		answered := idx < len(st.SectorPassed) && i < len(st.SectorPassed[idx]) && st.SectorPassed[idx][i]
 		sector := map[string]any{
-			"SectorId":   mockSectorBaseID + idx*100 + i + 1,
+			"SectorId":   mockSectorBaseID + idx*mockSectorsPerLevel + i + 1,
 			"Order":      i + 1,
 			"Name":       fmt.Sprintf("Сектор %d", i+1),
 			"IsAnswered": answered,
@@ -143,7 +171,7 @@ func (s *server) buildGameModelFromScenario(st *sessionState, now time.Time) (ma
 		}
 		if answered {
 			code := submittedSectorAnswer(st, idx, i, lvl)
-			sector["Answer"] = sectorAnswerObject(st.Login, code, now)
+			sector["Answer"] = sectorAnswerObject(st.Login, code, actionTime(st, idx, code, now))
 		}
 		sectors[i] = sector
 	}
@@ -188,7 +216,7 @@ func (s *server) buildGameModelFromScenario(st *sessionState, now time.Time) (ma
 		"Helps":                helps,
 		"Bonuses":              scenarioBonuses(st, idx, lvl, now),
 		"PenaltyHelps":         []any{},
-		"MixedActions":         codeActionsToMaps(st.Actions, now),
+		"MixedActions":         codeActionsToMaps(actionsForLevel(st.Actions, idx), now),
 	}
 
 	model := map[string]any{
@@ -256,7 +284,7 @@ func scenarioBonuses(st *sessionState, levelIdx int, lvl scenario.Level, now tim
 		}
 		if answered {
 			if answer, ok := st.BonusAnswers[bonusID]; ok {
-				item["Answer"] = sectorAnswerObject(st.Login, answer, now)
+				item["Answer"] = sectorAnswerObject(st.Login, answer, actionTime(st, levelIdx, answer, now))
 			}
 		}
 		bonuses = append(bonuses, item)
@@ -276,16 +304,44 @@ func submittedSectorAnswer(st *sessionState, levelIdx, sectorIdx int, lvl scenar
 	return fmt.Sprintf("%d", sectorIdx+1)
 }
 
-func (s *server) processAnswer(st *sessionState, answer string) bool {
-	if s.scenario != nil {
-		return s.processScenarioAnswer(st, answer)
+func (s *server) processLevelAnswer(st *sessionState, levelID, levelNumber int, answer string) bool {
+	if !s.validLevelIdentity(st, levelID, levelNumber) {
+		return false
 	}
-	return s.processFixtureAnswer(st, answer)
+	if s.scenario != nil {
+		return s.processScenarioLevelAnswer(st, answer)
+	}
+	return s.processFixtureLevelAnswer(st, answer)
+}
+
+func (s *server) processBonusAnswer(st *sessionState, levelID, levelNumber int, answer string) bool {
+	if !s.validLevelIdentity(st, levelID, levelNumber) {
+		return false
+	}
+	if s.scenario != nil {
+		return s.processScenarioBonusAnswer(st, answer)
+	}
+	return s.processFixtureBonusAnswer(st, answer)
+}
+
+func (s *server) validLevelIdentity(st *sessionState, levelID, levelNumber int) bool {
+	return (levelID == 0 || levelID == currentLevelID(st)) && (levelNumber == 0 || levelNumber == currentLevelNum(st))
+}
+
+func (s *server) processAnswer(st *sessionState, answer string) bool {
+	if s.matchesBonusAnswer(st, answer) {
+		return s.processBonusAnswer(st, 0, 0, answer)
+	}
+	return s.processLevelAnswer(st, 0, 0, answer)
 }
 
 func (s *server) processScenarioAnswer(st *sessionState, answer string) bool {
-	answer = strings.TrimSpace(answer)
-	if answer == "" {
+	return s.processAnswer(st, answer)
+}
+
+func (s *server) processScenarioLevelAnswer(st *sessionState, answer string) bool {
+	normalized := strings.TrimSpace(answer)
+	if normalized == "" {
 		return false
 	}
 
@@ -303,32 +359,87 @@ func (s *server) processScenarioAnswer(st *sessionState, answer string) bool {
 		if sectorIdx < len(lvl.SectorAnswers) {
 			accepted = lvl.SectorAnswers[sectorIdx]
 		}
-		if scenario.MatchAnswer(answer, accepted) {
+		if scenario.MatchAnswer(normalized, accepted) {
 			return s.markSectorAnswer(st, idx, sectorIdx, answer, 1)
 		}
 	}
 
+	return s.recordIncorrectAction(st, answer, 1)
+}
+
+func (s *server) processScenarioBonusAnswer(st *sessionState, answer string) bool {
+	normalized := strings.TrimSpace(answer)
+	if normalized == "" || st.CurrentIdx >= len(s.scenario.Levels) {
+		return false
+	}
+	idx := st.CurrentIdx
+	lvl := s.scenario.Levels[idx]
 	for _, bonus := range lvl.Bonuses {
 		bonusID := scenarioBonusID(idx, bonus.Number)
 		if st.AnsweredBonuses[bonusID] {
 			continue
 		}
-		if scenario.MatchAnswer(answer, bonus.Answers) {
+		if scenario.MatchAnswer(normalized, bonus.Answers) {
 			return s.markBonusAnswer(st, idx, bonusID, answer)
 		}
 	}
+	return s.recordIncorrectAction(st, answer, 2)
+}
 
+func (s *server) recordIncorrectAction(st *sessionState, answer string, kind int) bool {
+	idx := st.CurrentIdx
 	st.Actions = append(st.Actions, encx.CodeAction{
-		ActionId:    len(st.Actions) + 1,
-		LevelId:     mockLevelBaseID + idx + 1,
-		LevelNumber: idx + 1,
-		UserId:      101,
-		Kind:        1,
-		Login:       st.Login,
-		Answer:      answer,
-		LocDateTime: time.Now().Format("02.01 15:04:05"),
-		IsCorrect:   false,
+		ActionId:      len(st.Actions) + 1,
+		LevelId:       mockLevelBaseID + idx + 1,
+		LevelNumber:   idx + 1,
+		UserId:        101,
+		Kind:          kind,
+		Login:         st.Login,
+		Answer:        answer,
+		EnterDateTime: dt(time.Now()),
+		LocDateTime:   time.Now().Format("02.01 15:04:05"),
+		IsCorrect:     false,
 	})
-	st.LastAction = newEngineAction(st, idx, answer, false, 1)
+	st.LastAction = newEngineAction(st, st.CurrentIdx, answer, false, kind)
+	return false
+}
+
+func (s *server) matchesBonusAnswer(st *sessionState, answer string) bool {
+	answer = strings.TrimSpace(answer)
+	if answer == "" || st.CurrentIdx >= s.levelCount() {
+		return false
+	}
+	idx := st.CurrentIdx
+	if s.scenario != nil {
+		for _, bonus := range s.scenario.Levels[idx].Bonuses {
+			if !st.AnsweredBonuses[scenarioBonusID(idx, bonus.Number)] && scenario.MatchAnswer(answer, bonus.Answers) {
+				return true
+			}
+		}
+		return false
+	}
+	if topology, ok := s.profileLevel(idx); ok {
+		for i := 0; i < topology.BonusCount; i++ {
+			id := mockBonusBaseID + idx*1000 + i + 1
+			if !st.AnsweredBonuses[id] && strings.EqualFold(answer, fmt.Sprintf("bonus-%d", i+1)) {
+				return true
+			}
+		}
+	}
+	if level, ok := s.fixtures.gameModelTemplate["Level"].(map[string]any); ok {
+		if bonuses, ok := level["Bonuses"].([]any); ok {
+			for _, item := range bonuses {
+				bonus, ok := item.(map[string]any)
+				if !ok {
+					continue
+				}
+				id, ok := valueInt(bonus["BonusId"])
+				task, _ := bonus["Task"].(string)
+				if ok && !st.AnsweredBonuses[id] && task != "" && strings.EqualFold(answer, task) {
+					return true
+				}
+			}
+		}
+	}
 	return false
 }

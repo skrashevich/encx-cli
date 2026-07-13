@@ -23,12 +23,14 @@ type fixtureSet struct {
 	gameModelTemplate map[string]any
 	gameInfoTemplate  map[string]any
 	userDetailsHTML   string
+	profile           *protocolProfile
 }
 
 func loadFixtures() (*fixtureSet, error) {
 	gameModelRaw := embeddedGameModelTemplate
 	gameInfoRaw := embeddedGameInfoTemplate
 	userDetails := embeddedUserDetailsTemplate
+	var profile *protocolProfile
 
 	if path := strings.TrimSpace(os.Getenv("ENCX_MOCK_HAR")); path != "" {
 		derived, err := deriveFixturesFromHAR(path)
@@ -40,6 +42,7 @@ func loadFixtures() (*fixtureSet, error) {
 		if derived.userDetails != "" {
 			userDetails = derived.userDetails
 		}
+		profile = derived.profile
 	}
 
 	gameModel, err := parseJSONObject(gameModelRaw)
@@ -55,6 +58,7 @@ func loadFixtures() (*fixtureSet, error) {
 		gameModelTemplate: gameModel,
 		gameInfoTemplate:  gameInfo,
 		userDetailsHTML:   userDetails,
+		profile:           profile,
 	}, nil
 }
 
