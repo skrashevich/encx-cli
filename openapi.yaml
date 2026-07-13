@@ -20,7 +20,7 @@ servers:
         default: quest.en.cx
         description: |
           Домен сервера Encounter. Допустимые паттерны:
-          - *.en.cx (напр. quest.en.cx, tech.en.cx, nef.en.cx)
+          - *.en.cx (напр. quest.en.cx, tech.en.cx, nef.en.cx, arh.en.cx)
           - *.encounter.cx
           - *.encounter.ru
           - quest.ua (deprecated, мигрирован в {city}questua.en.cx;
@@ -36,7 +36,7 @@ servers:
         default: quest.en.cx
         description: |
           Домен сервера Encounter. Допустимые паттерны:
-          - *.en.cx (напр. quest.en.cx, tech.en.cx, nef.en.cx)
+          - *.en.cx (напр. quest.en.cx, tech.en.cx, nef.en.cx, arh.en.cx)
           - *.encounter.cx
           - *.encounter.ru
           - quest.ua (deprecated, мигрирован в {city}questua.en.cx;
@@ -134,23 +134,63 @@ paths:
         content:
           application/x-www-form-urlencoded:
             schema:
-              $ref: '#/components/schemas/GameActionRequest'
+              anyOf:
+                - $ref: '#/components/schemas/GamePollingRequest'
+                - $ref: '#/components/schemas/LevelAnswerRequest'
+                - $ref: '#/components/schemas/BonusAnswerRequest'
+                - $ref: '#/components/schemas/GameActionRequest'
             examples:
               poll:
                 summary: Polling (получение текущего состояния)
                 value: {}
-              send_code:
-                summary: Отправка кода
+              send_level_code:
+                summary: Отправка кода уровня/сектора
                 value:
                   LevelId: 100
+                  LevelNumber: 2
                   LevelAction.Answer: "КОД123"
+              send_bonus_code:
+                summary: Отправка кода бонуса
+                value:
+                  LevelId: 100
+                  LevelNumber: 2
+                  BonusAction.Answer: "БОНУС123"
       responses:
         '200':
           description: Модель игры
+          headers:
+            Content-Type:
+              description: Тип успешного ответа (наблюдался application/json).
+              schema:
+                type: string
+            Cache-Control:
+              description: Наблюдаемая директива кэширования игрового ответа.
+              schema:
+                type: string
+            Pragma:
+              description: Наблюдаемая legacy-директива управления кэшем.
+              schema:
+                type: string
+            Expires:
+              description: Наблюдаемая дата истечения кэша.
+              schema:
+                type: string
+            Set-Cookie:
+              description: Наблюдаемые протокольные cookies сессии/игры.
+              schema:
+                type: string
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/GameModel'
+        '302':
+          description: Anti-bot redirect to NotHumanRequest.aspx.
+          headers:
+            Location:
+              required: true
+              description: Относительный или абсолютный URL NotHumanRequest.aspx.
+              schema:
+                type: string
 
     get:
       operationId: getGameModelWithParams
@@ -186,9 +226,35 @@ paths:
           schema:
             type: integer
             enum: [1]
+        - name: level
+          in: query
+          description: Наблюдаемый параметр уровня; его семантика не установлена.
+          schema:
+            type: integer
       responses:
         '200':
           description: Модель игры (JSON) или HTML-страница ожидания старта
+          headers:
+            Content-Type:
+              description: Тип успешного ответа (наблюдался application/json).
+              schema:
+                type: string
+            Cache-Control:
+              description: Наблюдаемая директива кэширования игрового ответа.
+              schema:
+                type: string
+            Pragma:
+              description: Наблюдаемая legacy-директива управления кэшем.
+              schema:
+                type: string
+            Expires:
+              description: Наблюдаемая дата истечения кэша.
+              schema:
+                type: string
+            Set-Cookie:
+              description: Наблюдаемые протокольные cookies сессии/игры.
+              schema:
+                type: string
           content:
             application/json:
               schema:
@@ -1222,21 +1288,51 @@ components:
           items:
             type: string
 
-    GameActionRequest:
+    GamePollingRequest:
       type: object
       description: |
-        Параметры игрового действия. Все поля опциональны.
-        Пустой объект = polling (получение текущего состояния).
+        Пустой POST = polling (получение текущего состояния).
+      maxProperties: 0
+
+    LevelAnswerRequest:
+      type: object
+      description: Ответ уровня или сектора. Не совмещается с BonusAction.Answer.
+      required: [LevelId, LevelNumber, LevelAction.Answer]
+      additionalProperties: false
       properties:
         LevelId:
           type: integer
           description: ID текущего уровня (из Level.LevelId)
         LevelNumber:
           type: integer
-          description: Номер текущего уровня (отправляется при polling)
+          description: Номер текущего уровня
         LevelAction.Answer:
           type: string
-          description: Код (ответ) — уровень, секторы и бонусы
+          description: Код (ответ) уровня или сектора
+
+    BonusAnswerRequest:
+      type: object
+      description: Ответ бонуса. Не совмещается с LevelAction.Answer.
+      required: [LevelId, LevelNumber, BonusAction.Answer]
+      additionalProperties: false
+      properties:
+        LevelId:
+          type: integer
+          description: ID текущего уровня (из Level.LevelId)
+        LevelNumber:
+          type: integer
+          description: Номер текущего уровня
+        BonusAction.Answer:
+          type: string
+          description: Код (ответ) бонуса
+
+    GameActionRequest:
+      type: object
+      deprecated: true
+      description: |
+        Legacy-параметры игрового действия. Сохраняет совместимость с
+        произвольными form payload, включая наблюдаемые action-only запросы.
+      additionalProperties: true
 
     GameModel:
       type: object
@@ -1256,6 +1352,8 @@ components:
         - IsCaptain
         - GameDateTimeStart
         - Levels
+        - Level
+        - EngineAction
       properties:
         Event:
           description: |
@@ -1308,13 +1406,17 @@ components:
           items:
             $ref: '#/components/schemas/LevelSummary'
         Level:
-          $ref: '#/components/schemas/Level'
+          anyOf:
+            - $ref: '#/components/schemas/Level'
+            - type: "null"
         EngineAction:
-          $ref: '#/components/schemas/EngineAction'
+          anyOf:
+            - $ref: '#/components/schemas/EngineAction'
+            - type: "null"
 
     LevelSummary:
       type: object
-      required: [LevelId, LevelNumber, LevelName, Dismissed, IsPassed]
+      required: [LevelId, LevelNumber, LevelName, Dismissed, IsPassed, Task, LevelAction]
       properties:
         LevelId:
           type: integer
@@ -1327,9 +1429,13 @@ components:
         IsPassed:
           type: boolean
         Task:
-          $ref: '#/components/schemas/LevelTask'
+          anyOf:
+            - $ref: '#/components/schemas/LevelTask'
+            - type: "null"
         LevelAction:
-          $ref: '#/components/schemas/ActionResult'
+          anyOf:
+            - $ref: '#/components/schemas/ActionResult'
+            - type: "null"
 
     Level:
       type: object
