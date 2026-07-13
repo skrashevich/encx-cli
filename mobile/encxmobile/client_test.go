@@ -200,7 +200,17 @@ func TestGameRequestsArePacedAcrossConcurrentCalls(t *testing.T) {
 	defer srv.Close()
 
 	c := NewClientWithOptions(strings.TrimPrefix(srv.URL, "http://"), false, true, 5, "")
-	c.SetGameRequestMinIntervalMillis(50)
+	c.SetGameRequestMinIntervalMillis(100)
+
+	// Warm up the keep-alive connection: otherwise the first paced request pays
+	// TCP dial latency the second one skips, compressing the server-observed gap
+	// below the pacing floor by more than the assertion slack.
+	if _, err := c.GetGameModel(42); err != nil {
+		t.Fatalf("warmup GetGameModel: %v", err)
+	}
+	mu.Lock()
+	starts = nil
+	mu.Unlock()
 
 	ready := make(chan struct{})
 	errs := make(chan error, 2)
@@ -226,7 +236,11 @@ func TestGameRequestsArePacedAcrossConcurrentCalls(t *testing.T) {
 		t.Fatalf("request count = %d, want 2", len(got))
 	}
 	sort.Slice(got, func(i, j int) bool { return got[i].Before(got[j]) })
-	if gap := got[1].Sub(got[0]); gap < 45*time.Millisecond {
-		t.Fatalf("game requests gap = %v, want at least 45ms", gap)
+	// The pacer spaces request slots exactly 100ms apart, but the server-observed
+	// gap shrinks by however much the first request's timer/scheduling lagged its
+	// slot relative to the second's (observed up to ~12ms locally). 60ms still
+	// cleanly separates "paced" from concurrent (~0ms) while absorbing jitter.
+	if gap := got[1].Sub(got[0]); gap < 60*time.Millisecond {
+		t.Fatalf("game requests gap = %v, want at least 60ms", gap)
 	}
 }
