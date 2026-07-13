@@ -513,14 +513,15 @@ type GameInfo struct {
 	HideGameDescr            bool `json:"HideGameDescr,omitempty"`
 	DisplayAnnouncement      int  `json:"DisplayAnnouncement,omitempty"`
 	ForUserID                int  `json:"ForUserID,omitempty"`
-	AFC                      int  `json:"AFC,omitempty"`
-	IsQualityRateVisible     bool `json:"IsQualityRateVisible,omitempty"`
-	AuthorIndexCalculated    bool `json:"AuthorIndexCalculated,omitempty"`
-	State                    int  `json:"State,omitempty"`
-	IsModified               bool `json:"IsModified,omitempty"`
-	IsNewObject              bool `json:"IsNewObject,omitempty"`
-	ReadOnly                 bool `json:"ReadOnly,omitempty"`
-	SyncRoot                 any  `json:"SyncRoot,omitempty"`
+	// AFC arrives as a fractional number on some domains (e.g. 0.1 on tech.en.cx).
+	AFC                   float64 `json:"AFC,omitempty"`
+	IsQualityRateVisible  bool    `json:"IsQualityRateVisible,omitempty"`
+	AuthorIndexCalculated bool    `json:"AuthorIndexCalculated,omitempty"`
+	State                 int     `json:"State,omitempty"`
+	IsModified            bool    `json:"IsModified,omitempty"`
+	IsNewObject           bool    `json:"IsNewObject,omitempty"`
+	ReadOnly              bool    `json:"ReadOnly,omitempty"`
+	SyncRoot              any     `json:"SyncRoot,omitempty"`
 
 	raw *gameInfoRawState
 }

@@ -230,6 +230,23 @@ func TestGameListResponsePreservesObservedHomeFields(t *testing.T) {
 	}
 }
 
+func TestGameListResponseDecodesFractionalAFC(t *testing.T) {
+	t.Parallel()
+
+	// tech.en.cx returns AFC as a fractional number (e.g. 0.1) for some games.
+	raw := []byte(`{
+		"ComingGames": [],
+		"ActiveGames": [{"GameID": 81701, "AFC": 0.1}]
+	}`)
+	var response GameListResponse
+	if err := json.Unmarshal(raw, &response); err != nil {
+		t.Fatalf("Unmarshal: %v", err)
+	}
+	if got := response.ActiveGames[0].AFC; got != 0.1 {
+		t.Errorf("AFC = %v, want 0.1", got)
+	}
+}
+
 func TestLevelDoesNotFabricateAbsentTask(t *testing.T) {
 	t.Parallel()
 
