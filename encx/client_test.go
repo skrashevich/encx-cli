@@ -17,11 +17,13 @@ func testLogin() string {
 	return "svk"
 }
 
-func testPassword() string {
-	if v := os.Getenv("ENCX_TEST_PASSWORD"); v != "" {
-		return v
+func testPassword(t *testing.T) string {
+	t.Helper()
+	v := os.Getenv("ENCX_TEST_PASSWORD")
+	if v == "" {
+		t.Skip("Skipping: ENCX_TEST_PASSWORD is not set")
 	}
-	return "***REMOVED***"
+	return v
 }
 
 func skipIfNoIntegration(t *testing.T) {
@@ -37,7 +39,7 @@ func newTestClient() *encx.Client {
 
 func loginTestClient(t *testing.T, client *encx.Client) {
 	t.Helper()
-	resp, err := client.Login(t.Context(), testLogin(), testPassword())
+	resp, err := client.Login(t.Context(), testLogin(), testPassword(t))
 	if err != nil {
 		if encx.IsAntiSpam(err) {
 			t.Skipf("Domain anti-spam active: %s", encx.AntiSpamURLFromError(err))
@@ -53,7 +55,7 @@ func TestLogin(t *testing.T) {
 	skipIfNoIntegration(t)
 
 	client := newTestClient()
-	resp, err := client.Login(t.Context(), testLogin(), testPassword())
+	resp, err := client.Login(t.Context(), testLogin(), testPassword(t))
 	if err != nil {
 		t.Fatalf("Login failed: %v", err)
 	}
@@ -261,7 +263,7 @@ func TestLoginJSON(t *testing.T) {
 	skipIfNoIntegration(t)
 
 	client := newTestClient()
-	resp, err := client.Login(t.Context(), testLogin(), testPassword())
+	resp, err := client.Login(t.Context(), testLogin(), testPassword(t))
 	if err != nil {
 		t.Fatalf("Login failed: %v", err)
 	}
@@ -501,15 +503,15 @@ func TestGameStatisticsResponseJSON(t *testing.T) {
 
 func TestExtendedGameInfoJSON(t *testing.T) {
 	g := encx.GameInfo{
-		GameID:            42,
-		Title:             "Extended",
-		SiteID:            100,
-		OwnerID:           200,
-		LevelNumber:       5,
-		ComplexityFactor:  360,
-		QualityRate:       -1,
+		GameID:             42,
+		Title:              "Extended",
+		SiteID:             100,
+		OwnerID:            200,
+		LevelNumber:        5,
+		ComplexityFactor:   360,
+		QualityRate:        -1,
 		IsSectorsSupported: true,
-		TopicId:           12345,
+		TopicId:            12345,
 	}
 
 	data, err := json.Marshal(g)
