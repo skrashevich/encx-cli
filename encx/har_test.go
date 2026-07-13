@@ -138,3 +138,43 @@ func TestHARRedactsLoginPassword(t *testing.T) {
 		t.Fatalf("password = %q", payload.Get("Password"))
 	}
 }
+
+func TestHARRecorderSnapshotClearFirstKeepsNewEntries(t *testing.T) {
+	rec := NewHARRecorder()
+	rec.append(harEntry{Comment: "exported-1"})
+	rec.append(harEntry{Comment: "exported-2"})
+
+	doc, count, err := rec.ExportSnapshot()
+	if err != nil {
+		t.Fatalf("ExportSnapshot: %v", err)
+	}
+	if count != 2 {
+		t.Fatalf("snapshot count = %d, want 2", count)
+	}
+	if !strings.Contains(doc, "exported-1") || !strings.Contains(doc, "exported-2") {
+		t.Fatalf("snapshot does not contain exported entries: %q", doc)
+	}
+
+	// Запись, добавленная между экспортом и очисткой, должна пережить ClearFirst.
+	rec.append(harEntry{Comment: "captured-during-upload"})
+	rec.ClearFirst(count)
+
+	if got := rec.EntryCount(); got != 1 {
+		t.Fatalf("EntryCount after ClearFirst = %d, want 1", got)
+	}
+	after, _, err := rec.ExportSnapshot()
+	if err != nil {
+		t.Fatalf("ExportSnapshot after clear: %v", err)
+	}
+	if strings.Contains(after, "exported-1") {
+		t.Fatalf("cleared entry still exported: %q", after)
+	}
+	if !strings.Contains(after, "captured-during-upload") {
+		t.Fatalf("entry captured during upload was lost: %q", after)
+	}
+
+	rec.ClearFirst(100)
+	if got := rec.EntryCount(); got != 0 {
+		t.Fatalf("EntryCount after over-clear = %d, want 0", got)
+	}
+}

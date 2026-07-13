@@ -21,15 +21,31 @@ type Client struct {
 	scheme               string
 	httpClient           *http.Client
 	rootTransport        http.RoundTripper
+	transport            *switchableTransport
 	userAgent            string
 	lang                 string
 	debugLog             func(string, ...any)
 	har                  *HARRecorder
 	harAutoEnabled       bool
 	antiSpamHandler      func(string) error
-	antiSpamRecovery     atomic.Bool // suppress handler during anti-spam recovery Login
+	antiSpamRecovery     atomic.Int32 // >0 suppresses handler during anti-spam recovery Login
 	adminDelayDuration   time.Duration
 	adminDelayConfigured bool
+}
+
+// switchableTransport allows swapping the transport chain atomically while
+// requests are in flight (http.Client.Transport itself must never be mutated
+// concurrently with Do).
+type switchableTransport struct {
+	inner atomic.Pointer[http.RoundTripper]
+}
+
+func (t *switchableTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	rt := t.inner.Load()
+	if rt == nil {
+		return http.DefaultTransport.RoundTrip(req)
+	}
+	return (*rt).RoundTrip(req)
 }
 
 const defaultAdminDelay = 1200 * time.Millisecond
@@ -41,8 +57,9 @@ type Option func(*Client)
 // WithInsecureTLS disables TLS certificate verification.
 func WithInsecureTLS() Option {
 	return func(c *Client) {
-		transport := c.httpClient.Transport.(*http.Transport)
-		transport.TLSClientConfig.InsecureSkipVerify = true
+		if transport, ok := c.rootTransport.(*http.Transport); ok {
+			transport.TLSClientConfig.InsecureSkipVerify = true
+		}
 	}
 }
 
@@ -148,15 +165,16 @@ func New(domain string, opts ...Option) *Client {
 		userAgent:     defaultUserAgent,
 		lang:          "ru",
 		rootTransport: rootTransport,
+		transport:     &switchableTransport{},
 		httpClient: &http.Client{
-			Timeout:   defaultTimeout,
-			Jar:       jar,
-			Transport: rootTransport,
+			Timeout: defaultTimeout,
+			Jar:     jar,
 			CheckRedirect: func(req *http.Request, via []*http.Request) error {
 				return http.ErrUseLastResponse
 			},
 		},
 	}
+	c.httpClient.Transport = c.transport
 
 	for _, opt := range opts {
 		opt(c)
@@ -197,6 +215,18 @@ func (c *Client) ExportHARJSON() (string, error) {
 	return c.ensureHAR().ExportJSON()
 }
 
+// ExportHARSnapshot atomically returns the HAR document and the number of
+// entries it contains; pass the count to ClearHARFirst after the document is
+// persisted to drop exactly the exported entries.
+func (c *Client) ExportHARSnapshot() (string, int, error) {
+	return c.ensureHAR().ExportSnapshot()
+}
+
+// ClearHARFirst removes the n oldest captured HAR entries.
+func (c *Client) ClearHARFirst(n int) {
+	c.ensureHAR().ClearFirst(n)
+}
+
 func (c *Client) rebuildTransport() {
 	transport := c.rootTransport
 	if c.debugLog != nil {
@@ -208,7 +238,7 @@ func (c *Client) rebuildTransport() {
 	if c.har != nil && c.har.Enabled() {
 		transport = c.har.wrap(transport)
 	}
-	c.httpClient.Transport = transport
+	c.transport.inner.Store(&transport)
 }
 
 func (c *Client) baseURL() string {
@@ -318,8 +348,12 @@ func cloneRequestForRetry(req *http.Request) (*http.Request, error) {
 	return cloned, nil
 }
 
+// maxAntiSpamRetries bounds handler-driven retries so a handler that reports
+// success against a server that keeps answering NotHumanRequest cannot spin forever.
+const maxAntiSpamRetries = 3
+
 func (c *Client) doRequestAndRead(req *http.Request) (int, http.Header, []byte, error) {
-	for {
+	for attempt := 0; ; attempt++ {
 		attemptReq, err := cloneRequestForRetry(req)
 		if err != nil {
 			return 0, nil, nil, err
@@ -343,7 +377,8 @@ func (c *Client) doRequestAndRead(req *http.Request) (int, http.Header, []byte, 
 			}
 			return statusCode, headers, body, nil
 		}
-		if IsAntiSpam(readErr) && c.antiSpamHandler != nil && !c.antiSpamRecovery.Load() {
+		if IsAntiSpam(readErr) && c.antiSpamHandler != nil &&
+			attempt < maxAntiSpamRetries && c.antiSpamRecovery.Load() == 0 {
 			if err := c.antiSpamHandler(AntiSpamURLFromError(readErr)); err != nil {
 				return statusCode, headers, nil, err
 			}
@@ -357,8 +392,15 @@ func (c *Client) adminGETDelay(req *http.Request) {
 	if req.Method != http.MethodGet || !isAdminGETDelayURL(req.URL) {
 		return
 	}
-	if d := c.AdminGETDelay(); d > 0 {
-		time.Sleep(d)
+	d := c.AdminGETDelay()
+	if d <= 0 {
+		return
+	}
+	timer := time.NewTimer(d)
+	defer timer.Stop()
+	select {
+	case <-req.Context().Done():
+	case <-timer.C:
 	}
 }
 

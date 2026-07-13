@@ -19,3 +19,25 @@ func (c *EncClient) HAREntryCount() int64 {
 func (c *EncClient) ExportHAR() (string, error) {
 	return c.client.ExportHARJSON()
 }
+
+// HARSnapshot pairs an exported HAR document with the number of entries it contains.
+type HARSnapshot struct {
+	JSON       string
+	EntryCount int64
+}
+
+// ExportHARSnapshot atomically exports captured traffic together with its
+// entry count; pass the count to ClearHARFirst after a successful upload so
+// entries captured during the upload are preserved.
+func (c *EncClient) ExportHARSnapshot() (*HARSnapshot, error) {
+	doc, count, err := c.client.ExportHARSnapshot()
+	if err != nil {
+		return nil, err
+	}
+	return &HARSnapshot{JSON: doc, EntryCount: int64(count)}, nil
+}
+
+// ClearHARFirst removes the n oldest captured HAR entries.
+func (c *EncClient) ClearHARFirst(n int64) {
+	c.client.ClearHARFirst(int(n))
+}

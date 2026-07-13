@@ -66,13 +66,13 @@ type harTimings struct {
 }
 
 type harEntry struct {
-	StartedDateTime time.Time  `json:"startedDateTime"`
-	Time            float64    `json:"time"`
-	Request         harRequest `json:"request"`
+	StartedDateTime time.Time   `json:"startedDateTime"`
+	Time            float64     `json:"time"`
+	Request         harRequest  `json:"request"`
 	Response        harResponse `json:"response"`
-	Cache           struct{}   `json:"cache"`
-	Timings         harTimings `json:"timings"`
-	Comment         string     `json:"comment,omitempty"`
+	Cache           struct{}    `json:"cache"`
+	Timings         harTimings  `json:"timings"`
+	Comment         string      `json:"comment,omitempty"`
 }
 
 type harCreator struct {
@@ -137,8 +137,16 @@ func (r *HARRecorder) EntryCount() int {
 }
 
 func (r *HARRecorder) ExportJSON() (string, error) {
+	doc, _, err := r.ExportSnapshot()
+	return doc, err
+}
+
+// ExportSnapshot atomically returns the HAR document together with the number
+// of entries it contains, so the caller can later remove exactly the exported
+// entries with ClearFirst while keeping entries captured in the meantime.
+func (r *HARRecorder) ExportSnapshot() (string, int, error) {
 	if r == nil {
-		return emptyHARJSON(), nil
+		return emptyHARJSON(), 0, nil
 	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -150,9 +158,24 @@ func (r *HARRecorder) ExportJSON() (string, error) {
 	doc.Log.Entries = append([]harEntry(nil), r.entries...)
 	data, err := json.MarshalIndent(doc, "", "  ")
 	if err != nil {
-		return "", err
+		return "", 0, err
 	}
-	return string(data), nil
+	return string(data), len(r.entries), nil
+}
+
+// ClearFirst removes up to n oldest entries, preserving entries appended
+// after the matching ExportSnapshot call.
+func (r *HARRecorder) ClearFirst(n int) {
+	if r == nil || n <= 0 {
+		return
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if n >= len(r.entries) {
+		r.entries = nil
+		return
+	}
+	r.entries = append([]harEntry(nil), r.entries[n:]...)
 }
 
 func emptyHARJSON() string {

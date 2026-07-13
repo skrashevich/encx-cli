@@ -3,6 +3,7 @@ package encx
 import (
 	"encoding/json"
 	"fmt"
+	"sort"
 	"strconv"
 )
 
@@ -67,8 +68,15 @@ func answerFromObject(obj map[string]json.RawMessage) string {
 			return s
 		}
 	}
-	for _, raw := range obj {
-		if s := rawToString(raw); s != "" {
+	// Порядок обхода map недетерминирован — сортируем, чтобы один и тот же
+	// JSON всегда давал одно и то же значение.
+	fallback := make([]string, 0, len(obj))
+	for key := range obj {
+		fallback = append(fallback, key)
+	}
+	sort.Strings(fallback)
+	for _, key := range fallback {
+		if s := rawToString(obj[key]); s != "" {
 			return s
 		}
 	}

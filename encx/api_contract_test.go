@@ -1,8 +1,10 @@
 package encx
 
 import (
+	"errors"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"strings"
 	"testing"
 )
@@ -98,8 +100,56 @@ func TestGetGameModelLevelAddsLevelQuery(t *testing.T) {
 	}
 }
 
-func TestSendCodeAndBonusUseDocumentedActions(t *testing.T) {
-	var seen []string
+func TestGetGameModelLevelOmitsNonPositiveLevelQuery(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			t.Fatalf("method = %q, want GET", r.Method)
+		}
+		if _, ok := r.URL.Query()["level"]; ok {
+			t.Fatalf("unexpected level query: %s", r.URL.RawQuery)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"Event":0,"GameId":2020}`))
+	}))
+	defer server.Close()
+
+	client := newContractTestClient(server.URL)
+	if _, err := client.GetGameModelLevel(t.Context(), 2020, 0); err != nil {
+		t.Fatalf("GetGameModelLevel: %v", err)
+	}
+}
+
+func TestGetGameModelRetainsLegacyPostAndNoFormGet(t *testing.T) {
+	var methods []string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		methods = append(methods, r.Method)
+		if r.Method == http.MethodPost {
+			if err := r.ParseForm(); err != nil {
+				t.Fatalf("ParseForm: %v", err)
+			}
+			if got := r.PostForm.Get("LegacyAction"); got != "1" {
+				t.Fatalf("LegacyAction = %q, want 1", got)
+			}
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"Event":0,"GameId":2020}`))
+	}))
+	defer server.Close()
+
+	client := newContractTestClient(server.URL)
+	if _, err := client.GetGameModel(t.Context(), 2020, url.Values{"LegacyAction": {"1"}}); err != nil {
+		t.Fatalf("legacy GetGameModel POST: %v", err)
+	}
+	if _, err := client.GetGameModel(t.Context(), 2020); err != nil {
+		t.Fatalf("GetGameModel GET: %v", err)
+	}
+	if got, want := strings.Join(methods, ","), "POST,GET"; got != want {
+		t.Fatalf("methods = %q, want %q", got, want)
+	}
+}
+
+func TestSendCodeAndBonusUseExactDocumentedForms(t *testing.T) {
+	var seen []url.Values
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
 			t.Fatalf("method = %q, want POST", r.Method)
@@ -107,7 +157,7 @@ func TestSendCodeAndBonusUseDocumentedActions(t *testing.T) {
 		if err := r.ParseForm(); err != nil {
 			t.Fatalf("ParseForm: %v", err)
 		}
-		seen = append(seen, r.Form.Encode())
+		seen = append(seen, r.PostForm)
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte(`{"Event":0,"GameId":2020}`))
 	}))
@@ -124,12 +174,40 @@ func TestSendCodeAndBonusUseDocumentedActions(t *testing.T) {
 	if len(seen) != 2 {
 		t.Fatalf("requests = %d, want 2", len(seen))
 	}
-	if !strings.Contains(seen[0], "LevelAction.Answer=level-code") {
-		t.Fatalf("level action form = %q", seen[0])
+	wantLevel := url.Values{
+		"LevelId":            {"1356"},
+		"LevelNumber":        {"2"},
+		"LevelAction.Answer": {"level-code"},
 	}
-	if !strings.Contains(seen[1], "BonusAction.Answer=bonus-code") {
-		t.Fatalf("bonus action form = %q", seen[1])
+	if got := seen[0]; !valuesEqual(got, wantLevel) {
+		t.Fatalf("level action form = %q, want %q", got.Encode(), wantLevel.Encode())
 	}
+	wantBonus := url.Values{
+		"LevelId":            {"1356"},
+		"LevelNumber":        {"2"},
+		"BonusAction.Answer": {"bonus-code"},
+	}
+	if got := seen[1]; !valuesEqual(got, wantBonus) {
+		t.Fatalf("bonus action form = %q, want %q", got.Encode(), wantBonus.Encode())
+	}
+}
+
+func TestSendCodeReportsAntiBotRedirect(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Location", "/NotHumanRequest.aspx?return=redacted")
+		w.WriteHeader(http.StatusFound)
+	}))
+	defer server.Close()
+
+	client := newContractTestClient(server.URL)
+	_, err := client.SendCode(t.Context(), 2020, 1356, 2, "level-code")
+	if !errors.Is(err, ErrAntiSpam) {
+		t.Fatalf("SendCode error = %v, want ErrAntiSpam", err)
+	}
+}
+
+func valuesEqual(got, want url.Values) bool {
+	return got.Encode() == want.Encode()
 }
 
 func TestLevelCanSubmitLevelAnswer(t *testing.T) {

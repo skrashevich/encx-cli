@@ -71,7 +71,7 @@ func (c *Client) LoginForAntiSpamRecovery(ctx context.Context, loginPageURL, log
 			return &LoginResponse{Error: 0}, nil
 		}
 	}
-	c.antiSpamRecovery.Store(true)
-	defer c.antiSpamRecovery.Store(false)
+	c.antiSpamRecovery.Add(1)
+	defer c.antiSpamRecovery.Add(-1)
 	return c.Login(ctx, login, password, opts...)
 }

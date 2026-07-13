@@ -71,6 +71,8 @@ func NewClientWithOptions(domain string, insecureTLS, useHTTP bool, timeoutSecon
 // SetCodeSendTimeoutSeconds sets the per-request timeout for code submissions and quick probes.
 // Zero or negative values reset to the default (1 second).
 func (c *EncClient) SetCodeSendTimeoutSeconds(seconds int64) {
+	c.gameRequestMu.Lock()
+	defer c.gameRequestMu.Unlock()
 	if seconds <= 0 {
 		c.codeSendTimeout = defaultCodeSendTimeout
 		return
@@ -104,7 +106,9 @@ func (c *EncClient) pacedBG() context.Context {
 }
 
 func (c *EncClient) codeSendCtx() (context.Context, context.CancelFunc) {
+	c.gameRequestMu.Lock()
 	d := c.codeSendTimeout
+	c.gameRequestMu.Unlock()
 	if d <= 0 {
 		d = defaultCodeSendTimeout
 	}
@@ -112,27 +116,31 @@ func (c *EncClient) codeSendCtx() (context.Context, context.CancelFunc) {
 }
 
 func (c *EncClient) paceGameRequest(ctx context.Context) error {
+	// Слот резервируется под блокировкой, ожидание — снаружи, чтобы не держать
+	// мьютекс во время сна и не блокировать настройку/путь отправки кода.
 	c.gameRequestMu.Lock()
-	defer c.gameRequestMu.Unlock()
-
-	d := c.gameRequestMinInterval
-	if d <= 0 {
-		return nil
-	}
-
-	if !c.lastGameRequest.IsZero() {
-		wait := time.Until(c.lastGameRequest.Add(d))
-		if wait > 0 {
-			timer := time.NewTimer(wait)
-			select {
-			case <-ctx.Done():
-				timer.Stop()
-				return ctx.Err()
-			case <-timer.C:
-			}
+	var wait time.Duration
+	if d := c.gameRequestMinInterval; d > 0 {
+		now := time.Now()
+		next := c.lastGameRequest.Add(d)
+		if !c.lastGameRequest.IsZero() && next.After(now) {
+			wait = next.Sub(now)
+			c.lastGameRequest = next
+		} else {
+			c.lastGameRequest = now
 		}
 	}
-	c.lastGameRequest = time.Now()
+	c.gameRequestMu.Unlock()
+
+	if wait > 0 {
+		timer := time.NewTimer(wait)
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+			return ctx.Err()
+		case <-timer.C:
+		}
+	}
 	return nil
 }
 

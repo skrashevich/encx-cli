@@ -5,6 +5,8 @@
 // code submission, bonus codes, penalty hints, and game discovery.
 package encx
 
+import "encoding/json"
+
 // LoginResponse is the response from the /login/signin endpoint.
 type LoginResponse struct {
 	Error                int      `json:"Error"`
@@ -63,7 +65,7 @@ type Level struct {
 	PassedBonusesCount   int            `json:"PassedBonusesCount"`
 	SectorsLeftToClose   int            `json:"SectorsLeftToClose"`
 	Tasks                []LevelTask    `json:"Tasks"`
-	Task                 *LevelTask     `json:"Task"`
+	Task                 *LevelTask     `json:"Task,omitempty"`
 	Messages             []AdminMessage `json:"Messages"`
 	Sectors              []Sector       `json:"Sectors"`
 	Helps                []Help         `json:"Helps"`
@@ -134,6 +136,66 @@ type Sector struct {
 	Name       string     `json:"Name"`
 	IsAnswered bool       `json:"IsAnswered"`
 	Answer     FlexString `json:"Answer"`
+
+	raw *sectorRawState
+}
+
+type sectorRawState struct {
+	answer         json.RawMessage
+	originalAnswer FlexString
+}
+
+// RawAnswerJSON returns a copy of Answer in its original JSON form.
+func (s Sector) RawAnswerJSON() json.RawMessage {
+	if s.raw == nil {
+		return nil
+	}
+	return append(json.RawMessage(nil), s.raw.answer...)
+}
+
+// UnmarshalJSON decodes a sector while retaining its original Answer JSON.
+func (s *Sector) UnmarshalJSON(data []byte) error {
+	type sectorJSON Sector
+	var value sectorJSON
+	if err := json.Unmarshal(data, &value); err != nil {
+		return err
+	}
+	var raw struct {
+		Answer json.RawMessage `json:"Answer"`
+	}
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return err
+	}
+	*s = Sector(value)
+	s.raw = &sectorRawState{
+		answer:         append(json.RawMessage(nil), raw.Answer...),
+		originalAnswer: s.Answer,
+	}
+	return nil
+}
+
+// MarshalJSON encodes a sector while preserving an Answer JSON decoded from the API.
+func (s Sector) MarshalJSON() ([]byte, error) {
+	type sectorJSON Sector
+	value := sectorJSON(s)
+	var answer json.RawMessage
+	if s.raw != nil {
+		answer = s.raw.answer
+	}
+	if len(answer) == 0 || s.raw == nil || s.Answer != s.raw.originalAnswer {
+		var err error
+		answer, err = json.Marshal(s.Answer)
+		if err != nil {
+			return nil, err
+		}
+	}
+	return json.Marshal(struct {
+		*sectorJSON
+		Answer json.RawMessage `json:"Answer"`
+	}{
+		sectorJSON: &value,
+		Answer:     answer,
+	})
 }
 
 // Bonus represents a bonus task within a level.
@@ -150,6 +212,99 @@ type Bonus struct {
 	SecondsLeft    int        `json:"SecondsLeft"`
 	AwardTime      int        `json:"AwardTime"`
 	Negative       bool       `json:"Negative"`
+
+	raw *bonusRawState
+}
+
+type bonusRawState struct {
+	answer         json.RawMessage
+	originalAnswer FlexString
+	name           json.RawMessage
+	originalName   string
+	task           json.RawMessage
+	originalTask   string
+	help           json.RawMessage
+	originalHelp   string
+}
+
+// RawAnswerJSON returns a copy of Answer in its original JSON form.
+func (b Bonus) RawAnswerJSON() json.RawMessage {
+	if b.raw == nil {
+		return nil
+	}
+	return append(json.RawMessage(nil), b.raw.answer...)
+}
+
+// UnmarshalJSON decodes a bonus while retaining its original Answer JSON.
+func (b *Bonus) UnmarshalJSON(data []byte) error {
+	type bonusJSON Bonus
+	var value bonusJSON
+	if err := json.Unmarshal(data, &value); err != nil {
+		return err
+	}
+	var raw struct {
+		Answer json.RawMessage `json:"Answer"`
+		Name   json.RawMessage `json:"Name"`
+		Task   json.RawMessage `json:"Task"`
+		Help   json.RawMessage `json:"Help"`
+	}
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return err
+	}
+	*b = Bonus(value)
+	b.raw = &bonusRawState{
+		answer:         append(json.RawMessage(nil), raw.Answer...),
+		originalAnswer: b.Answer,
+		name:           append(json.RawMessage(nil), raw.Name...),
+		originalName:   b.Name,
+		task:           append(json.RawMessage(nil), raw.Task...),
+		originalTask:   b.Task,
+		help:           append(json.RawMessage(nil), raw.Help...),
+		originalHelp:   b.Help,
+	}
+	return nil
+}
+
+// MarshalJSON encodes a bonus while preserving an Answer JSON decoded from the API.
+func (b Bonus) MarshalJSON() ([]byte, error) {
+	type bonusJSON Bonus
+	value := bonusJSON(b)
+	var answer, name, task, help json.RawMessage
+	if b.raw != nil {
+		answer = b.raw.answer
+		name = b.raw.name
+		task = b.raw.task
+		help = b.raw.help
+	}
+	if len(answer) == 0 || b.raw == nil || b.Answer != b.raw.originalAnswer {
+		var err error
+		answer, err = json.Marshal(b.Answer)
+		if err != nil {
+			return nil, err
+		}
+	}
+	if len(name) == 0 || b.raw == nil || b.Name != b.raw.originalName {
+		name, _ = json.Marshal(b.Name)
+	}
+	if len(task) == 0 || b.raw == nil || b.Task != b.raw.originalTask {
+		task, _ = json.Marshal(b.Task)
+	}
+	if len(help) == 0 || b.raw == nil || b.Help != b.raw.originalHelp {
+		help, _ = json.Marshal(b.Help)
+	}
+	return json.Marshal(struct {
+		*bonusJSON
+		Answer json.RawMessage `json:"Answer"`
+		Name   json.RawMessage `json:"Name"`
+		Task   json.RawMessage `json:"Task"`
+		Help   json.RawMessage `json:"Help"`
+	}{
+		bonusJSON: &value,
+		Answer:    answer,
+		Name:      name,
+		Task:      task,
+		Help:      help,
+	})
 }
 
 // CodeAction represents a code entry in the action log.
@@ -169,6 +324,58 @@ type CodeAction struct {
 	LocAward      *string   `json:"LocAward"`
 	Penalty       int       `json:"Penalty"`
 	Negative      bool      `json:"Negative"`
+
+	raw *codeActionRawState
+}
+
+type codeActionRawState struct {
+	locDateTime         json.RawMessage
+	originalLocDateTime string
+}
+
+// UnmarshalJSON decodes a code action while retaining its original local time JSON.
+func (a *CodeAction) UnmarshalJSON(data []byte) error {
+	type codeActionJSON CodeAction
+	var value codeActionJSON
+	if err := json.Unmarshal(data, &value); err != nil {
+		return err
+	}
+	var raw struct {
+		LocDateTime json.RawMessage `json:"LocDateTime"`
+	}
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return err
+	}
+	*a = CodeAction(value)
+	a.raw = &codeActionRawState{
+		locDateTime:         append(json.RawMessage(nil), raw.LocDateTime...),
+		originalLocDateTime: a.LocDateTime,
+	}
+	return nil
+}
+
+// MarshalJSON encodes a code action while preserving a decoded local time JSON.
+func (a CodeAction) MarshalJSON() ([]byte, error) {
+	type codeActionJSON CodeAction
+	value := codeActionJSON(a)
+	var locDateTime json.RawMessage
+	if a.raw != nil {
+		locDateTime = a.raw.locDateTime
+	}
+	if len(locDateTime) == 0 || a.raw == nil || a.LocDateTime != a.raw.originalLocDateTime {
+		var err error
+		locDateTime, err = json.Marshal(a.LocDateTime)
+		if err != nil {
+			return nil, err
+		}
+	}
+	return json.Marshal(struct {
+		*codeActionJSON
+		LocDateTime json.RawMessage `json:"LocDateTime"`
+	}{
+		codeActionJSON: &value,
+		LocDateTime:    locDateTime,
+	})
 }
 
 // EngineAction holds the result of the last game action.
@@ -201,8 +408,39 @@ type DomainGame struct {
 
 // GameListResponse is the JSON response from GET /home/?json=1.
 type GameListResponse struct {
-	ComingGames []GameInfo `json:"ComingGames"`
-	ActiveGames []GameInfo `json:"ActiveGames"`
+	ComingGames          []GameInfo `json:"ComingGames"`
+	ActiveGames          []GameInfo `json:"ActiveGames"`
+	Error                int        `json:"Error,omitempty"`
+	Message              string     `json:"Message,omitempty"`
+	IpUnblockUrl         *string    `json:"IpUnblockUrl,omitempty"`
+	BruteForceUnblockUrl *string    `json:"BruteForceUnblockUrl,omitempty"`
+	ConfirmEmailUrl      *string    `json:"ConfirmEmailUrl,omitempty"`
+	CaptchaUrl           *string    `json:"CaptchaUrl,omitempty"`
+	AdminWhoCanActivate  []string   `json:"AdminWhoCanActivate,omitempty"`
+
+	rawFields map[string]json.RawMessage
+}
+
+// UnmarshalJSON decodes a game list while retaining explicit observed keys.
+func (r *GameListResponse) UnmarshalJSON(data []byte) error {
+	type gameListResponseJSON GameListResponse
+	var value gameListResponseJSON
+	if err := json.Unmarshal(data, &value); err != nil {
+		return err
+	}
+	rawFields, err := rawJSONFields(data)
+	if err != nil {
+		return err
+	}
+	*r = GameListResponse(value)
+	r.rawFields = rawFields
+	return nil
+}
+
+// MarshalJSON encodes a game list while retaining explicit keys decoded from the API.
+func (r GameListResponse) MarshalJSON() ([]byte, error) {
+	type gameListResponseJSON GameListResponse
+	return marshalWithRawFields(gameListResponseJSON(r), r.rawFields, nil)
 }
 
 // GameInfo holds full game metadata returned by the /home/?json=1 endpoint.
@@ -254,6 +492,105 @@ type GameInfo struct {
 	AlwaysAvailable         bool      `json:"AlwaysAvailable,omitempty"`
 	PublicAccess            bool      `json:"PublicAccess,omitempty"`
 	DisplayMonitoring       int       `json:"DisplayMonitoring,omitempty"`
+
+	Owner                    any  `json:"Owner,omitempty"`
+	Type                     int  `json:"Type,omitempty"`
+	CertificatePlaces        int  `json:"CertificatePlaces,omitempty"`
+	CertificateAccessMode    int  `json:"CertificateAccessMode,omitempty"`
+	ShowFinishPlace          bool `json:"ShowFinishPlace,omitempty"`
+	StatusId                 int  `json:"StatusId,omitempty"`
+	Status                   int  `json:"Status,omitempty"`
+	IsAvailableAfterFinished bool `json:"IsAvailableAfterFinished,omitempty"`
+	StatAvailabilityTypeID   int  `json:"StatAvailabilityTypeID,omitempty"`
+	StatAvailabilityType     int  `json:"StatAvailabilityType,omitempty"`
+	RateClosed               bool `json:"RateClosed,omitempty"`
+	LevelsSequenceId         int  `json:"LevelsSequenceId,omitempty"`
+	QualityRateCalculated    bool `json:"QualityRateCalculated,omitempty"`
+	Zone                     int  `json:"Zone,omitempty"`
+	AllowMakeStakes          bool `json:"AllowMakeStakes,omitempty"`
+	HidePlayersList          bool `json:"HidePlayersList,omitempty"`
+	ReplaceNlToBr            bool `json:"ReplaceNlToBr,omitempty"`
+	HideGameDescr            bool `json:"HideGameDescr,omitempty"`
+	DisplayAnnouncement      int  `json:"DisplayAnnouncement,omitempty"`
+	ForUserID                int  `json:"ForUserID,omitempty"`
+	AFC                      int  `json:"AFC,omitempty"`
+	IsQualityRateVisible     bool `json:"IsQualityRateVisible,omitempty"`
+	AuthorIndexCalculated    bool `json:"AuthorIndexCalculated,omitempty"`
+	State                    int  `json:"State,omitempty"`
+	IsModified               bool `json:"IsModified,omitempty"`
+	IsNewObject              bool `json:"IsNewObject,omitempty"`
+	ReadOnly                 bool `json:"ReadOnly,omitempty"`
+	SyncRoot                 any  `json:"SyncRoot,omitempty"`
+
+	raw *gameInfoRawState
+}
+
+type gameInfoRawState struct {
+	feeName         json.RawMessage
+	originalFeeName string
+	fields          map[string]json.RawMessage
+}
+
+// UnmarshalJSON decodes game metadata while retaining nullable and explicit JSON fields.
+func (g *GameInfo) UnmarshalJSON(data []byte) error {
+	type gameInfoJSON GameInfo
+	var value gameInfoJSON
+	if err := json.Unmarshal(data, &value); err != nil {
+		return err
+	}
+	rawFields, err := rawJSONFields(data)
+	if err != nil {
+		return err
+	}
+	*g = GameInfo(value)
+	g.raw = &gameInfoRawState{
+		feeName:         append(json.RawMessage(nil), rawFields["FeeName"]...),
+		originalFeeName: g.FeeName,
+		fields:          rawFields,
+	}
+	return nil
+}
+
+// MarshalJSON encodes game metadata while preserving its decoded FeeName JSON.
+func (g GameInfo) MarshalJSON() ([]byte, error) {
+	type gameInfoJSON GameInfo
+	overrides := map[string]json.RawMessage(nil)
+	var rawFields map[string]json.RawMessage
+	if g.raw != nil {
+		rawFields = g.raw.fields
+		if len(g.raw.feeName) > 0 && g.FeeName == g.raw.originalFeeName {
+			overrides = map[string]json.RawMessage{"FeeName": g.raw.feeName}
+		}
+	}
+	return marshalWithRawFields(gameInfoJSON(g), rawFields, overrides)
+}
+
+func rawJSONFields(data []byte) (map[string]json.RawMessage, error) {
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(data, &fields); err != nil {
+		return nil, err
+	}
+	return fields, nil
+}
+
+func marshalWithRawFields(value any, rawFields, overrides map[string]json.RawMessage) ([]byte, error) {
+	encoded, err := json.Marshal(value)
+	if err != nil {
+		return nil, err
+	}
+	fields, err := rawJSONFields(encoded)
+	if err != nil {
+		return nil, err
+	}
+	for key, raw := range rawFields {
+		if _, ok := fields[key]; !ok {
+			fields[key] = raw
+		}
+	}
+	for key, raw := range overrides {
+		fields[key] = raw
+	}
+	return json.Marshal(fields)
 }
 
 // DateTime represents a date-time value as returned by the EN API.

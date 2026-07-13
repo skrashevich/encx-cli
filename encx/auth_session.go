@@ -65,6 +65,9 @@ func (c *Client) VerifyAdminSession(ctx context.Context) error {
 		if strings.Contains(loc, "/administration/") {
 			return nil
 		}
+		// Редирект в неизвестное место (например, на главную для
+		// неавторизованного) — это не доступ к админке.
+		return fmt.Errorf("encx: admin session check redirected to %q", headers.Get("Location"))
 	}
 	if err := guardAdminHTMLRequiresLogin(body); err != nil {
 		return err

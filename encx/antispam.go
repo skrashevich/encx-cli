@@ -165,8 +165,8 @@ func (c *Client) doPostRaw(ctx context.Context, pageURL string, form url.Values)
 }
 
 func (c *Client) doRequestRaw(ctx context.Context, method, pageURL string, body io.Reader) (int, http.Header, []byte, error) {
-	c.antiSpamRecovery.Store(true)
-	defer c.antiSpamRecovery.Store(false)
+	c.antiSpamRecovery.Add(1)
+	defer c.antiSpamRecovery.Add(-1)
 
 	req, err := http.NewRequestWithContext(ctx, method, pageURL, body)
 	if err != nil {
