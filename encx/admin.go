@@ -636,14 +636,50 @@ func (c *Client) AdminCreateHint(ctx context.Context, gameId, levelNum int, h Ad
 }
 
 // AdminDeleteHint deletes a hint by its ID.
+//
+// Penalty hints that a player has already taken cannot be deleted — the
+// engine keeps them because penalty time was awarded. In that case the
+// server's refusal is returned as an error instead of silently succeeding.
 func (c *Client) AdminDeleteHint(ctx context.Context, gameId, levelNum, hintId int) error {
 	u := fmt.Sprintf("%s/Administration/Games/PromptEdit.aspx?gid=%d&level=%d&prid=%d&action=PromptDelete",
 		c.baseURL(), gameId, levelNum, hintId)
-	_, err := c.doGet(ctx, u)
+	body, err := c.doGet(ctx, u)
 	if err != nil {
 		return fmt.Errorf("encx: admin delete hint: %w", err)
 	}
+	if msg := hintDeleteRefusal(body); msg != "" {
+		return fmt.Errorf("encx: admin delete hint: %s", msg)
+	}
+	// Penalty hints are only deleted when the URL carries penalty=1; the
+	// regular delete request above silently leaves them in place. Deleting an
+	// already removed id is a no-op, so both variants are always issued.
+	up := fmt.Sprintf("%s/Administration/Games/PromptEdit.aspx?penalty=1&gid=%d&level=%d&prid=%d&action=PromptDelete",
+		c.baseURL(), gameId, levelNum, hintId)
+	body, err = c.doGet(ctx, up)
+	if err != nil {
+		return fmt.Errorf("encx: admin delete penalty hint: %w", err)
+	}
+	if msg := hintDeleteRefusal(body); msg != "" {
+		return fmt.Errorf("encx: admin delete penalty hint: %s", msg)
+	}
 	return nil
+}
+
+// hintDeleteRefusal extracts the engine's refusal message from a hint delete
+// response, e.g. "Штрафная подсказка не может быть удалена, так как по ней
+// было начислено штрафное время одному из игроков." Empty when none found.
+func hintDeleteRefusal(body string) string {
+	i := strings.Index(body, "не может быть удалена")
+	if i < 0 {
+		return ""
+	}
+	start := strings.LastIndexAny(body[:i], ">\n") + 1
+	rest := body[start:]
+	if end := strings.IndexAny(rest, "<\n"); end >= 0 {
+		rest = rest[:end]
+	}
+	// The message may sit inside an inline script comment ("// Штрафная …").
+	return strings.TrimSpace(strings.TrimLeft(strings.TrimSpace(rest), "/"))
 }
 
 // --- Task Management ---
