@@ -379,7 +379,9 @@ func (c *Client) AdminGetTaskIds(ctx context.Context, gameId, levelNum int) ([]i
 		return nil, fmt.Errorf("encx: admin get task ids: %w", err)
 	}
 
-	taskIdRe := regexp.MustCompile(`(?i)tid=(\d+)`)
+	// Only match task editor links: the page also contains unrelated tid=
+	// parameters (e.g. the waiver link, where tid is the team id).
+	taskIdRe := regexp.MustCompile(`(?i)TaskEdit\.aspx\?[^"'<>]*?tid=(\d+)`)
 	matches := taskIdRe.FindAllStringSubmatch(body, -1)
 	seen := map[int]bool{}
 	ids := make([]int, 0, len(matches))
