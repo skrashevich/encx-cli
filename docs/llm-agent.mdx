@@ -1,0 +1,254 @@
+---
+title: LLM-агент
+description: Управление игрой на естественном языке через --llm флаг и OpenRouter API
+---
+
+`encli` встраивает агента с tool-calling: он читает состояние игры, вызывает admin-команды, ищет факты в Википедии и читает локальные файлы со сценарием. Агент доступен в CLI (`--llm`), в локальном Web UI (`-web`) и в Docker (через `-e`).
+
+## Быстрый старт
+
+```sh
+# Установить ключ и модель
+export LLM_API_KEY=sk-or-v1-...
+export LLM_MODEL=anthropic/claude-sonnet-4
+
+# Запустить агента
+encli -game-id 12345 --llm "создай 3 уровня с бонусами и подсказками"
+```
+
+---
+
+## Настройка API
+
+По умолчанию используется [OpenRouter](https://openrouter.ai/) и бесплатная модель `openai/gpt-oss-120b:free`.
+
+### Переменные окружения
+
+| Переменная | Алиас | Описание |
+|---|---|---|
+| `LLM_API_KEY` | `OPENROUTER_API_KEY` | API-ключ ([получить на openrouter.ai](https://openrouter.ai/keys)) |
+| `LLM_MODEL` | `OPENROUTER_MODEL` | Идентификатор модели, например `anthropic/claude-sonnet-4` |
+| `LLM_BASE_URL` | `OPENROUTER_BASE_URL` | Base URL OpenAI-совместимого API (по умолчанию: `https://openrouter.ai/api/v1`) |
+
+Приоритет: сначала `LLM_*`, затем `OPENROUTER_*`. Для localhost (`127.0.0.1` / `localhost` в URL) ключ не обязателен.
+
+### Примеры настройки
+
+<CodeGroup>
+```sh OpenRouter
+export LLM_API_KEY=sk-or-v1-XXXX
+export LLM_MODEL=anthropic/claude-sonnet-4
+encli -game-id 12345 --llm "создай уровень с бонусом"
+```
+
+```sh Google Gemini (через OpenRouter)
+export LLM_API_KEY=sk-or-v1-XXXX
+export LLM_MODEL=google/gemini-2.5-flash-preview
+encli -game-id 12345 --llm "проверь ответы на уровне 3"
+```
+
+```sh Локальный сервер (Ollama, LiteLLM)
+export LLM_BASE_URL=http://127.0.0.1:8317/v1
+export LLM_MODEL=my-local-model
+encli -game-id 12345 --llm "покажи уровни"
+```
+
+```sh Разовый запуск
+LLM_API_KEY=sk-or-v1-XXXX LLM_MODEL=anthropic/claude-sonnet-4 \
+  encli -game-id 12345 --llm "создай уровень с бонусом"
+```
+</CodeGroup>
+
+Список моделей и цены: [openrouter.ai/models](https://openrouter.ai/models).
+
+---
+
+## Режим `--llm`
+
+```sh
+encli [flags] --llm "<запрос на естественном языке>"
+```
+
+### Флаги
+
+| Флаг | Описание |
+|---|---|
+| `-game-id <id>` | ID игры для работы агента |
+| `-readonly` | Запретить агенту инструменты, изменяющие игру |
+| `-debug` | Подробный лог в `stderr` |
+
+### Примеры запросов
+
+```sh
+# Создание контента
+encli -game-id 12345 --llm "создай 3 уровня с бонусами и подсказками"
+encli -game-id 12345 --llm "скопируй игру 82033 в 82034"
+
+# Аудит и проверка
+encli -readonly -game-id 12345 --llm "аудит всех уровней"
+encli -readonly -game-id 12345 --llm "покажи содержимое всех уровней"
+
+# Исправление ошибок (с подтверждением)
+encli -game-id 12345 --llm "проверь ответы и предложи исправления"
+
+# Отладка
+encli -debug -game-id 12345 --llm "покажи статус игры"
+```
+
+---
+
+## Режимы безопасности
+
+Агент поддерживает три режима безопасности, которые контролируют, какие действия он может выполнять.
+
+<Tabs>
+  <Tab title="Полный доступ (full)">
+    Агент может выполнять любые операции: читать, создавать, изменять и удалять данные.
+
+    ```sh
+    encli -game-id 12345 --llm "создай уровни"
+    ```
+
+    Режим по умолчанию в CLI.
+  </Tab>
+  <Tab title="С согласованием (approve)">
+    Перед каждым изменяющим действием CLI запрашивает подтверждение пользователя.
+
+    Режим по умолчанию в Web UI для новых чатов.
+  </Tab>
+  <Tab title="Только чтение (readonly)">
+    Агент может только читать данные. Все инструменты, изменяющие игру, заблокированы.
+
+    ```sh
+    encli -readonly -game-id 12345 --llm "покажи все уровни"
+    ```
+  </Tab>
+</Tabs>
+
+---
+
+## Review-режим
+
+Для запросов типа «проверь ответы», «найди ошибки» агент не применяет правки сразу. Он предлагает исправления, а CLI (или Web UI) запрашивает подтверждение по каждому пункту.
+
+```sh
+encli -game-id 12345 --llm "пройдись по уровням, проверь ответы и предложи исправления"
+```
+
+Агент выведет список предложений, и вы сможете принять или отклонить каждое из них.
+
+---
+
+## Инструменты агента
+
+Агент имеет доступ к следующим группам инструментов:
+
+### Игровые инструменты (чтение)
+
+| Инструмент | Описание |
+|---|---|
+| `status` | Текущее состояние игры |
+| `level` | Задание текущего уровня |
+| `levels` | Все уровни с прогрессом |
+| `bonuses` | Бонусы текущего уровня |
+| `hints` | Подсказки текущего уровня |
+| `sectors` | Секторы текущего уровня |
+| `log` | Лог попыток ввода кодов |
+| `messages` | Сообщения от организаторов |
+| `game_stats` | Статистика игры |
+| `profile` | Профиль пользователя |
+| `games` / `game_list` | Список игр |
+
+### Игровые инструменты (запись)
+
+| Инструмент | Описание |
+|---|---|
+| `send_code` | Отправить код уровня |
+| `send_bonus` | Отправить бонусный код |
+| `hint` | Запросить штрафную подсказку |
+| `enter` | Вступить в игру |
+| `login` / `logout` | Управление сессией |
+
+### Admin-инструменты
+
+| Инструмент | Описание |
+|---|---|
+| `admin_levels` | Список уровней с ID |
+| `admin_level_content` | Полное содержимое уровня |
+| `admin_create_levels` | Создать уровни |
+| `admin_delete_level` | Удалить уровень |
+| `admin_rename_level` | Переименовать уровень |
+| `admin_set_autopass` | Настроить автопереход |
+| `admin_set_block` | Настроить блокировку ответов |
+| `admin_create_bonus` / `admin_delete_bonus` | Управление бонусами |
+| `admin_create_sector` / `admin_delete_sector` / `admin_update_sector` | Управление секторами |
+| `admin_create_hint` / `admin_delete_hint` / `admin_update_hint` | Управление подсказками |
+| `admin_create_task` / `admin_update_task` / `admin_delete_task` | Управление заданиями |
+| `admin_wipe_game` | Очистить игру |
+| `admin_copy_game` | Скопировать игру |
+| `admin_update_game` | Обновить настройки игры |
+
+### Локальные файлы
+
+| Инструмент | Описание |
+|---|---|
+| `read_local_file` | Прочитать текстовый файл |
+| `list_local_dir` | Список файлов в каталоге |
+| `search_local_files` | Поиск по содержимому / glob |
+
+Корень для локальных путей задаётся переменной `LLM_FILES_ROOT` (по умолчанию — текущая рабочая директория). Файлы вне этого каталога недоступны.
+
+```sh
+export LLM_FILES_ROOT=~/quests/my-scenario
+encli -game-id 12345 --llm "прочитай levels.md и создай уровни по сценарию"
+```
+
+### Википедия
+
+| Инструмент | Описание |
+|---|---|
+| `wikipedia_search` | Поиск статей |
+| `wikipedia_article` | Краткое содержание статьи |
+
+```sh
+encli -game-id 12345 --llm "создай уровень про Эйфелеву башню, проверь факты в Википедии"
+```
+
+---
+
+## Поведение агента
+
+- Вызовы инструментов выводятся в читаемом виде в `stderr`, например: `[admin_level_content] Читаю содержимое уровня 3`.
+- Большие ответы tool-call'ов сжимаются перед отправкой обратно в модель.
+- При ошибках 429 и 502–504 — до 3 повторов с нарастающей задержкой.
+- После создания или изменения уровней агент проверяет результат (коды, тайминги, подсказки, задания).
+
+---
+
+## Отчёт о стоимости
+
+В конце сессии агент выводит отчёт в `stderr`:
+
+```
+=== Agent Report ===
+Model:    anthropic/claude-sonnet-4
+Requests: 8
+Tokens:   prompt=12450 completion=3210 total=15660
+Cost:     ~$0.0234 (OpenRouter pricing)
+```
+
+Стоимость рассчитывается по прайсу OpenRouter из `/models`.
+
+---
+
+## Docker
+
+```sh
+docker run --rm \
+  -e ENCX_LOGIN=user \
+  -e ENCX_PASSWORD=secret \
+  -e ENCX_GAME_ID=12345 \
+  -e LLM_API_KEY=sk-or-v1-... \
+  -e LLM_MODEL=anthropic/claude-sonnet-4 \
+  ghcr.io/skrashevich/encx-cli -game-id 12345 --llm "покажи уровни"
+```

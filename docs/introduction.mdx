@@ -1,0 +1,66 @@
+---
+title: Введение
+description: encx-cli — Go-библиотека и CLI для API движка городских квестов Encounter (en.cx)
+---
+
+# encx-cli
+
+`encx-cli` — это Go-клиент и CLI для API движка городских квестов [Encounter](https://en.cx/) (`en.cx`). Проект состоит из двух независимых частей: библиотеки `encx` для встраивания в собственный код и консольной утилиты `encli` для работы из терминала.
+
+## Что такое Encounter
+
+[Encounter](https://en.cx/) — платформа для проведения городских квестов, брейнштормов, фотоохот и других командных игр. Участники получают задания, ищут коды в городе и отправляют ответы через сайт. `encx-cli` предоставляет программный доступ к этому API без браузера.
+
+Поддерживаемые домены: `*.en.cx`, `*.encounter.cx`, `*.encounter.ru`.
+
+<Note>
+  Домен `quest.ua` устарел и мигрирован в `{city}questua.en.cx` (например, `kharkov.quest.ua` → `kharkovquestua.en.cx`).
+</Note>
+
+## Что внутри
+
+<CardGroup cols={2}>
+  <Card title="Библиотека encx" icon="package" href="/docs/library">
+    Go-пакет для встраивания в собственные приложения. Авторизация, получение состояния игры, отправка кодов, статистика, admin API.
+  </Card>
+  <Card title="CLI encli" icon="terminal" href="/docs/quickstart">
+    Консольная утилита для быстрой работы с API из терминала: логин, просмотр игр, отправка кодов, управление уровнями.
+  </Card>
+  <Card title="LLM-агент" icon="bot" href="/docs/llm-agent">
+    Встроенный агент с tool-calling на базе OpenRouter. Создаёт уровни, проверяет ответы, читает сценарии с диска и ищет факты в Википедии.
+  </Card>
+  <Card title="Web UI" icon="globe" href="/docs/web-ui">
+    Локальный чат-интерфейс для агента с историей диалогов, переключателем режима безопасности и тёмной темой.
+  </Card>
+</CardGroup>
+
+## Для кого
+
+- **Разработчики** — хотите написать тулинг поверх Encounter API: берите пакет `encx`.
+- **Организаторы квестов** — нужно быстро создать уровни, скопировать игру или проверить ответы: используйте `encli` или LLM-агент.
+- **Участники** — хотите работать из терминала без браузера: `encli login`, `encli status`, `encli send-code`.
+
+## Структура проекта
+
+| Путь | Описание |
+|---|---|
+| `encx/` | Go-пакет библиотеки (клиент, типы, методы API) |
+| `cmd/encli/` | Исходный код CLI-утилиты |
+| `cmd/encli/webui/` | Встроенный Web UI (HTML/JS/CSS) |
+| `openapi.yaml` | Неофициальная OpenAPI 3.1 спецификация Encounter API |
+
+## Тестовый домен
+
+Для разработки и тестирования используйте домен `tech.en.cx`. Чтобы получить права на создание игр (исключительно в технологических целях), напишите в [техподдержку сети](https://world.en.cx/UserDetails.aspx?uid=7).
+
+```sh
+encli login -domain tech.en.cx -insecure
+encli games -domain tech.en.cx
+```
+
+## Ссылки
+
+- [GitHub репозиторий](https://github.com/skrashevich/encx-cli)
+- [Releases (готовые бинарники)](https://github.com/skrashevich/encx-cli/releases)
+- [OpenAPI спецификация](https://github.com/skrashevich/encx-cli/blob/main/openapi.yaml)
+- [OpenRouter — каталог моделей](https://openrouter.ai/models)
