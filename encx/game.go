@@ -1,6 +1,7 @@
 package encx
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -53,12 +54,12 @@ func (c *Client) getGameModel(ctx context.Context, gameId int, extraQuery url.Va
 	}
 	c.setHeaders(req)
 
-	_, _, body, err := c.doRequestAndRead(req)
+	status, _, body, err := c.doRequestAndRead(req)
 	if err != nil {
 		return nil, fmt.Errorf("encx: game request: %w", err)
 	}
 
-	return decodeGameModelJSON(body, "game model")
+	return decodeGameModelJSON(body, status, "game model")
 }
 
 func (c *Client) postGameModel(ctx context.Context, gameId int, formValues ...url.Values) (*GameModel, error) {
@@ -84,16 +85,16 @@ func (c *Client) postGameModel(ctx context.Context, gameId int, formValues ...ur
 	c.setHeaders(req)
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 
-	_, _, body, err := c.doRequestAndRead(req)
+	status, _, body, err := c.doRequestAndRead(req)
 	if err != nil {
 		return nil, fmt.Errorf("encx: game request: %w", err)
 	}
 
-	return decodeGameModelJSON(body, "game model")
+	return decodeGameModelJSON(body, status, "game model")
 }
 
-func decodeGameModelJSON(body []byte, context string) (*GameModel, error) {
-	if len(body) > 0 && body[0] == '<' {
+func decodeGameModelJSON(body []byte, statusCode int, context string) (*GameModel, error) {
+	if trimmed := bytes.TrimLeft(body, " \t\r\n\uFEFF"); len(trimmed) > 0 && trimmed[0] == '<' {
 		return nil, fmt.Errorf("encx: session expired or access denied (server returned HTML instead of JSON; try re-login)")
 	}
 	if len(body) == 0 {
@@ -101,7 +102,9 @@ func decodeGameModelJSON(body []byte, context string) (*GameModel, error) {
 	}
 	var model GameModel
 	if err := json.Unmarshal(body, &model); err != nil {
-		return nil, fmt.Errorf("encx: decode %s: %w", context, err)
+		// Carries the HTTP status so callers can tell an unreadable reply from a live engine
+		// (2xx) apart from a proxy/gateway error page (non-2xx).
+		return nil, &UndecodableResponseError{StatusCode: statusCode, Context: context, Err: err}
 	}
 	return &model, nil
 }
@@ -147,10 +150,10 @@ func (c *Client) GetPenaltyHint(ctx context.Context, gameId, penaltyId int) (*Ga
 	}
 	c.setHeaders(req)
 
-	_, _, body, err := c.doRequestAndRead(req)
+	status, _, body, err := c.doRequestAndRead(req)
 	if err != nil {
 		return nil, fmt.Errorf("encx: hint request: %w", err)
 	}
 
-	return decodeGameModelJSON(body, "hint response")
+	return decodeGameModelJSON(body, status, "hint response")
 }

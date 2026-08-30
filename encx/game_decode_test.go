@@ -7,7 +7,7 @@ import (
 )
 
 func TestDecodeGameModelJSONEmptyBody(t *testing.T) {
-	_, err := decodeGameModelJSON(nil, "game model")
+	_, err := decodeGameModelJSON(nil, 200, "game model")
 	if err == nil {
 		t.Fatal("expected error for empty body")
 	}
