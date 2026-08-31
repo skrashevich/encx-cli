@@ -97,12 +97,7 @@ func parseAgentConfig(configJSON string) (agentConfig, agenttools.Policy, error)
 	}
 	cfg.AuthMethod = strings.ToLower(strings.TrimSpace(cfg.AuthMethod))
 	if strings.TrimSpace(cfg.Model) == "" {
-		if cfg.AuthMethod != AuthMethodOnDevice {
-			return cfg, "", errors.New("encxmobile: agent config needs a model")
-		}
-		// The on-device model is whatever the system provides; there is nothing
-		// for the host to name.
-		cfg.Model = AuthMethodOnDevice
+		return cfg, "", errors.New("encxmobile: agent config needs a model")
 	}
 	policy, err := agenttools.ParsePolicy(strings.TrimSpace(cfg.Policy))
 	if err != nil {
@@ -110,11 +105,6 @@ func parseAgentConfig(configJSON string) (agentConfig, agenttools.Policy, error)
 	}
 	if cfg.AuthMethod == AuthMethodCodex && strings.TrimSpace(cfg.CodexCredential) == "" {
 		return cfg, "", errors.New("encxmobile: ChatGPT sign-in is selected but no credential was supplied")
-	}
-	if cfg.AuthMethod == AuthMethodOnDevice && cfg.WebToolsEnabled {
-		// The on-device model is small and its context is short; a page of search
-		// results crowds out the game state it actually needs.
-		cfg.WebToolsEnabled = false
 	}
 	switch {
 	case cfg.MaxIterations < 0:
@@ -188,16 +178,8 @@ type AgentSession struct {
 	history  []providers.Message
 	pending  map[string]chan bool
 	cancel   context.CancelFunc
-	// hostCtx is the context of a turn driven by the host, so Cancel() reaches
-	// tools the host started. Nil for turns driven by the built-in loop.
-	hostCtx context.Context
-	turn    int64
-	callSeq int64
-}
-
-// hostMessage builds a transcript entry for a host-driven exchange.
-func hostMessage(role, content string) providers.Message {
-	return providers.Message{Role: role, Content: content}
+	turn     int64
+	callSeq  int64
 }
 
 // NewAgentSession builds an agent over this client. configJSON carries the LLM
@@ -218,9 +200,6 @@ func (c *EncClient) NewAgentSession(configJSON string) (*AgentSession, error) {
 		codexStore *codexTokenStore
 	)
 	switch {
-	case cfg.AuthMethod == AuthMethodOnDevice:
-		// The model runs inside the host process, so there is no provider to
-		// build. The host drives the conversation and calls InvokeTool.
 	case cfg.AuthMethod == AuthMethodCodex:
 		provider, codexStore, err = newCodexProvider(cfg.CodexCredential)
 		if err != nil {
@@ -321,10 +300,6 @@ func (s *AgentSession) SendMessage(text string) (string, error) {
 	message := strings.TrimSpace(text)
 	if message == "" {
 		return "", errors.New("encxmobile: the message is empty")
-	}
-	if s.provider == nil {
-		return "", errors.New(
-			"encxmobile: this session has no provider; the host drives the turn with BeginHostTurn and InvokeTool")
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())

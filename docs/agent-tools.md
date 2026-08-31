@@ -218,35 +218,6 @@ This path authenticates against OpenAI with the Codex CLI's public client ID,
 which is what PicoClaw itself does. Whether a ChatGPT subscription may be used
 this way is between the account owner and OpenAI's terms.
 
-### A model running inside the host
-
-Set `auth_method` to `on-device` and no provider is built at all. The host owns
-the conversation and calls back for tools:
-
-```go
-session, _ := client.NewAgentSession(`{"auth_method":"on-device","policy":"approve"}`)
-
-catalogJSON, _ := session.ToolCatalogJSON()   // names, descriptions, JSON schemas
-instructions := session.SystemPrompt()
-
-turn, _ := session.BeginHostTurn()            // claims the session, clears cached reads
-result, err := session.InvokeTool("enc_game_state", `{"game_id":42}`)
-session.EndHostTurn(reply, "")
-session.RecordHostExchange(question, reply)
-```
-
-`InvokeTool` is the same path the built-in loop takes, so the policy gate,
-confirmations, pacing and caching all still apply — a host-driven loop is not a
-way around the confirmation the player configured. `SendMessage` refuses on such
-a session rather than dereferencing a provider that was never built.
-
-Web tools are dropped for this auth method: the models small enough to run in a
-phone have short context windows, and a page of search results crowds out the
-game state they need.
-
-The iOS app uses this for Apple's on-device model and for a downloaded open
-model (Qwen3 via MLX).
-
 `AgentSession` reports progress as JSON events (`turn_started`, `tool_started`,
 `tool_finished`, `turn_finished`, `turn_failed`) through `AgentDelegate.OnEvent`,
 and asks for authorization through `AgentDelegate.OnConfirmationRequest`, which
