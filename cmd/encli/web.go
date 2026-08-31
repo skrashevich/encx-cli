@@ -329,6 +329,10 @@ func (h *webHub) httpGetApproval(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "no pending approval"})
 		return
 	}
+	if prompt, ok := gate.currentPrompt(); ok {
+		writeJSON(w, http.StatusOK, prompt)
+		return
+	}
 	pending, ok := h.store.PendingFixes(id)
 	if !ok {
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "no pending approval"})
@@ -436,6 +440,8 @@ func (h *webHub) httpSSE(w http.ResponseWriter, r *http.Request) {
 	room := h.sse.room(id)
 	ch := room.subscribe(32)
 	defer room.unsubscribe(ch)
+	w.WriteHeader(http.StatusOK)
+	fl.Flush()
 
 	done := r.Context().Done()
 	for {

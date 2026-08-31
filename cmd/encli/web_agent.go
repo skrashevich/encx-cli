@@ -129,7 +129,7 @@ func runWebChatTurn(ctx context.Context, hub *webHub, chatID string) {
 				runWebPendingFixApprovals(ctx, hub, chatID, cfg, client, session)
 			},
 			ApproveToolCall: func(ctx context.Context, toolName, argsJSON string) (bool, error) {
-				return runWebToolApproval(ctx, hub, chatID, toolName, argsJSON)
+				return runWebToolApproval(ctx, hub, chatID, t.session, toolName, argsJSON)
 			},
 		})
 	})

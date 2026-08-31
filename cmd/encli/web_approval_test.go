@@ -4,8 +4,10 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 )
@@ -71,6 +73,87 @@ func TestParseApprovalAction(t *testing.T) {
 		if string(a) != tc.want {
 			t.Fatalf("%s -> %s", tc.in, a)
 		}
+	}
+}
+
+func TestWebToolApprovalPublishesWhileThreadLocked(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	store := NewChatStore()
+	snap := store.Create("d", 1, SecurityModeApprove)
+	hub := &webHub{store: store, sse: newSSEHub()}
+
+	thread, unlock, ok := store.LockThread(snap.ID)
+	if !ok {
+		t.Fatal("chat not found")
+	}
+	defer unlock()
+
+	events := hub.sse.room(snap.ID).subscribe(4)
+	defer hub.sse.room(snap.ID).unsubscribe(events)
+
+	type result struct {
+		allowed bool
+		err     error
+	}
+	resultCh := make(chan result, 1)
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	go func() {
+		allowed, err := runWebToolApproval(ctx, hub, snap.ID, thread.session, "admin_update_level", `{"level_id":7}`)
+		resultCh <- result{allowed: allowed, err: err}
+	}()
+
+	select {
+	case frame := <-events:
+		if !strings.Contains(string(frame), "event: approval_prompt") || !strings.Contains(string(frame), `"kind":"tool"`) {
+			t.Fatalf("unexpected SSE frame: %s", frame)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("approval prompt was not published while the chat thread was locked")
+	}
+
+	gate := hub.approvalGate(snap.ID)
+	if gate == nil {
+		t.Fatal("approval gate not registered")
+	}
+	if err := gate.respond(approvalYes); err != nil {
+		t.Fatal(err)
+	}
+	if prompt, ok := gate.currentPrompt(); ok {
+		t.Fatalf("resolved approval still exposes prompt: %#v", prompt)
+	}
+	select {
+	case got := <-resultCh:
+		if got.err != nil || !got.allowed {
+			t.Fatalf("approval result = %+v", got)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("tool approval did not receive the response")
+	}
+}
+
+func TestGetApprovalReturnsToolPrompt(t *testing.T) {
+	hub := &webHub{store: NewChatStore(), sse: newSSEHub()}
+	snap := hub.store.Create("d", 1, SecurityModeApprove)
+	gate := newApprovalGate()
+	gate.setPrompt(toolApprovalPayload(nil, "admin_update_level", `{"level_id":7}`))
+	hub.setApprovalGate(snap.ID, gate)
+	defer hub.clearApprovalGate(snap.ID)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/chats/"+snap.ID+"/approval", nil)
+	req.SetPathValue("id", snap.ID)
+	res := httptest.NewRecorder()
+	hub.httpGetApproval(res, req)
+	if res.Code != http.StatusOK {
+		body, _ := io.ReadAll(res.Result().Body)
+		t.Fatalf("GET approval status %d: %s", res.Code, body)
+	}
+	var prompt map[string]any
+	if err := json.NewDecoder(res.Result().Body).Decode(&prompt); err != nil {
+		t.Fatal(err)
+	}
+	if prompt["kind"] != "tool" || prompt["tool"] != "admin_update_level" {
+		t.Fatalf("unexpected prompt: %#v", prompt)
 	}
 }
 

@@ -939,6 +939,20 @@ function connectES(chatId) {
   const es = new EventSource(url);
   state.es = es;
   wireSSE(es);
+  es.addEventListener('open', () => {
+    void syncApprovalPrompt(chatId);
+  });
+}
+
+async function syncApprovalPrompt(chatId) {
+  try {
+    const prompt = await api(`/chats/${encodeURIComponent(chatId)}/approval`);
+    if (state.activeId === chatId) showApprovalPrompt(prompt);
+  } catch (e) {
+    if (e?.status !== 404) {
+      toast(e.message || String(e), true);
+    }
+  }
 }
 
 function syncRunningFromDetail() {
@@ -1162,6 +1176,7 @@ async function selectChat(chatId) {
     renderMessages();
     renderAuth();
     connectES(chatId);
+    await syncApprovalPrompt(chatId);
     refreshSendState();
   } catch (e) {
     toast(e.message || String(e), true);

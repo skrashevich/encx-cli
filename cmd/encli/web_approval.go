@@ -19,11 +19,31 @@ const (
 type approvalGate struct {
 	mu      sync.Mutex
 	replyCh chan approvalAction
+	prompt  map[string]any
 	closed  bool
 }
 
 func newApprovalGate() *approvalGate {
 	return &approvalGate{replyCh: make(chan approvalAction, 1)}
+}
+
+func (g *approvalGate) setPrompt(prompt map[string]any) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	g.prompt = prompt
+}
+
+func (g *approvalGate) currentPrompt() (map[string]any, bool) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	if g.closed || g.prompt == nil {
+		return nil, false
+	}
+	prompt := make(map[string]any, len(g.prompt))
+	for key, value := range g.prompt {
+		prompt[key] = value
+	}
+	return prompt, true
 }
 
 func (g *approvalGate) respond(action approvalAction) error {
@@ -34,6 +54,7 @@ func (g *approvalGate) respond(action approvalAction) error {
 	}
 	select {
 	case g.replyCh <- action:
+		g.prompt = nil
 		return nil
 	default:
 		return fmt.Errorf("approval already waiting for response")
@@ -118,7 +139,9 @@ func runWebPendingFixApprovals(ctx context.Context, hub *webHub, chatID string, 
 	for len(session.pendingFixes) > 0 {
 		idx++
 		fix := session.pendingFixes[0]
-		hub.publishSSE(chatID, "approval_prompt", fixProposalPayload(session, idx, total, fix))
+		prompt := fixProposalPayload(session, idx, total, fix)
+		gate.setPrompt(prompt)
+		hub.publishSSE(chatID, "approval_prompt", prompt)
 
 		action, err := gate.wait(ctx)
 		hub.publishSSE(chatID, "approval_resolved", map[string]any{
@@ -177,18 +200,6 @@ func printApprovalSummaryWeb(hub *webHub, chatID string, session *llmSession, ou
 	})
 }
 
-func (h *webHub) chatSession(chatID string) *llmSession {
-	h.store.mu.Lock()
-	t := h.store.chats[chatID]
-	h.store.mu.Unlock()
-	if t == nil {
-		return nil
-	}
-	t.mu.Lock()
-	defer t.mu.Unlock()
-	return t.session
-}
-
 func toolApprovalPayload(session *llmSession, toolName, argsJSON string) map[string]any {
 	details := formatToolApprovalDetails(session, toolName, argsJSON)
 	return map[string]any{
@@ -200,13 +211,14 @@ func toolApprovalPayload(session *llmSession, toolName, argsJSON string) map[str
 	}
 }
 
-func runWebToolApproval(ctx context.Context, hub *webHub, chatID, toolName, argsJSON string) (bool, error) {
+func runWebToolApproval(ctx context.Context, hub *webHub, chatID string, session *llmSession, toolName, argsJSON string) (bool, error) {
 	gate := newApprovalGate()
+	prompt := toolApprovalPayload(session, toolName, argsJSON)
+	gate.setPrompt(prompt)
 	hub.setApprovalGate(chatID, gate)
 	defer hub.clearApprovalGate(chatID)
 
-	session := hub.chatSession(chatID)
-	hub.publishSSE(chatID, "approval_prompt", toolApprovalPayload(session, toolName, argsJSON))
+	hub.publishSSE(chatID, "approval_prompt", prompt)
 
 	action, err := gate.wait(ctx)
 	hub.publishSSE(chatID, "approval_resolved", map[string]any{
