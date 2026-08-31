@@ -23,6 +23,10 @@ const (
 	defaultAddr = "0.0.0.0:18080"
 	mockGameID  = 424242
 	mockTeamID  = 5150
+	// mockAPIUserID and mockTeamName mirror the identity the legacy handlers
+	// report, so the new-engine routes describe the same account.
+	mockAPIUserID = 101
+	mockTeamName  = "MockTeam"
 
 	networkDropCode     = "PZDC"
 	networkDropDuration = time.Minute
@@ -72,9 +76,11 @@ func main() {
 		}
 	}
 
-	var scenarioFlag string
+	var scenarioFlag, engineFlag string
 	fs := flag.NewFlagSet("encx-mock", flag.ExitOnError)
 	fs.StringVar(&scenarioFlag, "scenario", "", "path to scenario file (overrides ENCX_MOCK_SCENARIO)")
+	fs.StringVar(&engineFlag, "engine", os.Getenv("ENCX_MOCK_ENGINE"),
+		"which engine to serve: legacy (default), new, or both (env: ENCX_MOCK_ENGINE)")
 	_ = fs.Parse(os.Args[1:])
 
 	fixtures, err := loadFixtures()
@@ -102,19 +108,21 @@ func main() {
 		antiBotAnswerAttempts: antiBotAnswerAttemptsFromEnv(),
 	}
 
-	mux := http.NewServeMux()
-	mux.HandleFunc("POST /login/signin", s.handleLogin)
-	mux.HandleFunc("GET /UserDetails.aspx", s.handleUserDetails)
-	mux.HandleFunc("GET /home/", s.handleGameList)
-	mux.HandleFunc("GET /", s.handleDomainRoot)
-	mux.HandleFunc("POST /gameengines/encounter/makefee/Login.aspx", s.handleEnterGame)
-	mux.HandleFunc("GET /MakeGameFee.aspx", s.handleMakeGameFee)
-	mux.HandleFunc("GET /GameDetails.aspx", s.handleGameDetails)
-	mux.HandleFunc("GET /Teams/TeamDetails.aspx", s.handleTeamDetails)
-	mux.HandleFunc("GET /gamestatistics/full/", s.handleGameStatistics)
-	mux.HandleFunc("GET /gameengines/encounter/play/", s.handleGamePlayGET)
-	mux.HandleFunc("POST /gameengines/encounter/play/", s.handleGamePlayPOST)
-	mux.HandleFunc("GET /NotHumanRequest.aspx", s.handleNotHuman)
+	mux := s.routes()
+	handler := http.Handler(mux)
+	switch strings.ToLower(strings.TrimSpace(engineFlag)) {
+	case "new", "both":
+		// The new-engine routes translate the same handlers, so both engines
+		// answer from one game state and e2e can exercise either.
+		apiMux := http.NewServeMux()
+		s.registerNewAPIRoutes(apiMux, mux)
+		if engineFlag == "new" {
+			handler = apiMux
+		} else {
+			handler = newEngineFallbackMux(apiMux, mux)
+		}
+		log.Printf("serving the new engine API (-engine %s)", engineFlag)
+	}
 
 	log.Printf("encx-mock listening on http://%s", addr)
 	log.Printf("test account: any login/password except fail:fail")
@@ -135,7 +143,7 @@ func main() {
 		log.Printf("loaded game content from scenario: %s", scenarioPath)
 	}
 
-	if err := http.ListenAndServe(addr, withCommonHeaders(mux)); err != nil {
+	if err := http.ListenAndServe(addr, withCommonHeaders(handler)); err != nil {
 		log.Fatal(err)
 	}
 }
@@ -839,4 +847,22 @@ func credentialsKeyForLog(authKey string) string {
 		return "<?>"
 	}
 	return login + ":***"
+}
+
+// routes builds the legacy ASP.NET surface the mock emulates.
+func (s *server) routes() *http.ServeMux {
+	mux := http.NewServeMux()
+	mux.HandleFunc("POST /login/signin", s.handleLogin)
+	mux.HandleFunc("GET /UserDetails.aspx", s.handleUserDetails)
+	mux.HandleFunc("GET /home/", s.handleGameList)
+	mux.HandleFunc("GET /", s.handleDomainRoot)
+	mux.HandleFunc("POST /gameengines/encounter/makefee/Login.aspx", s.handleEnterGame)
+	mux.HandleFunc("GET /MakeGameFee.aspx", s.handleMakeGameFee)
+	mux.HandleFunc("GET /GameDetails.aspx", s.handleGameDetails)
+	mux.HandleFunc("GET /Teams/TeamDetails.aspx", s.handleTeamDetails)
+	mux.HandleFunc("GET /gamestatistics/full/", s.handleGameStatistics)
+	mux.HandleFunc("GET /gameengines/encounter/play/", s.handleGamePlayGET)
+	mux.HandleFunc("POST /gameengines/encounter/play/", s.handleGamePlayPOST)
+	mux.HandleFunc("GET /NotHumanRequest.aspx", s.handleNotHuman)
+	return mux
 }

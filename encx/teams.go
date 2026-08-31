@@ -54,46 +54,52 @@ func (e *TeamActionError) Error() string {
 	return fmt.Sprintf("encx: team %s: action did not change team state", e.Operation)
 }
 
-// GetTeamDetails fetches the team details page and returns raw HTML.
-func (c *Client) GetTeamDetails(ctx context.Context, teamId int) (string, error) {
+// legacyGetTeamDetails fetches the ASP.NET team details page as raw HTML.
+func (c *Client) legacyGetTeamDetails(ctx context.Context, teamId int) (string, error) {
 	return c.doGet(ctx, fmt.Sprintf("%s/Teams/TeamDetails.aspx?tid=%d", c.baseURL(), teamId))
 }
 
-// GetMyTeamDetails fetches the current user's team page.
-func (c *Client) GetMyTeamDetails(ctx context.Context) (string, error) {
+// legacyGetMyTeamDetails fetches the current user's ASP.NET team page.
+func (c *Client) legacyGetMyTeamDetails(ctx context.Context) (string, error) {
 	return c.doGet(ctx, fmt.Sprintf("%s/Teams/TeamDetails.aspx", c.baseURL()))
 }
 
 func (c *Client) absURL(href string) string {
+	return absURLAgainst(c.baseURL(), href)
+}
+
+func absURLAgainst(base, href string) string {
 	if strings.HasPrefix(href, "http://") || strings.HasPrefix(href, "https://") {
 		return href
 	}
+	base = strings.TrimSuffix(base, "/")
 	if strings.HasPrefix(href, "/") {
-		return c.baseURL() + href
+		return base + href
 	}
-	return c.baseURL() + "/" + href
+	return base + "/" + href
 }
 
-// GetTeamManagementInfo fetches and parses management links and invitations for a team.
-func (c *Client) GetTeamManagementInfo(ctx context.Context, teamID int) (*TeamManagementInfo, error) {
-	body, err := c.GetTeamDetails(ctx, teamID)
+// legacyGetTeamManagementInfo parses management links and invitations out of
+// the ASP.NET team page.
+func (c *Client) legacyGetTeamManagementInfo(ctx context.Context, teamID int) (*TeamManagementInfo, error) {
+	body, err := c.legacyGetTeamDetails(ctx, teamID)
 	if err != nil {
 		return nil, err
 	}
 	return ParseTeamManagementInfo(body, teamID), nil
 }
 
-// GetTeamInvitations fetches team invitations addressed to the current user.
-func (c *Client) GetTeamInvitations(ctx context.Context) ([]TeamInvitation, error) {
-	body, err := c.GetMyTeamDetails(ctx)
+// legacyGetTeamInvitations parses invitations out of the ASP.NET team page.
+func (c *Client) legacyGetTeamInvitations(ctx context.Context) ([]TeamInvitation, error) {
+	body, err := c.legacyGetMyTeamDetails(ctx)
 	if err != nil {
 		return nil, err
 	}
 	return ParseTeamInvitations(body), nil
 }
 
-// AcceptTeamInvitation accepts a team invitation by team ID.
-func (c *Client) AcceptTeamInvitation(ctx context.Context, teamId int) error {
+// legacyAcceptTeamInvitation accepts an invitation through the ASP.NET page.
+func (c *Client) legacyAcceptTeamInvitation(ctx context.Context, teamId int) error {
 	body, err := c.doGet(ctx, fmt.Sprintf("%s/Teams/TeamDetails.aspx?action=accept_invitation&tid=%d", c.baseURL(), teamId))
 	if err != nil {
 		return err
@@ -111,8 +117,8 @@ func (c *Client) AcceptTeamInvitation(ctx context.Context, teamId int) error {
 	}
 }
 
-// RejectTeamInvitation rejects a team invitation by team ID.
-func (c *Client) RejectTeamInvitation(ctx context.Context, teamID int) error {
+// legacyRejectTeamInvitation rejects an invitation through the ASP.NET page.
+func (c *Client) legacyRejectTeamInvitation(ctx context.Context, teamID int) error {
 	body, err := c.doGet(ctx, fmt.Sprintf("%s/Teams/TeamDetails.aspx?action=reject_invitation&tid=%d", c.baseURL(), teamID))
 	if err != nil {
 		return err
@@ -130,8 +136,8 @@ func (c *Client) RejectTeamInvitation(ctx context.Context, teamID int) error {
 	}
 }
 
-// RequestTeamMembership sends a request to join the named team.
-func (c *Client) RequestTeamMembership(ctx context.Context, teamName string) error {
+// legacyRequestTeamMembership posts the ASP.NET SendRequest form.
+func (c *Client) legacyRequestTeamMembership(ctx context.Context, teamName string) error {
 	u := fmt.Sprintf("%s/Teams/SendRequest.aspx", c.baseURL())
 	form := url.Values{}
 	form.Set("TeamName", teamName)
@@ -147,8 +153,8 @@ func (c *Client) RequestTeamMembership(ctx context.Context, teamName string) err
 	return nil
 }
 
-// InviteTeamMember invites a user login into the specified team.
-func (c *Client) InviteTeamMember(ctx context.Context, teamID int, login string) error {
+// legacyInviteTeamMember posts the ASP.NET team page invite form.
+func (c *Client) legacyInviteTeamMember(ctx context.Context, teamID int, login string) error {
 	u := fmt.Sprintf("%s/Teams/TeamDetails.aspx?tid=%d", c.baseURL(), teamID)
 	body, err := c.doGet(ctx, u)
 	if err != nil {
@@ -166,7 +172,7 @@ func (c *Client) InviteTeamMember(ctx context.Context, teamID int, login string)
 	if err != nil {
 		return err
 	}
-	info, err := c.GetTeamManagementInfo(ctx, teamID)
+	info, err := c.legacyGetTeamManagementInfo(ctx, teamID)
 	if err != nil {
 		return fmt.Errorf("encx: team invite member: verify state: %w", err)
 	}
@@ -181,14 +187,14 @@ func (c *Client) InviteTeamMember(ctx context.Context, teamID int, login string)
 	}
 }
 
-// RemoveTeamInvitation removes a pending invitation for a user from a team.
-func (c *Client) RemoveTeamInvitation(ctx context.Context, teamID, userID int) error {
+// legacyRemoveTeamInvitation withdraws an invitation through the ASP.NET page.
+func (c *Client) legacyRemoveTeamInvitation(ctx context.Context, teamID, userID int) error {
 	u := fmt.Sprintf("%s/Teams/TeamDetails.aspx?action=remove_invitation&uid=%d&tid=%d", c.baseURL(), userID, teamID)
 	body, err := c.doGet(ctx, u)
 	if err != nil {
 		return err
 	}
-	info, err := c.GetTeamManagementInfo(ctx, teamID)
+	info, err := c.legacyGetTeamManagementInfo(ctx, teamID)
 	if err != nil {
 		return fmt.Errorf("encx: team remove invitation: verify state: %w", err)
 	}
@@ -203,9 +209,9 @@ func (c *Client) RemoveTeamInvitation(ctx context.Context, teamID, userID int) e
 	return nil
 }
 
-// LeaveTeam leaves a team by following the leave action link exposed by the page.
-func (c *Client) LeaveTeam(ctx context.Context, teamID int) error {
-	body, err := c.GetTeamDetails(ctx, teamID)
+// legacyLeaveTeam follows the leave action link on the ASP.NET team page.
+func (c *Client) legacyLeaveTeam(ctx context.Context, teamID int) error {
+	body, err := c.legacyGetTeamDetails(ctx, teamID)
 	if err != nil {
 		return err
 	}
@@ -232,8 +238,8 @@ func (c *Client) LeaveTeam(ctx context.Context, teamID int) error {
 	return fmt.Errorf("encx: leave team: no leave action found for team %d", teamID)
 }
 
-// RenameTeam renames a team.
-func (c *Client) RenameTeam(ctx context.Context, teamID int, name string) error {
+// legacyRenameTeam renames a team through the ASP.NET page.
+func (c *Client) legacyRenameTeam(ctx context.Context, teamID int, name string) error {
 	form := url.Values{}
 	form.Set("txtTeamName", name)
 	form.Set("Submit.x", "1")
@@ -242,7 +248,7 @@ func (c *Client) RenameTeam(ctx context.Context, teamID int, name string) error 
 	if err != nil {
 		return err
 	}
-	info, err := c.GetTeamManagementInfo(ctx, teamID)
+	info, err := c.legacyGetTeamManagementInfo(ctx, teamID)
 	if err != nil {
 		return fmt.Errorf("encx: team rename: verify state: %w", err)
 	}
@@ -255,8 +261,8 @@ func (c *Client) RenameTeam(ctx context.Context, teamID int, name string) error 
 	}
 }
 
-// SetTeamSite updates the team website URL.
-func (c *Client) SetTeamSite(ctx context.Context, teamID int, site string) error {
+// legacySetTeamSite updates the team website URL through the ASP.NET page.
+func (c *Client) legacySetTeamSite(ctx context.Context, teamID int, site string) error {
 	form := url.Values{}
 	form.Set("entbTeamSite", site)
 	form.Set("btnSubmit.x", "1")
@@ -265,8 +271,8 @@ func (c *Client) SetTeamSite(ctx context.Context, teamID int, site string) error
 	return err
 }
 
-// SetTeamForum updates the team external forum URL.
-func (c *Client) SetTeamForum(ctx context.Context, teamID int, forum string) error {
+// legacySetTeamForum updates the team forum URL through the ASP.NET page.
+func (c *Client) legacySetTeamForum(ctx context.Context, teamID int, forum string) error {
 	form := url.Values{}
 	form.Set("txtTeamForum", forum)
 	form.Set("btnSubmit.x", "1")
@@ -397,7 +403,7 @@ func (s teamState) hasInvitation(teamID int) bool {
 }
 
 func (c *Client) getCurrentTeamState(ctx context.Context) (teamState, error) {
-	body, err := c.GetMyTeamDetails(ctx)
+	body, err := c.legacyGetMyTeamDetails(ctx)
 	if err != nil {
 		return teamState{}, err
 	}

@@ -7,9 +7,9 @@ import (
 	"strings"
 )
 
-// LoginComplete establishes a session that works for Administration pages.
-// It signs in via Login.aspx first, then falls back to JSON /login/signin if needed.
-func (c *Client) LoginComplete(ctx context.Context, login, password string, opts ...LoginOptions) error {
+// legacyLoginComplete establishes a session that works for the ASP.NET
+// Administration pages: Login.aspx form first, JSON /login/signin second.
+func (c *Client) legacyLoginComplete(ctx context.Context, login, password string, opts ...LoginOptions) error {
 	login = strings.TrimSpace(login)
 	if login == "" || password == "" {
 		return fmt.Errorf("encx: login and password required")
@@ -19,13 +19,13 @@ func (c *Client) LoginComplete(ctx context.Context, login, password string, opts
 	var pageErr error
 	if err := c.LoginViaLoginPage(ctx, pageURL, login, password, opts...); err != nil {
 		pageErr = err
-	} else if verifyErr := c.VerifyAdminSession(ctx); verifyErr == nil {
+	} else if verifyErr := c.legacyVerifyAdminSession(ctx); verifyErr == nil {
 		return nil
 	} else {
 		pageErr = verifyErr
 	}
 
-	resp, err := c.Login(ctx, login, password, opts...)
+	resp, err := c.legacyLogin(ctx, login, password, opts...)
 	if err != nil {
 		if pageErr != nil {
 			return fmt.Errorf("encx: login page failed (%v); json login failed: %w", pageErr, err)
@@ -38,14 +38,15 @@ func (c *Client) LoginComplete(ctx context.Context, login, password string, opts
 		}
 		return fmt.Errorf("encx: login error %d: %s", resp.Error, LoginErrorText(resp.Error))
 	}
-	if err := c.VerifyAdminSession(ctx); err != nil {
+	if err := c.legacyVerifyAdminSession(ctx); err != nil {
 		return fmt.Errorf("encx: signed in but administration pages still require login: %w", err)
 	}
 	return nil
 }
 
-// VerifyAdminSession reports whether the cookie jar can access game administration URLs.
-func (c *Client) VerifyAdminSession(ctx context.Context) error {
+// legacyVerifyAdminSession reports whether the cookie jar can access the
+// ASP.NET game administration URLs.
+func (c *Client) legacyVerifyAdminSession(ctx context.Context) error {
 	u := c.baseURL() + "/Administration/Games/LevelManager.aspx"
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u, nil)
 	if err != nil {

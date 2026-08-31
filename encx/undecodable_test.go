@@ -27,7 +27,7 @@ func TestIsUndecodableAcceptedUsesHTTPStatus(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			// Non-HTML garbage: HTML is claimed by the session-expired branch first, on every
 			// status, because Encounter serves its login page with HTTP 200.
-			_, err := decodeGameModelJSON([]byte(`{"Level": "not an object"}`), tc.status, "game model")
+			_, err := testClient().decodeGameModelJSON([]byte(`{"Level": "not an object"}`), tc.status, "game model")
 			if err == nil {
 				t.Fatal("expected a decode error")
 			}
@@ -45,7 +45,7 @@ func TestHTMLDetectionSurvivesLeadingBytes(t *testing.T) {
 
 	for _, prefix := range []string{"", "\ufeff", "\r\n", "  \t", "\n\ufeff "} {
 		body := []byte(prefix + "<html><body>502 Bad Gateway</body></html>")
-		_, err := decodeGameModelJSON(body, 502, "game model")
+		_, err := testClient().decodeGameModelJSON(body, 502, "game model")
 		if err == nil {
 			t.Fatalf("prefix %q: expected an error", prefix)
 		}
@@ -64,7 +64,7 @@ func TestHTMLDetectionSurvivesLeadingBytes(t *testing.T) {
 func TestJSONEnvelopeOn2xxIsAccepted(t *testing.T) {
 	t.Parallel()
 
-	_, err := decodeGameModelJSON([]byte(`{"Level": "not an object"}`), 200, "game model")
+	_, err := testClient().decodeGameModelJSON([]byte(`{"Level": "not an object"}`), 200, "game model")
 	if err == nil {
 		t.Fatal("expected a decode error")
 	}
@@ -87,7 +87,7 @@ func TestJSONEnvelopeOn2xxIsAccepted(t *testing.T) {
 func TestUnrelatedErrorsAreNotAccepted(t *testing.T) {
 	t.Parallel()
 
-	_, emptyErr := decodeGameModelJSON(nil, 200, "game model")
+	_, emptyErr := testClient().decodeGameModelJSON(nil, 200, "game model")
 	for _, err := range []error{
 		emptyErr,
 		ErrAntiSpam,

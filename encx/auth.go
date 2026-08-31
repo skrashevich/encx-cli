@@ -9,12 +9,10 @@ import (
 	"strings"
 )
 
-// Login authenticates the user on the Encounter domain.
+// legacyLogin authenticates the user against the ASP.NET engine.
 // On success (Error == 0), session cookies are stored in the client's cookie jar
 // and used for subsequent requests.
-//
-// Optional LoginOptions can be passed to specify network or CAPTCHA digits.
-func (c *Client) Login(ctx context.Context, login, password string, opts ...LoginOptions) (*LoginResponse, error) {
+func (c *Client) legacyLogin(ctx context.Context, login, password string, opts ...LoginOptions) (*LoginResponse, error) {
 	u, err := url.Parse(c.baseURL() + "/login/signin")
 	if err != nil {
 		return nil, fmt.Errorf("encx: parse login URL: %w", err)
@@ -66,6 +64,11 @@ func (c *Client) Login(ctx context.Context, login, password string, opts ...Logi
 // LoginForAntiSpamRecovery signs in during anti-spam recovery: Login.aspx form first, then JSON /login/signin.
 // loginPageURL should be the Login.aspx link from NotHumanRequest (see ResolveAntiSpamLoginURL).
 func (c *Client) LoginForAntiSpamRecovery(ctx context.Context, loginPageURL, login, password string, opts ...LoginOptions) (*LoginResponse, error) {
+	if c.useNewEngine(ctx) {
+		// The new engine has no NotHumanRequest wall and no Login.aspx form;
+		// recovery there is an ordinary sign-in.
+		return c.Login(ctx, login, password, opts...)
+	}
 	if strings.TrimSpace(loginPageURL) != "" {
 		if err := c.LoginViaLoginPage(ctx, loginPageURL, login, password, opts...); err == nil {
 			return &LoginResponse{Error: 0}, nil
@@ -73,5 +76,5 @@ func (c *Client) LoginForAntiSpamRecovery(ctx context.Context, loginPageURL, log
 	}
 	c.antiSpamRecovery.Add(1)
 	defer c.antiSpamRecovery.Add(-1)
-	return c.Login(ctx, login, password, opts...)
+	return c.legacyLogin(ctx, login, password, opts...)
 }

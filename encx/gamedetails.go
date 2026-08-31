@@ -10,10 +10,11 @@ import (
 	"strings"
 )
 
-// EnterGame registers the player in a game (application / fee confirmation).
-// Primary: GET /MakeGameFee.aspx?gid={id}&confirm=yes (e.g. tech.en.cx/MakeGameFee.aspx?gid=81793&confirm=yes).
-// Fallback: POST /gameengines/encounter/makefee/Login.aspx on legacy hosts.
-func (c *Client) EnterGame(ctx context.Context, gameId int) (string, error) {
+// legacyEnterGame registers the player in a game (application / fee
+// confirmation) on the ASP.NET engine.
+// Primary: GET /MakeGameFee.aspx?gid={id}&confirm=yes.
+// Fallback: POST /gameengines/encounter/makefee/Login.aspx on older hosts.
+func (c *Client) legacyEnterGame(ctx context.Context, gameId int) (string, error) {
 	body, err := c.enterGameViaMakeGameFee(ctx, gameId)
 	if err == nil {
 		return body, nil
@@ -149,8 +150,7 @@ func resolveAgainstBase(baseURL, location string) (string, error) {
 	return base.ResolveReference(ref).String(), nil
 }
 
-// GetGameDetails fetches the game details/statistics page.
-// Returns raw HTML that can be parsed for game information and stats.
-func (c *Client) GetGameDetails(ctx context.Context, gameId int) (string, error) {
+// legacyGetGameDetails fetches the game details/statistics page as raw HTML.
+func (c *Client) legacyGetGameDetails(ctx context.Context, gameId int) (string, error) {
 	return c.doGet(ctx, fmt.Sprintf("%s/GameDetails.aspx?gid=%d", c.baseURL(), gameId))
 }

@@ -1,0 +1,84 @@
+{
+  "event": 0,
+  "game_id": 82448,
+  "game_number": 12,
+  "game_title": "Тестовая игра",
+  "game_type_id": 1,
+  "game_zone_id": 0,
+  "game_date_time_start": "2026-08-31 20:00:00",
+  "level_sequence": 3,
+  "count_levels": 2,
+  "user_id": 501,
+  "team_id": 77,
+  "login": "svk",
+  "team_name": "Команда",
+  "is_captain": true,
+  "is_chat_visible": true,
+  "is_guest_mode": false,
+  "allowed_to_answer": true,
+  "user_answer_hit": false,
+  "server_unix": 1788000000,
+  "levels": [
+    {"level_id": 811, "level_number": 1, "level_name": "Первый", "dismissed": false, "is_passed": true},
+    {"level_id": 812, "level_number": 2, "level_name": "Второй", "dismissed": true, "is_passed": false}
+  ],
+  "level": {
+    "level_id": 812,
+    "number": 2,
+    "name": "Второй",
+    "timeout": 3600,
+    "timeout_award": 120,
+    "timeout_seconds_remain": 1800,
+    "timeout_expires_unix": 1788001800,
+    "is_passed": false,
+    "dismissed": false,
+    "level_start_unix": 1787998200,
+    "level_passed_unix": 0,
+    "starts_at_unix": 0,
+    "seconds_to_start": 0,
+    "has_answer_block_rule": true,
+    "block_duration": 45,
+    "block_target_id": 2,
+    "attempts_number": 5,
+    "attempts_period": 300,
+    "required_sectors_count": 3,
+    "passed_sectors_count": 1,
+    "passed_bonuses_count": 2,
+    "sectors_left_to_close": 2,
+    "tasks": [
+      {"task_id": 9001, "task_text_formatted": "Задание <b>уровня</b>", "for_player_id": 0, "for_player_loc": ""}
+    ],
+    "messages": [
+      {"message_id": 3301, "owner_id": 12, "owner_login": "author", "wrapped_text": "Сообщение оргов"}
+    ],
+    "sectors": [
+      {"sector_id": 5501, "order": 1, "name": "Сектор A", "is_passed": true, "answer_text": "ответA", "answer_login": "svk", "answer_user_id": 501, "answer_unix": 1787998800},
+      {"sector_id": 5502, "order": 2, "name": "Сектор B", "is_passed": false, "answer_text": "", "answer_login": "", "answer_user_id": 0, "answer_unix": 0}
+    ],
+    "helps": [
+      {"help_id": 7701, "help_number": 1, "help_text": "Подсказка один", "is_penalty": false, "penalty_time": 0, "penalty_comment": "", "request_confirm": false, "remain_seconds": 0, "state": 0, "award": 0, "delay": 600, "opens_at_unix": 1787998800}
+    ],
+    "penalty_helps": [
+      {"help_id": 7801, "help_number": 1, "help_text": "Штрафная", "is_penalty": true, "penalty_time": 300, "penalty_comment": "минус 5 минут", "request_confirm": true, "remain_seconds": 42, "state": 1, "award": 0, "delay": 0, "opens_at_unix": 0}
+    ],
+    "bonuses": [
+      {"bonus_id": 9101, "number": 1, "name": "Бонус", "task": "Найдите", "help": "Подсказка бонуса", "is_answered": true, "answer_text": "бонусответ", "answer_login": "svk", "answer_user_id": 501, "answer_unix": 1787999000, "expired": false, "seconds_to_start": 0, "seconds_left": 900, "award_time": 180, "negative": false, "delay": 0, "life_time": 1800, "available_from": "", "available_to": "", "starts_at_unix": 0, "expires_at_unix": 1788000900}
+    ],
+    "mixed_actions": [
+      {"level_id": 812, "level_number": 2, "user_id": 501, "login": "svk", "answer": "ответA", "kind": 1, "is_correct": true, "negative": false, "enter_unix": 1787998800},
+      {"level_id": 812, "level_number": 2, "user_id": 502, "login": "other", "answer": "мимо", "kind": 1, "is_correct": false, "negative": false, "enter_unix": 1787998900}
+    ]
+  },
+  "engine_action": {
+    "game_id": 82448,
+    "level_id": 812,
+    "level_number": 2,
+    "level_answer": "ответA",
+    "level_ok": true,
+    "bonus_answer": "",
+    "bonus_ok": false,
+    "reject_reason": "",
+    "request_level_id": 812,
+    "request_level_number": 2
+  }
+}

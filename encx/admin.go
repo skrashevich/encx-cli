@@ -79,8 +79,8 @@ type Profile struct {
 	Location string `json:"location,omitempty"`
 }
 
-// GetProfile fetches the current user's profile from /UserDetails.aspx.
-func (c *Client) GetProfile(ctx context.Context) (*Profile, error) {
+// legacyGetProfile fetches the current user's profile from /UserDetails.aspx.
+func (c *Client) legacyGetProfile(ctx context.Context) (*Profile, error) {
 	u := fmt.Sprintf("%s/UserDetails.aspx", c.baseURL())
 	body, err := c.doGet(ctx, u)
 	if err != nil {
@@ -158,7 +158,7 @@ type AdminGame struct {
 }
 
 // AdminGetGames fetches the list of games the user has admin access to.
-func (c *Client) AdminGetGames(ctx context.Context) ([]AdminGame, error) {
+func (c *Client) legacyAdminGetGames(ctx context.Context) ([]AdminGame, error) {
 	u := fmt.Sprintf("%s/Administration/GamesManager.aspx", c.baseURL())
 	body, err := c.doGet(ctx, u)
 	if err != nil {
@@ -189,7 +189,7 @@ func (c *Client) AdminGetGames(ctx context.Context) ([]AdminGame, error) {
 // --- Level Management ---
 
 // AdminGetLevels fetches the list of levels for a game from the admin panel.
-func (c *Client) AdminGetLevels(ctx context.Context, gameId int) ([]AdminLevel, error) {
+func (c *Client) legacyAdminGetLevels(ctx context.Context, gameId int) ([]AdminLevel, error) {
 	u := fmt.Sprintf("%s/Administration/Games/LevelManager.aspx?gid=%d", c.baseURL(), gameId)
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u, nil)
 	if err != nil {
@@ -241,7 +241,7 @@ func looksLikeLevelManagerPage(body string) bool {
 }
 
 // AdminCreateLevels creates the specified number of new levels in the game.
-func (c *Client) AdminCreateLevels(ctx context.Context, gameId, count int) error {
+func (c *Client) legacyAdminCreateLevels(ctx context.Context, gameId, count int) error {
 	u := fmt.Sprintf("%s/Administration/Games/LevelManager.aspx?gid=%d&levels=create&ddlCreateLevelsNum=%d",
 		c.baseURL(), gameId, count)
 	_, err := c.doGet(ctx, u)
@@ -252,7 +252,7 @@ func (c *Client) AdminCreateLevels(ctx context.Context, gameId, count int) error
 }
 
 // AdminDeleteLevel deletes a level by its number.
-func (c *Client) AdminDeleteLevel(ctx context.Context, gameId, levelNum int) error {
+func (c *Client) legacyAdminDeleteLevel(ctx context.Context, gameId, levelNum int) error {
 	u := fmt.Sprintf("%s/Administration/Games/LevelManager.aspx?gid=%d&levels=delete&ddlDeleteLevels=%d",
 		c.baseURL(), gameId, levelNum)
 	_, err := c.doGet(ctx, u)
@@ -263,7 +263,7 @@ func (c *Client) AdminDeleteLevel(ctx context.Context, gameId, levelNum int) err
 }
 
 // AdminRenameLevels renames levels. The map key is the level ID, value is the new name.
-func (c *Client) AdminRenameLevels(ctx context.Context, gameId int, names map[int]string) error {
+func (c *Client) legacyAdminRenameLevels(ctx context.Context, gameId int, names map[int]string) error {
 	u := fmt.Sprintf("%s/Administration/Games/LevelManager.aspx?gid=%d&level_names=update", c.baseURL(), gameId)
 
 	form := url.Values{}
@@ -280,7 +280,7 @@ func (c *Client) AdminRenameLevels(ctx context.Context, gameId int, names map[in
 }
 
 // AdminUpdateAutopass updates the autopass settings for a level.
-func (c *Client) AdminUpdateAutopass(ctx context.Context, gameId, levelNum int, s AdminLevelSettings) error {
+func (c *Client) legacyAdminUpdateAutopass(ctx context.Context, gameId, levelNum int, s AdminLevelSettings) error {
 	u := fmt.Sprintf("%s/Administration/Games/LevelEditor.aspx?gid=%d&level=%d", c.baseURL(), gameId, levelNum)
 
 	form := url.Values{}
@@ -305,7 +305,7 @@ func (c *Client) AdminUpdateAutopass(ctx context.Context, gameId, levelNum int, 
 }
 
 // AdminUpdateAnswerBlock updates the answer block settings for a level.
-func (c *Client) AdminUpdateAnswerBlock(ctx context.Context, gameId, levelNum int, s AdminLevelSettings) error {
+func (c *Client) legacyAdminUpdateAnswerBlock(ctx context.Context, gameId, levelNum int, s AdminLevelSettings) error {
 	u := fmt.Sprintf("%s/Administration/Games/LevelEditor.aspx?gid=%d&level=%d", c.baseURL(), gameId, levelNum)
 
 	form := url.Values{}
@@ -326,7 +326,7 @@ func (c *Client) AdminUpdateAnswerBlock(ctx context.Context, gameId, levelNum in
 
 // AdminUpdateSectorCompletion updates how many sectors are required to pass a level.
 // requiredCount <= 0 means all sectors are required.
-func (c *Client) AdminUpdateSectorCompletion(ctx context.Context, gameId, levelNum, requiredCount int) error {
+func (c *Client) legacyAdminUpdateSectorCompletion(ctx context.Context, gameId, levelNum, requiredCount int) error {
 	u := fmt.Sprintf("%s/Administration/Games/LevelEditor.aspx?gid=%d&level=%d", c.baseURL(), gameId, levelNum)
 
 	form := url.Values{}
@@ -352,7 +352,7 @@ func (c *Client) AdminUpdateSectorCompletion(ctx context.Context, gameId, levelN
 // --- Bonus Management ---
 
 // AdminCreateBonus creates a new bonus on the specified level.
-func (c *Client) AdminCreateBonus(ctx context.Context, gameId, levelNum int, b AdminBonus) error {
+func (c *Client) legacyAdminCreateBonus(ctx context.Context, gameId, levelNum int, b AdminBonus) error {
 	u := fmt.Sprintf("%s/Administration/Games/BonusEdit.aspx?gid=%d&level=%d&bonus=0&action=save",
 		c.baseURL(), gameId, levelNum)
 
@@ -412,7 +412,7 @@ func (c *Client) AdminCreateBonus(ctx context.Context, gameId, levelNum int, b A
 }
 
 // AdminDeleteBonus deletes a bonus by its ID.
-func (c *Client) AdminDeleteBonus(ctx context.Context, gameId, levelNum, bonusId int) error {
+func (c *Client) legacyAdminDeleteBonus(ctx context.Context, gameId, levelNum, bonusId int) error {
 	u := fmt.Sprintf("%s/Administration/Games/BonusEdit.aspx?gid=%d&level=%d&bonus=%d&action=delete",
 		c.baseURL(), gameId, levelNum, bonusId)
 	_, err := c.doGet(ctx, u)
@@ -425,7 +425,7 @@ func (c *Client) AdminDeleteBonus(ctx context.Context, gameId, levelNum, bonusId
 // --- Sector Management ---
 
 // AdminCreateSector creates a new sector on the specified level.
-func (c *Client) AdminCreateSector(ctx context.Context, gameId, levelNum int, s AdminSector) error {
+func (c *Client) legacyAdminCreateSector(ctx context.Context, gameId, levelNum int, s AdminSector) error {
 	u := fmt.Sprintf("%s/Administration/Games/LevelEditor.aspx?gid=%d&level=%d", c.baseURL(), gameId, levelNum)
 	_, err := c.doPost(ctx, u, adminSectorForm(s))
 	if err != nil {
@@ -436,7 +436,7 @@ func (c *Client) AdminCreateSector(ctx context.Context, gameId, levelNum int, s 
 }
 
 // AdminAddSectorAnswers appends answers to an existing sector without creating a new sector.
-func (c *Client) AdminAddSectorAnswers(ctx context.Context, gameId, levelNum, sectorId int, answers []string) error {
+func (c *Client) legacyAdminAddSectorAnswers(ctx context.Context, gameId, levelNum, sectorId int, answers []string) error {
 	const maxAnswersPerRequest = 10
 	for start := 0; start < len(answers); start += maxAnswersPerRequest {
 		end := start + maxAnswersPerRequest
@@ -461,7 +461,7 @@ func (c *Client) AdminAddSectorAnswers(ctx context.Context, gameId, levelNum, se
 }
 
 // AdminUpdateSector updates an existing sector by its ID.
-func (c *Client) AdminUpdateSector(ctx context.Context, gameId, levelNum, sectorId int, s AdminSector) error {
+func (c *Client) legacyAdminUpdateSector(ctx context.Context, gameId, levelNum, sectorId int, s AdminSector) error {
 	name := strings.TrimSpace(s.Name)
 	if name == "" {
 		name = fmt.Sprintf("Сектор %d", sectorId)
@@ -519,7 +519,7 @@ func adminAddSectorAnswersForm(body string, sectorId int, answers []string) url.
 }
 
 // AdminDeleteSector deletes a sector by its ID (delsector= from LevelEditor).
-func (c *Client) AdminDeleteSector(ctx context.Context, gameId, levelNum, sectorId int) error {
+func (c *Client) legacyAdminDeleteSector(ctx context.Context, gameId, levelNum, sectorId int) error {
 	return c.adminDeleteSector(ctx, gameId, levelNum, sectorId)
 }
 
@@ -588,7 +588,7 @@ func (c *Client) doGetFollowRedirects(ctx context.Context, rawURL, referer strin
 // --- Hint Management ---
 
 // AdminCreateHint creates a new hint (regular or penalty) on the specified level.
-func (c *Client) AdminCreateHint(ctx context.Context, gameId, levelNum int, h AdminHint) error {
+func (c *Client) legacyAdminCreateHint(ctx context.Context, gameId, levelNum int, h AdminHint) error {
 	var u string
 	if h.IsPenalty || h.RequestConfirm {
 		u = fmt.Sprintf("%s/Administration/Games/PromptEdit.aspx?penalty=1&gid=%d&level=%d",
@@ -640,7 +640,7 @@ func (c *Client) AdminCreateHint(ctx context.Context, gameId, levelNum int, h Ad
 // Penalty hints that a player has already taken cannot be deleted — the
 // engine keeps them because penalty time was awarded. In that case the
 // server's refusal is returned as an error instead of silently succeeding.
-func (c *Client) AdminDeleteHint(ctx context.Context, gameId, levelNum, hintId int) error {
+func (c *Client) legacyAdminDeleteHint(ctx context.Context, gameId, levelNum, hintId int) error {
 	u := fmt.Sprintf("%s/Administration/Games/PromptEdit.aspx?gid=%d&level=%d&prid=%d&action=PromptDelete",
 		c.baseURL(), gameId, levelNum, hintId)
 	body, err := c.doGet(ctx, u)
@@ -685,7 +685,7 @@ func hintDeleteRefusal(body string) string {
 // --- Task Management ---
 
 // AdminCreateTask creates a new task on the specified level.
-func (c *Client) AdminCreateTask(ctx context.Context, gameId, levelNum int, t AdminTask) error {
+func (c *Client) legacyAdminCreateTask(ctx context.Context, gameId, levelNum int, t AdminTask) error {
 	u := fmt.Sprintf("%s/Administration/Games/TaskEdit.aspx?gid=%d&level=%d", c.baseURL(), gameId, levelNum)
 
 	form := url.Values{}
@@ -707,7 +707,7 @@ func (c *Client) AdminCreateTask(ctx context.Context, gameId, levelNum int, t Ad
 // --- Comment Management ---
 
 // AdminUpdateComment updates the level name and comment.
-func (c *Client) AdminUpdateComment(ctx context.Context, gameId, levelNum int, name, comment string) error {
+func (c *Client) legacyAdminUpdateComment(ctx context.Context, gameId, levelNum int, name, comment string) error {
 	u := fmt.Sprintf("%s/Administration/Games/NameCommentEdit.aspx?gid=%d&level=%d", c.baseURL(), gameId, levelNum)
 
 	form := url.Values{}
@@ -725,7 +725,7 @@ func (c *Client) AdminUpdateComment(ctx context.Context, gameId, levelNum int, n
 // --- Team Management ---
 
 // AdminGetTeams fetches the list of teams registered for the game.
-func (c *Client) AdminGetTeams(ctx context.Context, gameId, levelNum int) ([]AdminTeam, error) {
+func (c *Client) legacyAdminGetTeams(ctx context.Context, gameId, levelNum int) ([]AdminTeam, error) {
 	u := fmt.Sprintf("%s/Administration/Games/TaskEdit.aspx?gid=%d&level=%d", c.baseURL(), gameId, levelNum)
 	body, err := c.doGet(ctx, u)
 	if err != nil {
@@ -761,7 +761,7 @@ func (c *Client) AdminGetTeams(ctx context.Context, gameId, levelNum int) ([]Adm
 // --- Bonus/Penalty Time Corrections ---
 
 // AdminGetCorrections fetches the list of bonus/penalty time corrections for a game.
-func (c *Client) AdminGetCorrections(ctx context.Context, gameId int) ([]AdminCorrection, error) {
+func (c *Client) legacyAdminGetCorrections(ctx context.Context, gameId int) ([]AdminCorrection, error) {
 	u := fmt.Sprintf("%s/GameBonusPenaltyTime.aspx?gid=%d&lang=ru", c.baseURL(), gameId)
 	body, err := c.doGet(ctx, u)
 	if err != nil {
@@ -811,7 +811,7 @@ func (c *Client) AdminGetCorrections(ctx context.Context, gameId int) ([]AdminCo
 }
 
 // AdminAddCorrection adds a new bonus/penalty time correction.
-func (c *Client) AdminAddCorrection(ctx context.Context, gameId int, corr AdminCorrectionAdd) error {
+func (c *Client) legacyAdminAddCorrection(ctx context.Context, gameId int, corr AdminCorrectionAdd) error {
 	// First get the form to resolve team/level names to IDs
 	formURL := fmt.Sprintf("%s/GameBonusPenaltyTime.aspx?gid=%d&action=add", c.baseURL(), gameId)
 	body, err := c.doGet(ctx, formURL)
@@ -853,7 +853,7 @@ func (c *Client) AdminAddCorrection(ctx context.Context, gameId int, corr AdminC
 }
 
 // AdminDeleteCorrection deletes a bonus/penalty time correction by its ID.
-func (c *Client) AdminDeleteCorrection(ctx context.Context, gameId int, correctionId string) error {
+func (c *Client) legacyAdminDeleteCorrection(ctx context.Context, gameId int, correctionId string) error {
 	u := fmt.Sprintf("%s/GameBonusPenaltyTime.aspx?gid=%d&action=delete&correct=%s",
 		c.baseURL(), gameId, correctionId)
 	_, err := c.doGet(ctx, u)
@@ -864,7 +864,7 @@ func (c *Client) AdminDeleteCorrection(ctx context.Context, gameId int, correcti
 }
 
 // AdminGetGameInfo reads the game editor page and returns current game settings.
-func (c *Client) AdminGetGameInfo(ctx context.Context, gameId int) (*AdminGameInfo, error) {
+func (c *Client) legacyAdminGetGameInfo(ctx context.Context, gameId int) (*AdminGameInfo, error) {
 	u := fmt.Sprintf("%s/Administration/Games/GameEditor.aspx?gid=%d&action=edit", c.baseURL(), gameId)
 	body, err := c.doGet(ctx, u)
 	if err != nil {
@@ -908,7 +908,7 @@ func (c *Client) AdminGetGameInfo(ctx context.Context, gameId int) (*AdminGameIn
 }
 
 // AdminUpdateGameInfo updates game settings via the game editor page.
-func (c *Client) AdminUpdateGameInfo(ctx context.Context, gameId int, info AdminGameInfo) error {
+func (c *Client) legacyAdminUpdateGameInfo(ctx context.Context, gameId int, info AdminGameInfo) error {
 	u := fmt.Sprintf("%s/Administration/Games/GameEditor.aspx", c.baseURL())
 
 	form := url.Values{}
@@ -953,7 +953,7 @@ func (c *Client) AdminUpdateGameInfo(ctx context.Context, gameId int, info Admin
 }
 
 // AdminNotDeliverGame marks a game as "not delivered" (несостоявшаяся).
-func (c *Client) AdminNotDeliverGame(ctx context.Context, gameId int) error {
+func (c *Client) legacyAdminNotDeliverGame(ctx context.Context, gameId int) error {
 	u := fmt.Sprintf("%s/Administration/GamesManager.aspx?gid=%d&action=NotDeliver", c.baseURL(), gameId)
 	_, err := c.doGet(ctx, u)
 	if err != nil {
@@ -965,7 +965,7 @@ func (c *Client) AdminNotDeliverGame(ctx context.Context, gameId int) error {
 // --- Level Reordering ---
 
 // AdminSwapLevels swaps two levels by their numbers.
-func (c *Client) AdminSwapLevels(ctx context.Context, gameId, level1, level2 int) error {
+func (c *Client) legacyAdminSwapLevels(ctx context.Context, gameId, level1, level2 int) error {
 	u := fmt.Sprintf("%s/Administration/Games/LevelManager.aspx?gid=%d&levels=swap&ddlSwapLevels1=%d&ddlSwapLevels2=%d",
 		c.baseURL(), gameId, level1, level2)
 	_, err := c.doGet(ctx, u)
@@ -976,7 +976,7 @@ func (c *Client) AdminSwapLevels(ctx context.Context, gameId, level1, level2 int
 }
 
 // AdminInsertLevel moves level src to the position after level dst.
-func (c *Client) AdminInsertLevel(ctx context.Context, gameId, src, dst int) error {
+func (c *Client) legacyAdminInsertLevel(ctx context.Context, gameId, src, dst int) error {
 	u := fmt.Sprintf("%s/Administration/Games/LevelManager.aspx?gid=%d&levels=insert&ddlInsertAfterSrc=%d&ddlInsertAfterDst=%d",
 		c.baseURL(), gameId, src, dst)
 	_, err := c.doGet(ctx, u)
@@ -987,7 +987,7 @@ func (c *Client) AdminInsertLevel(ctx context.Context, gameId, src, dst int) err
 }
 
 // AdminCloneLevels creates count new levels cloned from the specified level number.
-func (c *Client) AdminCloneLevels(ctx context.Context, gameId, count, likeLevel int) error {
+func (c *Client) legacyAdminCloneLevels(ctx context.Context, gameId, count, likeLevel int) error {
 	u := fmt.Sprintf("%s/Administration/Games/LevelManager.aspx?gid=%d&levels=createlike&ddlCreateLevelsNum=%d&ddlCreateLikeLevel=%d",
 		c.baseURL(), gameId, count, likeLevel)
 	_, err := c.doGet(ctx, u)
@@ -1000,7 +1000,7 @@ func (c *Client) AdminCloneLevels(ctx context.Context, gameId, count, likeLevel 
 // --- Task Delete/Update ---
 
 // AdminDeleteTask deletes a task by its ID.
-func (c *Client) AdminDeleteTask(ctx context.Context, gameId, levelNum, taskId int) error {
+func (c *Client) legacyAdminDeleteTask(ctx context.Context, gameId, levelNum, taskId int) error {
 	u := fmt.Sprintf("%s/Administration/Games/TaskEdit.aspx?gid=%d&level=%d&tid=%d&action=TaskDelete",
 		c.baseURL(), gameId, levelNum, taskId)
 	_, err := c.doGet(ctx, u)
@@ -1011,7 +1011,7 @@ func (c *Client) AdminDeleteTask(ctx context.Context, gameId, levelNum, taskId i
 }
 
 // AdminUpdateTask updates an existing task by its ID.
-func (c *Client) AdminUpdateTask(ctx context.Context, gameId, levelNum, taskId int, t AdminTask) error {
+func (c *Client) legacyAdminUpdateTask(ctx context.Context, gameId, levelNum, taskId int, t AdminTask) error {
 	u := fmt.Sprintf("%s/Administration/Games/TaskEdit.aspx?gid=%d&level=%d&tid=%d&action=TaskEdit",
 		c.baseURL(), gameId, levelNum, taskId)
 
@@ -1034,7 +1034,7 @@ func (c *Client) AdminUpdateTask(ctx context.Context, gameId, levelNum, taskId i
 // --- Bonus Update ---
 
 // AdminUpdateBonus updates an existing bonus by its ID.
-func (c *Client) AdminUpdateBonus(ctx context.Context, gameId, levelNum, bonusId int, b AdminBonus) error {
+func (c *Client) legacyAdminUpdateBonus(ctx context.Context, gameId, levelNum, bonusId int, b AdminBonus) error {
 	u := fmt.Sprintf("%s/Administration/Games/BonusEdit.aspx?gid=%d&level=%d&bonus=%d&action=save",
 		c.baseURL(), gameId, levelNum, bonusId)
 
@@ -1094,7 +1094,7 @@ func (c *Client) AdminUpdateBonus(ctx context.Context, gameId, levelNum, bonusId
 // --- Hint Update ---
 
 // AdminUpdateHint updates an existing hint by its ID.
-func (c *Client) AdminUpdateHint(ctx context.Context, gameId, levelNum, hintId int, h AdminHint) error {
+func (c *Client) legacyAdminUpdateHint(ctx context.Context, gameId, levelNum, hintId int, h AdminHint) error {
 	var u string
 	if h.IsPenalty || h.RequestConfirm {
 		u = fmt.Sprintf("%s/Administration/Games/PromptEdit.aspx?penalty=1&gid=%d&level=%d&prid=%d",
@@ -1144,7 +1144,7 @@ func (c *Client) AdminUpdateHint(ctx context.Context, gameId, levelNum, hintId i
 // --- Game Lifecycle ---
 
 // AdminDeliverGame marks a game as "delivered" (состоявшаяся).
-func (c *Client) AdminDeliverGame(ctx context.Context, gameId int) error {
+func (c *Client) legacyAdminDeliverGame(ctx context.Context, gameId int) error {
 	u := fmt.Sprintf("%s/Administration/GamesManager.aspx?gid=%d&action=Deliver", c.baseURL(), gameId)
 	_, err := c.doGet(ctx, u)
 	if err != nil {
@@ -1154,7 +1154,7 @@ func (c *Client) AdminDeliverGame(ctx context.Context, gameId int) error {
 }
 
 // AdminAwardPoints awards points to game participants.
-func (c *Client) AdminAwardPoints(ctx context.Context, gameId int) error {
+func (c *Client) legacyAdminAwardPoints(ctx context.Context, gameId int) error {
 	u := fmt.Sprintf("%s/Administration/GamesManager.aspx?gid=%d&action=AwardPoints", c.baseURL(), gameId)
 	_, err := c.doGet(ctx, u)
 	if err != nil {
@@ -1164,7 +1164,7 @@ func (c *Client) AdminAwardPoints(ctx context.Context, gameId int) error {
 }
 
 // AdminEndRatings ends accepting ratings for a game.
-func (c *Client) AdminEndRatings(ctx context.Context, gameId int) error {
+func (c *Client) legacyAdminEndRatings(ctx context.Context, gameId int) error {
 	u := fmt.Sprintf("%s/Administration/GamesManager.aspx?gid=%d&action=EndRatings", c.baseURL(), gameId)
 	_, err := c.doGet(ctx, u)
 	if err != nil {
@@ -1174,7 +1174,7 @@ func (c *Client) AdminEndRatings(ctx context.Context, gameId int) error {
 }
 
 // AdminCalculateIK calculates the game coefficient (ИК).
-func (c *Client) AdminCalculateIK(ctx context.Context, gameId int) error {
+func (c *Client) legacyAdminCalculateIK(ctx context.Context, gameId int) error {
 	u := fmt.Sprintf("%s/Administration/GamesManager.aspx?gid=%d&action=CalcIK", c.baseURL(), gameId)
 	_, err := c.doGet(ctx, u)
 	if err != nil {
@@ -1184,7 +1184,7 @@ func (c *Client) AdminCalculateIK(ctx context.Context, gameId int) error {
 }
 
 // AdminGetActionMonitor reads the game action monitor rows.
-func (c *Client) AdminGetActionMonitor(ctx context.Context, gameId int) ([]AdminActionMonitorEntry, error) {
+func (c *Client) legacyAdminGetActionMonitor(ctx context.Context, gameId int) ([]AdminActionMonitorEntry, error) {
 	u := fmt.Sprintf("%s/Administration/Games/ActionMonitor.aspx?gid=%d&type=own", c.baseURL(), gameId)
 	body, err := c.doGet(ctx, u)
 	if err != nil {
@@ -1235,7 +1235,7 @@ func (c *Client) AdminGetActionMonitor(ctx context.Context, gameId int) ([]Admin
 // --- Game Messages ---
 
 // AdminCreateMessage creates a message for a game using the MessageEdit form.
-func (c *Client) AdminCreateMessage(ctx context.Context, gameId, levelID int, m AdminGameMessage) error {
+func (c *Client) legacyAdminCreateMessage(ctx context.Context, gameId, levelID int, m AdminGameMessage) error {
 	u := fmt.Sprintf("%s/Administration/Games/MessageEdit.aspx?gid=%d&level=%d&action=add", c.baseURL(), gameId, levelID)
 	form := adminMessageForm(levelID, m)
 	_, err := c.doPost(ctx, u, form)
@@ -1246,7 +1246,7 @@ func (c *Client) AdminCreateMessage(ctx context.Context, gameId, levelID int, m 
 }
 
 // AdminUpdateMessage updates an existing message by its ID.
-func (c *Client) AdminUpdateMessage(ctx context.Context, gameId, levelNum, messageId int, m AdminGameMessage) error {
+func (c *Client) legacyAdminUpdateMessage(ctx context.Context, gameId, levelNum, messageId int, m AdminGameMessage) error {
 	u := fmt.Sprintf("%s/Administration/Games/MessageEdit.aspx?gid=%d&level=%d&mid=%d", c.baseURL(), gameId, levelNum, messageId)
 	form := adminMessageForm(levelNum, m)
 	_, err := c.doPost(ctx, u, form)
@@ -1257,7 +1257,7 @@ func (c *Client) AdminUpdateMessage(ctx context.Context, gameId, levelNum, messa
 }
 
 // AdminDeleteMessage deletes a message by its ID.
-func (c *Client) AdminDeleteMessage(ctx context.Context, gameId, levelNum, messageId int) error {
+func (c *Client) legacyAdminDeleteMessage(ctx context.Context, gameId, levelNum, messageId int) error {
 	u := fmt.Sprintf("%s/Administration/Games/MessageEdit.aspx?gid=%d&level=%d&mid=%d&action=delete", c.baseURL(), gameId, levelNum, messageId)
 	_, err := c.doGet(ctx, u)
 	if err != nil {

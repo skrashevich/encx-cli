@@ -273,7 +273,7 @@ func (c *Client) adminDeleteSectorAndReadList(ctx context.Context, gameID, level
 }
 
 // AdminClearLevelSectors deletes all sectors exposed by the level editor.
-func (c *Client) AdminClearLevelSectors(ctx context.Context, gameID, levelNum int) error {
+func (c *Client) legacyAdminClearLevelSectors(ctx context.Context, gameID, levelNum int) error {
 	const maxRounds = 3
 	body, err := c.adminReadSectorAnswersList(ctx, gameID, levelNum)
 	if err != nil {

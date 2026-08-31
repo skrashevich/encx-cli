@@ -1,21 +1,352 @@
-# Ralph progress: gomobile iOS bindings
+# Ralph progress: scenario import round-trip fidelity
 
-## US-001: Gomobile-compatible wrapper package
-- Created mobile/encxmobile with EncClient wrapping encx.Client
-- JSON-based API for all player methods (Login, GetGameModel, SendCode, etc.)
-- Session persistence via ExportCookies/ImportCookies
-- Package-level LoginErrorText, EventText, ParseTeamLinks
-- Tests pass: go test ./mobile/encxmobile/
+Задача: экспорт сценария импортированной игры должен совпадать с исходным
+GameScenario.html. Исходный файл (434KB) и экспорт импортированной игры (306KB)
+расходились на 1306 строк видимого текста.
 
-## US-002: iOS framework build tooling
-- mobile/bind-ios.sh builds Encx.xcframework via gomobile bind -target=ios
-- golang.org/x/mobile added to go.mod
-- tools/tools.go pins gomobile/gobind for reproducible builds
-- Verified: mobile/build/Encx.xcframework contains ios-arm64 + simulator slices
+## Диагностика
+Парсер encx/scenario видел оба файла ОДИНАКОВЫМИ (levels JSON байт в байт),
+то есть терял данные симметрично — значит дефект в самом парсере, а не только
+в цикле импорта. Текстовый diff HTML-файлов выявил три класса потерь.
 
-## US-003: Integration documentation
-- README section "iOS (gomobile)" with build, Xcode setup, Swift example
+## US-001: нежадные regexp обрезали вложенную разметку
+`(.*?)</span>` останавливался на первом ВЛОЖЕННОМ `</span>`. Задание уровня 1
+обрезалось с 2804 до ~200 символов на `<details><summary><span>...`.
+Исправлено: findElements + extractBalanced (encx/scenario/scenario.go) —
+подсчёт вложенности одноимённых тегов. Переведены: lblLevelTask, lblLevelHelp,
+lblLevelHelpTitle, lblLevelComment, divSectorName, lblLevelAnswer, lblBonusNum,
+lblBonusAnswer, bonus white-fields.
 
-## Patterns
-- gomobile requires int64 (not int), no context.Context, JSON strings for complex types
-- EncxmobileEncClient is the Swift/ObjC class name from gomobile bind
+Побочно обнаружено: незакрытые теги в авторском HTML приводили к потере
+элемента целиком. Добавлен guard по `</div>` (границе блока шаблона экспорта).
+
+## US-002: штрафные подсказки не парсились
+`LevelPenaltyHelpsRepeater` игнорировался — 95 штрафных подсказок терялись.
+Добавлен scenario.PenaltyHint (текст, delay, penalty time, request confirm,
+описание) + parsePenaltyHints. Разграничение по id: `_LevelHelpsRepeater_`
+vs `_LevelPenaltyHelpsRepeater_`.
+
+## US-003: импорт штрафных подсказок
+cmd/encli/import_scenario.go: scenarioPenaltyHintToAdminHint →
+encx.AdminCreateHint с IsPenalty (клиент уже умел penalty=1). Покрыты оба
+пути: полный импорт и --sync-missing. penaltyHintKey отделяет ключи штрафных
+подсказок от обычных, чтобы sync не считал их эквивалентными. Счётчики
+dry-run/JSON/итогового отчёта и printDryRunLevel показывают penalty hints.
+
+## US-004: точные пробелы в именах
+cleanInlineText схлопывал пробелы: `lvl 2 спойлер Попытки  ` → без хвоста,
+`Замена трешки 2    (...)` → один пробел. Добавлен inlineText (без Fields),
+убран TrimSpace в importLevelName и scenarioAdminSectors (fallback остался по
+strings.TrimSpace(name) == "").
+
+## US-005: регрессионная сеть
+encx/scenario/lossless_test.go — missingScenarioText: сверяет каждую видимую
+строку блока уровня с распарсенной моделью. Тест TestScenarioTextIsLossless
+работает на фикстуре, а с ENCX_SCENARIO_FILE=<путь> — на реальном экспорте.
+Результат на `~/Downloads/t.en.cx : Game scenario.html`: 0 потерь (до фикса
+было ~1300).
+
+## Ревью-итерация 1 (architect): найдено и исправлено
+- Паника: block[titleEl.end:textEl.start] при незакрытом теге в заголовке
+  штрафной подсказки. Добавлена проверка textEl.start >= titleEl.end.
+- extractBalanced разделён на два прохода. Первый доверяет только собственному
+  закрывающему тегу и границе следующего репитер-поля (repeaterIDMarker);
+  второй добавляет границу блока (`</div`). Иначе: посторонний `</div>` внутри
+  корректного задания обрезал текст, а незакрытый тег в задании, лежащем прямо
+  в div.scenarioBlock, «съедал» подсказки и ответы уровня (утечка спойлеров).
+- guardClose был "</div>" при том, что hasTagPrefix требует разделитель после
+  префикса → `</div></div>` не распознавался. Теперь "</div".
+- Если границы нет вовсе — возвращаем остаток, а не теряем поле молча.
+- elementsByIndex ключевался только по внутреннему индексу репитера; добавлен
+  внешний (иначе title уровня 2 мог спариться с текстом уровня 1).
+- sync: сравнение имени уровня было асимметричным (TrimSpace слева, verbatim
+  справа) → AdminUpdateComment срабатывал на каждом прогоне. Введён
+  namesEquivalent (collapse+fold) для СРАВНЕНИЯ; запись осталась verbatim.
+  Тот же компромисс применён к сравнению имён секторов.
+- penaltyHintKey не учитывал RequestConfirm и Comment → изменение только этих
+  полей никогда не пересинхронизировалось.
+- cmd/encx-mock/hints.go теперь отдаёт PenaltyHints (IsPenalty/Penalty/
+  PenaltyComment/RequestConfirm), иначе фича не покрывается mock-тестами.
+
+## Ревью-итерация 2 (architect): найдено и исправлено
+- N-1 (HIGH): в двухпроходной версии граница repeaterIDMarker была
+  ТЕРМИНАЛЬНОЙ и срабатывала раньше собственного закрывающего тега —
+  корректно закрытое поле с вложенным `id="LevelsScenarioRepeater_`
+  (вложенный span, <img id=...>, <div id=...>) молча обрезалось.
+  Переписано в ОДИН проход: repeaterIDMarker и конец блока — лишь
+  КАНДИДАТЫ, собственный закрывающий тег всегда приоритетнее; при
+  незакрытом элементе берётся ближайший кандидат (earliestBoundary).
+  Тест: TestNestedRepeaterIDDoesNotTruncateClosedField.
+- N-2: findCreatedSector сравнивал имена строго — переведён на namesEquivalent.
+- N-4: exportChromeRe в чекере заякорен на конец строки, чтобы не маскировать
+  реальные потери строк, начинающихся со служебных префиксов.
+
+## Известные оставшиеся ограничения (вне текущего дефекта)
+- Незакрытый тег внутри ОТВЕТА: элемент завершается по кандидат-границе, из-за
+  чего lblAnswerFor не распознаётся и ответ отбрасывается (сектор получается
+  пустым). Поведение унаследовано от прежнего парсера, на реальных файлах не
+  воспроизводится.
+- Лишний непарный </span> в авторской разметке закрывает поле раньше времени
+  (пример: moscow.en.cx, уровень 6 — теряется строка «ФО: Исполнитель»).
+  Присуще любому парсеру со счётчиком глубины; прежний regexp-парсер на этом
+  же входе терял больше.
+- ForMemberID: персональные задания/подсказки/ответы («Задание для <команда>»,
+  lblAnswerFor) не парсятся и схлопываются в общие. В файле пользователя все
+  27 заданий и 290 ответов — «для всех», поэтому на эту задачу не влияет.
+- Бонусы: ValidFrom/ValidTo, Delay*, Work*, BonusFor не переносятся.
+- AdminLevelSettings: AttemptsNumber/AttemptsPeriod*/ApplyForPlayer.
+- AdminHint.Days: splitSeconds сворачивает сутки в часы.
+
+## Патterns / выводы
+- Для HTML-экспортов Encounter нежадные regexp по закрывающему тегу
+  небезопасны: авторский контент уровней содержит произвольную разметку.
+- encx.AdminHint уже поддерживал штрафные подсказки — не хватало только
+  парсинга и вызова со стороны import-scenario.
+- Проверка «парсер видит два файла одинаково» ничего не доказывает, если
+  парсер лоссовый: нужен инвариант «весь видимый текст присутствует в модели».
+
+# Параллельная поддержка нового движка Encounter (Go Backend API)
+
+Задача: реализовать новый REST-движок (api.en.cx, «Encounter Go Backend API»)
+рядом со старым ASP.NET так, чтобы переключение было прозрачным для всех
+потребителей encx (cmd/encli, mobile/encxmobile, agenttools, agentmcp, e2e).
+
+## Архитектура (US-003)
+- `encx/backend.go`: неэкспортируемый интерфейс `backend` — контракт, который
+  обязаны выполнять оба движка. Две реализации, `legacyEngine` и `newEngine`,
+  проверяются компилятором (`var _ backend = ...`), поэтому забытый метод —
+  ошибка сборки, а не молчаливый уход на «не тот» движок.
+- `encx/facade.go`: публичные методы `Client` стали тонкой диспетчеризацией
+  `c.engine(ctx).Method(...)`. Сигнатуры не менялись — 119 мест использования
+  `*encx.Client` в репозитории не тронуты.
+- Старые тела методов переименованы в `legacyXxx` и остались нетронутыми:
+  legacy-поведение и его тесты не менялись ни строкой.
+- `encx/engine.go`: `EngineMode` (legacy|new|auto), `WithEngine`,
+  `WithAPIBaseURL`, `ENCX_ENGINE`, `Engine()`, `SetEngine()`. По умолчанию —
+  legacy (обратная совместимость). В режиме auto выполняется однократная
+  проба `GET {api}/version`, вердикт кэшируется.
+- Хост API выводится из домена сайта: tech.en.cx -> api.en.cx (новый бэкенд
+  обслуживает все сайты зоны с одного хоста, сайт задаётся заголовком
+  `X-En-Domain`).
+
+## Пакет encx/enapi (US-002)
+Транспорт нового движка: `X-En-Domain`, `Authorization: Bearer`, типизированный
+`APIError` (формы `{"error","message","code"}`, `{"sentence_key","format_args"}`
+и plain text). Переиспользует `*http.Client` от `encx.Client`, поэтому HAR,
+debug-логирование и cookie jar работают одинаково на обоих движках.
+
+## Что уже перенесено
+- Авторизация (US-004): `POST /login` -> JWT + cookie `en_access`;
+  ошибки движка отображаются в legacy-коды `LoginResponse.Error`
+  (см. `loginResponseFromAPIError`), чтобы `LoginErrorText` продолжал работать.
+  `ExportCookies`/`ImportCookies` научились переносить JWT и cookies API-хоста,
+  сохранив старый формат (JSON-массив) когда нового состояния нет.
+- Игровой движок (US-005): ASP-совместимый маршрут
+  `/gameengines/encounter/play/{id}?json=1` + `models.EngineClientMessage`
+  (`subscribe|answer|bonus|penalty`); полный маппинг `EngineState` -> `GameModel`.
+- Каталог (US-006): `/games/home`, `/games/active`, `/games/coming`,
+  `/games/{id}/details`, `/games/{id}/fee-box`, `/games/{id}/make-fee`,
+  медиа с API-хоста в `FetchResource`.
+
+## Выводы и подводные камни
+- Новый бэкенд сохранил ASP-совместимые маршруты движка, но отвечает
+  snake_case-моделью `models.EngineState`, а не старым PascalCase JSON:
+  «совместимость маршрута» != «совместимость формата».
+- Без `?json=1` маршрут `/gameengines/.../play/{id}` отвечает 404.
+- `models.EngineTask` отдаёт только `task_text_formatted`: разделения на сырой
+  и форматированный текст, как в legacy, наверху больше нет.
+- Даты приходят в RFC3339 (в т.ч. с долями секунды), а не .NET-таймстампами;
+  `DateTime.Value`/`Timestamp` заполняются Unix-секундами — так же, как это
+  делает cmd/encx-mock.
+- `GetGameScenarioHTML` нельзя просто перевести на `/games/{id}/scenario`:
+  там структурированный JSON, а cmd/encli парсит HTML. Вынесено в US-013.
+- Спецификация зафиксирована в `docs/newengine/swagger.json` (478 маршрутов),
+  протокол WebSocket движка — в `docs/newengine/engine-websocket.md`.
+
+## Итог: что покрыто новым движком
+- 84 экспортируемых метода `encx.Client` диспетчеризуются по движкам через
+  интерфейс `backend`; 22 остальных не зависят от движка (HAR, cookies, выбор
+  движка, троттлинг ASP-форм) либо собраны из уже диспетчеризуемых методов
+  (`AdminWipeGame`, `AdminCopyGame`).
+- Матрица соответствия: `docs/newengine/parity.md`. Она не может разойтись с
+  кодом: `encx/engine_parity_test.go` роняет тесты, если метод диспетчеризуется,
+  но не описан, если в матрице есть несуществующий метод, или если новый
+  экспортируемый метод не попал ни в интерфейс, ни в список независимых.
+- `cmd/encx-mock -engine new|both` отдаёт те же данные в формате нового API,
+  поэтому `TestMockGameModelAgreesAcrossEngines` и
+  `TestMockCatalogAgreesAcrossEngines` сравнивают результат обоих движков на
+  одном игровом состоянии.
+- `encx/live_new_engine_test.go` — живые тесты против реального нового движка,
+  пропускаются без `ENCX_LIVE_DOMAIN`/`ENCX_LIVE_LOGIN`/`ENCX_LIVE_PASSWORD`.
+
+## Что живой прогон исправил (demo.en.cx, новый движок)
+Три реальные ошибки, которых не было видно на фикстурах:
+1. `level_stats` содержит агрегатные группы под отрицательными ключами
+   (-1 общее время, -2 чистое время) — по строке на игрока. Первая версия
+   маппинга перебирала только уровни и молча теряла 214 строк из 2353.
+2. `GET /admin/games` отдаёт `items` с полем `game_id`, а не `id`, и без
+   `started`/`finished`. Использование общей `models.GamesResponse` давало
+   `AdminGame.ID == 0`; понадобилась отдельная `AdminGamesListResponse`.
+3. `game_date_time_start` на маршруте движка приходит Unix-секундами в строке
+   («1501015980»), а не отформатированным временем, как в legacy.
+Плюс поведенческое: вход без `no_cookie` попадает в класс сессии `web` и
+вытесняет собственную браузерную сессию пользователя («session_superseded»).
+`encx` запрашивает сессию без cookie и представляется как `automation`.
+
+## Что осталось незакрытым
+- `AdminDeliverGame` / `AdminNotDeliverGame`: числовые значения `status_id` не
+  описаны в API, операция необратима. Методы возвращают явную ошибку и не
+  отправляют запрос; значения подставляются через `encx.GameStatusDelivered`
+  и `encx.GameStatusCancelled`.
+- `GetGameScenarioHTML` — legacy-only: HTML-экспорта сценария в новом движке
+  нет. Движко-независимая замена — `GetGameScenario`.
+- Поля без аналога в новом API перечислены в разделе «Известные пробелы»
+  файла `docs/newengine/parity.md`.
+
+## Определение движка: почему проба спрашивает про домен, а не про хост
+Первая версия `EngineAuto` пробовала `GET {api}/version`. На реальном прогоне
+это оказалось неверно: `api.en.cx` — единый хост всей зоны и отвечает `200` на
+запрос с ЛЮБЫМ `X-En-Domain`, включая несуществующий. В результате
+`encli -engine auto -domain t.en.cx games` уходил на новый движок и печатал
+«No games found», хотя домен всё ещё на ASP.NET.
+
+Дискриминатор — `GET /sites/domain/{domain}`:
+- `200` с описанием сайта — домен переехал (demo.en.cx → site 135);
+- `404 domain_unregistered` — домен ещё на старом движке (t.en.cx, tech.en.cx).
+
+Режим по умолчанию переведён с `legacy` на `auto` (включая gomobile-биндинги:
+`NewClient`/`NewClientWithOptions` наследуют дефолт пакета, переопределяется
+через `EncClient.SetEngine`). Чтобы это не гоняло сеть из тестов и локальных
+сборок, проба пропускается, когда домен — IP или имя без зоны и API-хост не
+задан явно (`WithAPIBaseURL` / `-api-base-url` / `ENCX_API_BASE_URL`).
+
+Проверено вживую: `-engine auto` на t.en.cx отдаёт 24 игры через старый движок,
+на demo.en.cx — каталог через новый.
+
+## Что нашёл ревьюер (architect) и что исправлено
+1. BLOCKER `AdminInsertLevel`: легаси-семантика — «поставить src ПОСЛЕ dst»
+   (`ddlInsertAfterSrc`/`ddlInsertAfterDst`), а новая реализация трактовала dst
+   как позицию и брала уровень dst-1. Порядок уровней расходился между
+   движками. Исправлено: `after_level_id = id(dst)`.
+2. BLOCKER `AdminCreateMessage`: `AdminGameMessage.ShowOnLevelsMode` необязателен,
+   и легаси-форма считает «все уровни» всем, что не равно 2 — включая
+   незаполненный ноль. Новая реализация сравнивала с 1, поэтому
+   `encli admin-create-message` создавал сообщение на одном уровне вместо всех.
+   Исправлено: `AllLevels: mode != 2`.
+3. HIGH гонка: `EngineMode()` читал поле без блокировки, `SetEngine` писал под
+   ней. Добавлен RLock; `go test -race` чист.
+4. HIGH `AdminUpdateBonus` сужал бонус до одного уровня: у легаси
+   `AdminBonus.LevelID == 0 || -1` означает «на всю игру» (`rbAllLevels`), а
+   новая реализация всегда слала level_ids = [текущий уровень]. Исправлено в
+   обе стороны — и запись, и чтение (`all_levels` -> LevelID 0).
+5. HIGH маппинг кодов логина искал подстроки по всему телу ответа (до 4 КБ):
+   слово с «ip» внутри («recipient») превращало неверный пароль в блокировку по
+   IP. Теперь маркер читается только из полей, называющих причину.
+6. `omitempty` там, где ложь осмысленна: `request_penalty_confirm`,
+   `penalty_comment`, `has_delay`, `has_relative_limit`, `has_absolute_limit` —
+   иначе снять галку через update было невозможно.
+7. `AdminGame.Status` больше не выводится из дат: легаси его вообще не
+   заполняет, а `status_id` нового движка не документирован — подставленная
+   метка была бы неотличима от достоверной и врала бы для отменённой игры.
+8. Сценарий: ответы уровня, приходящие плоским списком `answers` (уровень без
+   секторов), больше не теряются.
+9. `prize_cents` при записи умножается на 100: `models.Game.prize` — целые
+   единицы, а поле запроса названо `_cents`. Помечено в матрице как требующее
+   перепроверки на живом стенде.
+10. Матрица паритета: в колонке «старый движок» у swap/insert/clone стояли
+    имена REST-маршрутов вместо реальных ASP-форм. Тест матрицы усилен — теперь
+    проверяется не только наличие метода, но и что обе колонки заполнены и
+    различаются; он сразу поймал ещё две пустые по смыслу строки.
+
+Не принято: замечание про `decodeGameModelJSON`/`classifyHTMLGameResponse` в
+`encx/game.go` — эти изменения были в рабочем дереве до начала работы над новым
+движком (см. `git status` на старте: `M encx/game.go`, `M encx/game_decode_test.go`,
+`M encx/undecodable_test.go`), к переезду отношения не имеют и не трогались.
+
+## Второй раунд ревью: закрыта дыра, открывшаяся из-за дефолтного auto
+Ревьюер отклонил и вторую версию — по делу. `defaultAPIBaseURL` выводил хост
+строковой эвристикой «отрезать одну метку», без учёта public suffix:
+`quest.example.com` -> `api.example.com`, `game.github.io` -> `api.github.io`.
+Проба признавала домен переехавшим по одному условию `site.ID != 0`. Пока
+дефолтом был `legacy`, это требовало явного opt-in; после перевода дефолта в
+`auto` любой такой хост, ответивший `{"id":1}`, уводил на себя заголовок сайта,
+а при `LoginComplete` — логин и пароль.
+
+Закрыто двумя проверками:
+- хост выводится только для зон Encounter (en.cx, encounter.cx, encounter.ru,
+  en-world.org, quest.ua); всё остальное остаётся на старом движке, пока
+  API-хост не задан явно;
+- сайт обязан подтвердить домен через `primary_domain` или список `domains`
+  (оба поля реально приходят: demo.en.cx -> primary_domain demo.en.cx и четыре
+  алиаса). Сайт без единого домена принимается, только если API-хост назвал сам
+  вызывающий — `WithAPIBaseURL` теперь означает «за хост поручились»
+  (отдельный флаг `apiBaseURLExplicit`, а не просто непустое поле).
+
+Также по второму раунду:
+- вердикт кэшируется только при определённом ответе: `404 domain_unregistered`
+  окончателен, сетевой сбой — нет, иначе долгоживущий клиент (`encli web`,
+  `encli mcp`, mobile) оставался прибит к legacy после одного обрыва;
+- неизвестное значение `-engine` теперь ошибка, а не молчаливый откат к дефолту
+  (раньше опечатка была безвредна, потому что дефолт совпадал с legacy);
+- ветка `email` в маппинге кодов логина сужена до «email not confirmed».
+
+## Третий раунд: APPROVED, закрыт последний путь к неподтверждённому хосту
+Ревьюер утвердил работу и отдельно подтвердил, что `apiBaseURLExplicit`
+выставляется только внутри `WithAPIBaseURL` и в обход не выставляется. Остался
+один путь, который он попросил закрыть до выката `auto`, и он закрыт.
+
+Проблема: проверки зоны и владения доменом жили только на ветке `auto`.
+При явном `-engine new` (или `ENCX_ENGINE=new`) `resolveEngine` возвращал режим
+сразу, а `defaultAPIBaseURL` для чужой зоны подставлял `api.en.cx`. То есть
+`encli -engine new -domain quest.example.com login ...` отправлял пароль на
+api.en.cx с заголовком `X-En-Domain: quest.example.com`. Утечки постороннему
+здесь нет — хост легитимный, — но он этот домен не обслуживает, и правило
+«обращаемся только к подтверждённому или явно указанному хосту» нарушалось.
+
+Исправление: `defaultAPIBaseURL` для домена вне зон Encounter возвращает пустую
+строку вместо подстановки дефолта; `enapi.Client` с пустым хостом не шлёт
+запрос, а возвращает `MissingHostError` с указанием, что задать
+(`WithAPIBaseURL` / `-api-base-url` / `ENCX_API_BASE_URL`). Тот же guard добавлен
+в `FetchResource`, которая ходит мимо enapi. `cookiesFor`/`restoreCookies`
+пропускают пустой хост, поэтому экспорт и импорт сессии для такого домена
+по-прежнему работают — просто хранить для него нечего.
+
+Не менял по итогам обсуждения: повторную пробу при устойчивом сетевом сбое
+(каждый вызов может стоить до 5 с) и отсутствие singleflight. Оба пункта
+ревьюер оценил как допустимые: корректность не нарушена, вердикт остаётся
+первым, движок не «прыгает». Если понадобится — singleflight точечно решает оба.
+
+## Баг из мобильного приложения: «отправляется только первый код»
+Воспроизведён на demo.en.cx, игра 27053. У уровня стоит правило блокировки
+ответов — 1 попытка в 60 секунд. Движок ведёт себя так:
+
+- первый ответ: `level_ok: false`, попытка засчитана, `block_duration` -> 60;
+- следующий ответ внутри окна: `reject_reason: "answer_blocked"`, поле
+  `level_ok` в ответе ОТСУТСТВУЕТ, попытка не списывается.
+
+Дефект был в маппинге: `EngineActionSnapshot.LevelOK` был объявлен как `bool`,
+поэтому отсутствие вердикта декодировалось в `false`, и `IsCorrectAnswer`
+получал указатель на `false`. Приложение показывало «код неверный» на ответ,
+который движок вообще не проверял, и не могло понять, что попытка не потрачена
+и надо подождать. Снаружи это и выглядело как «второй код не отправляется».
+
+Показательно, что legacy-тип это различал всегда: `ActionResult.IsCorrectAnswer`
+— `*bool`, то есть «нет вердикта» там выражается nil. Новый маппинг эту
+информацию терял.
+
+Исправлено:
+- `EngineActionSnapshot.LevelOK` и `BonusOK` стали `*bool` — отсутствие вердикта
+  доезжает до вызывающего как nil, ровно как на старом движке;
+- `EngineAction.RejectReason` (новое поле, `omitempty`) прокидывает причину
+  отказа; константа `enapi.RejectAnswerBlocked = "answer_blocked"`;
+- cmd/encx-mock перестал схлопывать nil в false, чтобы оба движка врали
+  одинаково или не врали вовсе.
+
+Проверено вживую после исправления: первый код — `verdict=false`, второй —
+`verdict=nil (не проверялся)`, `reject="answer_blocked"`, а
+`CanSubmitLevelAnswer()` при `block_duration=59` возвращает false, то есть
+приложение может не отправлять код вовсе и показать таймер.
+
+Что стоит поправить в самом приложении (вне encx): перед отправкой смотреть
+`Level.CanSubmitLevelAnswer()` и `Level.BlockDuration`, а результат отправки
+трактовать по трём состояниям, а не двум — верно / неверно / не проверялся.

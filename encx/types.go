@@ -386,6 +386,10 @@ type EngineAction struct {
 	PenaltyAction *PenaltyActionResult `json:"PenaltyAction"`
 	GameId        int                  `json:"GameId"`
 	LevelId       int                  `json:"LevelId"`
+	// RejectReason explains why an answer was not judged, e.g. "answer_blocked"
+	// when the level's answer-block rule refused it. Only the new engine
+	// reports it; the legacy one leaves it empty.
+	RejectReason string `json:"RejectReason,omitempty"`
 }
 
 // ActionResult indicates whether the last submitted answer was correct.

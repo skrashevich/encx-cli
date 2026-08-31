@@ -66,7 +66,7 @@ func parseCheckedInputs(body string) map[string]bool {
 }
 
 // AdminGetLevelSettings reads the level settings (autopass, answer block) from the admin panel.
-func (c *Client) AdminGetLevelSettings(ctx context.Context, gameId, levelNum int) (*AdminLevelSettings, error) {
+func (c *Client) legacyAdminGetLevelSettings(ctx context.Context, gameId, levelNum int) (*AdminLevelSettings, error) {
 	u := fmt.Sprintf("%s/Administration/Games/LevelEditor.aspx?gid=%d&level=%d", c.baseURL(), gameId, levelNum)
 	body, err := c.doGet(ctx, u)
 	if err != nil {
@@ -168,8 +168,9 @@ func parseTimeText(text string) (h, m, s int) {
 	return
 }
 
-// GetGameScenarioHTML reads the GameScenario export page visible to the current session.
-func (c *Client) GetGameScenarioHTML(ctx context.Context, gameId int) (string, error) {
+// legacyGetGameScenarioHTML reads the ASP.NET GameScenario export page
+// visible to the current session.
+func (c *Client) legacyGetGameScenarioHTML(ctx context.Context, gameId int) (string, error) {
 	u := fmt.Sprintf("%s/GameScenario.aspx?gid=%d", c.baseURL(), gameId)
 	body, err := c.doGet(ctx, u)
 	if err != nil {
@@ -179,7 +180,7 @@ func (c *Client) GetGameScenarioHTML(ctx context.Context, gameId int) (string, e
 }
 
 // AdminGetBonusIds returns the list of bonus IDs on a level.
-func (c *Client) AdminGetBonusIds(ctx context.Context, gameId, levelNum int) ([]int, error) {
+func (c *Client) legacyAdminGetBonusIds(ctx context.Context, gameId, levelNum int) ([]int, error) {
 	u := fmt.Sprintf("%s/Administration/Games/LevelEditor.aspx?level=%d&gid=%d", c.baseURL(), levelNum, gameId)
 	body, err := c.doGet(ctx, u)
 	if err != nil {
@@ -198,7 +199,7 @@ func (c *Client) AdminGetBonusIds(ctx context.Context, gameId, levelNum int) ([]
 }
 
 // AdminGetBonus reads a bonus details from the admin panel.
-func (c *Client) AdminGetBonus(ctx context.Context, gameId, levelNum, bonusId int) (*AdminBonus, error) {
+func (c *Client) legacyAdminGetBonus(ctx context.Context, gameId, levelNum, bonusId int) (*AdminBonus, error) {
 	u := fmt.Sprintf("%s/Administration/Games/BonusEdit.aspx?gid=%d&level=%d&bonus=%d&action=edit",
 		c.baseURL(), gameId, levelNum, bonusId)
 	body, err := c.doGet(ctx, u)
@@ -274,7 +275,7 @@ func (c *Client) AdminGetBonus(ctx context.Context, gameId, levelNum, bonusId in
 }
 
 // AdminGetHintIds returns the list of hint IDs on a level.
-func (c *Client) AdminGetHintIds(ctx context.Context, gameId, levelNum int) ([]int, error) {
+func (c *Client) legacyAdminGetHintIds(ctx context.Context, gameId, levelNum int) ([]int, error) {
 	u := fmt.Sprintf("%s/Administration/Games/LevelEditor.aspx?level=%d&gid=%d", c.baseURL(), levelNum, gameId)
 	body, err := c.doGet(ctx, u)
 	if err != nil {
@@ -296,7 +297,7 @@ func (c *Client) AdminGetHintIds(ctx context.Context, gameId, levelNum int) ([]i
 
 // AdminGetHint reads a hint's details from the admin panel.
 // It tries without penalty=1 first, then retries with penalty=1 if text is empty (penalty hints require it).
-func (c *Client) AdminGetHint(ctx context.Context, gameId, levelNum, hintId int) (*AdminHint, error) {
+func (c *Client) legacyAdminGetHint(ctx context.Context, gameId, levelNum, hintId int) (*AdminHint, error) {
 	h, err := c.adminGetHintFromURL(ctx, gameId, levelNum, hintId, false)
 	if err != nil {
 		return nil, err
@@ -372,7 +373,7 @@ func (c *Client) adminGetHintFromURL(ctx context.Context, gameId, levelNum, hint
 }
 
 // AdminGetTaskIds returns task IDs for a level from the admin panel.
-func (c *Client) AdminGetTaskIds(ctx context.Context, gameId, levelNum int) ([]int, error) {
+func (c *Client) legacyAdminGetTaskIds(ctx context.Context, gameId, levelNum int) ([]int, error) {
 	u := fmt.Sprintf("%s/Administration/Games/LevelEditor.aspx?level=%d&gid=%d", c.baseURL(), levelNum, gameId)
 	body, err := c.doGet(ctx, u)
 	if err != nil {
@@ -396,7 +397,7 @@ func (c *Client) AdminGetTaskIds(ctx context.Context, gameId, levelNum int) ([]i
 }
 
 // AdminGetTask reads task details from the admin panel.
-func (c *Client) AdminGetTask(ctx context.Context, gameId, levelNum, taskId int) (*AdminTask, error) {
+func (c *Client) legacyAdminGetTask(ctx context.Context, gameId, levelNum, taskId int) (*AdminTask, error) {
 	u := fmt.Sprintf("%s/Administration/Games/TaskEdit.aspx?action=TaskEdit&gid=%d&level=%d&tid=%d",
 		c.baseURL(), gameId, levelNum, taskId)
 	body, err := c.doGet(ctx, u)
@@ -427,7 +428,7 @@ func (c *Client) AdminGetTask(ctx context.Context, gameId, levelNum, taskId int)
 }
 
 // AdminGetComment reads the level name and comment from the admin panel.
-func (c *Client) AdminGetComment(ctx context.Context, gameId, levelNum int) (name, comment string, err error) {
+func (c *Client) legacyAdminGetComment(ctx context.Context, gameId, levelNum int) (name, comment string, err error) {
 	u := fmt.Sprintf("%s/Administration/Games/NameCommentEdit.aspx?gid=%d&level=%d", c.baseURL(), gameId, levelNum)
 	body, err := c.doGet(ctx, u)
 	if err != nil {
@@ -452,7 +453,7 @@ func (c *Client) AdminGetComment(ctx context.Context, gameId, levelNum int) (nam
 }
 
 // AdminGetMessageIds returns message IDs for a level from the admin panel.
-func (c *Client) AdminGetMessageIds(ctx context.Context, gameId, levelNum int) ([]int, error) {
+func (c *Client) legacyAdminGetMessageIds(ctx context.Context, gameId, levelNum int) ([]int, error) {
 	u := fmt.Sprintf("%s/Administration/Games/LevelEditor.aspx?level=%d&gid=%d", c.baseURL(), levelNum, gameId)
 	body, err := c.doGet(ctx, u)
 	if err != nil {
@@ -473,7 +474,7 @@ func (c *Client) AdminGetMessageIds(ctx context.Context, gameId, levelNum int) (
 }
 
 // AdminGetMessage reads message details from the admin panel.
-func (c *Client) AdminGetMessage(ctx context.Context, gameId, levelNum, messageId int) (*AdminGameMessage, error) {
+func (c *Client) legacyAdminGetMessage(ctx context.Context, gameId, levelNum, messageId int) (*AdminGameMessage, error) {
 	u := fmt.Sprintf("%s/Administration/Games/MessageEdit.aspx?gid=%d&level=%d&mid=%d", c.baseURL(), gameId, levelNum, messageId)
 	body, err := c.doGet(ctx, u)
 	if err != nil {
@@ -514,7 +515,7 @@ func (c *Client) AdminGetMessage(ctx context.Context, gameId, levelNum, messageI
 
 // AdminGetSectorRefs reads only sector IDs and names from the ALoader endpoint.
 // Unlike AdminGetSectorAnswers, it does not fetch every sector's answers.
-func (c *Client) AdminGetSectorRefs(ctx context.Context, gameId, levelNum int) ([]AdminSector, error) {
+func (c *Client) legacyAdminGetSectorRefs(ctx context.Context, gameId, levelNum int) ([]AdminSector, error) {
 	u := fmt.Sprintf("%s/ALoader/LevelInfo.aspx?gid=%d&level=%d&object=3", c.baseURL(), gameId, levelNum)
 	body, err := c.doGet(ctx, u)
 	if err != nil {
@@ -543,7 +544,7 @@ func parseAdminSectorRefs(body string) []AdminSector {
 }
 
 // AdminGetSectorAnswers reads sector answers from the ALoader endpoint.
-func (c *Client) AdminGetSectorAnswers(ctx context.Context, gameId, levelNum int) ([]AdminSector, error) {
+func (c *Client) legacyAdminGetSectorAnswers(ctx context.Context, gameId, levelNum int) ([]AdminSector, error) {
 	u := fmt.Sprintf("%s/ALoader/LevelInfo.aspx?gid=%d&level=%d&object=3", c.baseURL(), gameId, levelNum)
 	body, err := c.doGet(ctx, u)
 	if err != nil {

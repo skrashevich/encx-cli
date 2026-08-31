@@ -1225,16 +1225,14 @@ func readAdminLevelsByNumber(ctx context.Context, client *encx.Client, gameID in
 }
 
 func readCurrentScenarioLevelsByNumber(ctx context.Context, client *encx.Client, gameID int) (map[int]scenario.Level, error) {
-	var body string
+	// GetGameScenario works on both engines: the legacy one parses the HTML
+	// export, the new one maps its structured answer onto the same document.
+	var doc *scenario.Document
 	err := runWithAntiSpamRetry("read current game scenario", func() error {
 		var callErr error
-		body, callErr = client.GetGameScenarioHTML(ctx, gameID)
+		doc, callErr = client.GetGameScenario(ctx, gameID)
 		return callErr
 	})
-	if err != nil {
-		return nil, err
-	}
-	doc, err := scenario.ParseString(body, fmt.Sprintf("GameScenario.aspx?gid=%d", gameID))
 	if err != nil {
 		return nil, err
 	}

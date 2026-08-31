@@ -148,3 +148,25 @@ func (c *EncClient) paceGameRequest(ctx context.Context) error {
 func (c *EncClient) Domain() string {
 	return c.domain
 }
+
+// SetEngine selects the Encounter backend: "legacy" (default), "new", or
+// "auto" to probe the API host once. Unknown values are ignored so a caller
+// cannot silently end up on the wrong engine.
+//
+// Encounter is migrating from the ASP.NET engine to a REST one; both are
+// implemented, and every method of this client works the same on either.
+func (c *EncClient) SetEngine(mode string) {
+	if parsed, ok := encx.ParseEngineMode(mode); ok {
+		c.client.SetEngine(parsed)
+	}
+}
+
+// Engine reports which backend is actually serving this client.
+func (c *EncClient) Engine() string {
+	return string(c.client.Engine())
+}
+
+// APIBaseURL returns the host the new engine is reached at.
+func (c *EncClient) APIBaseURL() string {
+	return c.client.APIBaseURL()
+}

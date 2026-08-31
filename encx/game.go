@@ -12,19 +12,17 @@ import (
 	"strings"
 )
 
-// GetGameModel retrieves the current game state with the documented GET endpoint.
-// Passing form values is retained for backward compatibility and performs a
-// POST action request; prefer SendCode, SendBonusCode, or GetPenaltyHint.
-func (c *Client) GetGameModel(ctx context.Context, gameId int, formValues ...url.Values) (*GameModel, error) {
+// legacyGetGameModel retrieves the current game state from the ASP.NET engine.
+func (c *Client) legacyGetGameModel(ctx context.Context, gameId int, formValues ...url.Values) (*GameModel, error) {
 	if len(formValues) > 0 {
 		return c.postGameModel(ctx, gameId, formValues...)
 	}
 	return c.getGameModel(ctx, gameId, nil)
 }
 
-// GetGameModelLevel retrieves the state for a specific level number. This is
-// used by storm sequence games where the API accepts a level query parameter.
-func (c *Client) GetGameModelLevel(ctx context.Context, gameId, levelNumber int) (*GameModel, error) {
+// legacyGetGameModelLevel retrieves the state for a specific level number on
+// the ASP.NET engine. Storm sequence games pass the level as a query parameter.
+func (c *Client) legacyGetGameModelLevel(ctx context.Context, gameId, levelNumber int) (*GameModel, error) {
 	q := url.Values{}
 	if levelNumber > 0 {
 		q.Set("level", strconv.Itoa(levelNumber))
@@ -59,7 +57,7 @@ func (c *Client) getGameModel(ctx context.Context, gameId int, extraQuery url.Va
 		return nil, fmt.Errorf("encx: game request: %w", err)
 	}
 
-	return decodeGameModelJSON(body, status, "game model")
+	return c.decodeGameModelJSON(body, status, "game model")
 }
 
 func (c *Client) postGameModel(ctx context.Context, gameId int, formValues ...url.Values) (*GameModel, error) {
@@ -90,12 +88,12 @@ func (c *Client) postGameModel(ctx context.Context, gameId int, formValues ...ur
 		return nil, fmt.Errorf("encx: game request: %w", err)
 	}
 
-	return decodeGameModelJSON(body, status, "game model")
+	return c.decodeGameModelJSON(body, status, "game model")
 }
 
-func decodeGameModelJSON(body []byte, statusCode int, context string) (*GameModel, error) {
+func (c *Client) decodeGameModelJSON(body []byte, statusCode int, context string) (*GameModel, error) {
 	if trimmed := bytes.TrimLeft(body, " \t\r\n\uFEFF"); len(trimmed) > 0 && trimmed[0] == '<' {
-		return nil, fmt.Errorf("encx: session expired or access denied (server returned HTML instead of JSON; try re-login)")
+		return nil, c.classifyHTMLGameResponse(trimmed, context)
 	}
 	if len(body) == 0 {
 		return nil, fmt.Errorf("encx: empty response (%s)", context)
@@ -109,9 +107,39 @@ func decodeGameModelJSON(body []byte, statusCode int, context string) (*GameMode
 	return &model, nil
 }
 
-// SendCode submits an answer via LevelAction.Answer (level, sectors, bonuses
-// when the level has no active answer block rule).
-func (c *Client) SendCode(ctx context.Context, gameId, levelId, levelNumber int, code string) (*GameModel, error) {
+// classifyHTMLGameResponse explains an HTML body where JSON was expected.
+//
+// The engine answers with HTML for several unrelated reasons, and they need
+// different responses from the caller. Reporting all of them as an expired
+// session sends players to re-login when their session is perfectly valid — the
+// usual cause is the anti-spam wall after a burst of requests.
+func (c *Client) classifyHTMLGameResponse(body []byte, context string) error {
+	page := string(body)
+	if isNotHumanRequest(page) {
+		return newAntiSpamError(c.domain, c.scheme, "")
+	}
+	if looksLikeLoginPage(page) {
+		return fmt.Errorf("encx: session expired or access denied (login page returned; try re-login)")
+	}
+	return fmt.Errorf(
+		"encx: engine returned an HTML page instead of JSON (%s); the session may still be valid, retry shortly",
+		context,
+	)
+}
+
+// looksLikeLoginPage recognizes the Encounter sign-in form. The markers are the
+// login form's own field names, which no game page carries.
+func looksLikeLoginPage(page string) bool {
+	lower := strings.ToLower(page)
+	if strings.Contains(lower, "login.aspx") {
+		return true
+	}
+	return strings.Contains(lower, "txtlogin") && strings.Contains(lower, "txtpassword")
+}
+
+// legacySendCode submits an answer via LevelAction.Answer (level, sectors,
+// bonuses when the level has no active answer block rule).
+func (c *Client) legacySendCode(ctx context.Context, gameId, levelId, levelNumber int, code string) (*GameModel, error) {
 	form := url.Values{}
 	form.Set("LevelId", strconv.Itoa(levelId))
 	form.Set("LevelNumber", strconv.Itoa(levelNumber))
@@ -119,9 +147,9 @@ func (c *Client) SendCode(ctx context.Context, gameId, levelId, levelNumber int,
 	return c.postGameModel(ctx, gameId, form)
 }
 
-// SendBonusCode submits a bonus answer via BonusAction.Answer. The Encounter API
-// requires this separate action when level answers are blocked.
-func (c *Client) SendBonusCode(ctx context.Context, gameId, levelId, levelNumber int, code string) (*GameModel, error) {
+// legacySendBonusCode submits a bonus answer via BonusAction.Answer. The
+// ASP.NET API requires this separate action when level answers are blocked.
+func (c *Client) legacySendBonusCode(ctx context.Context, gameId, levelId, levelNumber int, code string) (*GameModel, error) {
 	form := url.Values{}
 	form.Set("LevelId", strconv.Itoa(levelId))
 	form.Set("LevelNumber", strconv.Itoa(levelNumber))
@@ -129,9 +157,9 @@ func (c *Client) SendBonusCode(ctx context.Context, gameId, levelId, levelNumber
 	return c.postGameModel(ctx, gameId, form)
 }
 
-// GetPenaltyHint requests a penalty hint by its ID.
-// This uses a GET request with pid and pact=1 as query parameters.
-func (c *Client) GetPenaltyHint(ctx context.Context, gameId, penaltyId int) (*GameModel, error) {
+// legacyGetPenaltyHint requests a penalty hint by its ID via a GET request
+// with pid and pact=1 as query parameters.
+func (c *Client) legacyGetPenaltyHint(ctx context.Context, gameId, penaltyId int) (*GameModel, error) {
 	u, err := url.Parse(fmt.Sprintf("%s/gameengines/encounter/play/%d", c.baseURL(), gameId))
 	if err != nil {
 		return nil, fmt.Errorf("encx: parse hint URL: %w", err)
@@ -155,5 +183,5 @@ func (c *Client) GetPenaltyHint(ctx context.Context, gameId, penaltyId int) (*Ga
 		return nil, fmt.Errorf("encx: hint request: %w", err)
 	}
 
-	return decodeGameModelJSON(body, status, "hint response")
+	return c.decodeGameModelJSON(body, status, "hint response")
 }

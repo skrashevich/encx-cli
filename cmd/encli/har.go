@@ -30,7 +30,11 @@ func appendEncOpts(cfg *config) []encx.Option {
 	if cfg.harRecording {
 		opts = append(opts, encx.WithHARRecording(true))
 	}
-	return opts
+	engineOpts, err := engineOptions(cfg)
+	if err != nil {
+		fatal("%v", err)
+	}
+	return append(opts, engineOpts...)
 }
 
 func exportClientHAR(client *encx.Client, cfg *config) {

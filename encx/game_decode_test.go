@@ -6,13 +6,56 @@ import (
 	"testing"
 )
 
+// testClient is a client with no network use, for decoding-only tests.
+func testClient() *Client { return New("tech.en.cx") }
+
 func TestDecodeGameModelJSONEmptyBody(t *testing.T) {
-	_, err := decodeGameModelJSON(nil, 200, "game model")
+	_, err := testClient().decodeGameModelJSON(nil, 200, "game model")
 	if err == nil {
 		t.Fatal("expected error for empty body")
 	}
 	if !strings.Contains(err.Error(), "empty response") {
 		t.Fatalf("expected empty response error, got %v", err)
+	}
+}
+
+func TestHTMLResponseIsNotAlwaysAnExpiredSession(t *testing.T) {
+	client := testClient()
+
+	// The engine serves HTML for several unrelated reasons. Telling a player to
+	// re-login when the session is valid sends them chasing the wrong problem —
+	// after a burst of requests the real cause is the anti-spam wall.
+	_, err := client.decodeGameModelJSON(
+		[]byte("<html><body>Server is busy, please retry</body></html>"),
+		200,
+		"game model",
+	)
+	if err == nil {
+		t.Fatal("an HTML body should still be an error")
+	}
+	if strings.Contains(strings.ToLower(err.Error()), "session expired") {
+		t.Fatalf("an unrecognized HTML page must not claim the session expired: %v", err)
+	}
+
+	_, err = client.decodeGameModelJSON(
+		[]byte(`<html><form action="Login.aspx"><input name="txtLogin"><input name="txtPassword"></form></html>`),
+		200,
+		"game model",
+	)
+	if err == nil || !strings.Contains(strings.ToLower(err.Error()), "session expired") {
+		t.Fatalf("an actual login page should report an expired session, got %v", err)
+	}
+
+	_, err = client.decodeGameModelJSON(
+		[]byte(`<html><body><a href="/NotHumanRequest.aspx">verify</a></body></html>`),
+		200,
+		"game model",
+	)
+	if err == nil {
+		t.Fatal("the anti-spam page should be an error")
+	}
+	if AntiSpamUserMessage(err) == "" {
+		t.Fatalf("the anti-spam page should be reported as anti-spam, got %v", err)
 	}
 }
 

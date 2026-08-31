@@ -19,11 +19,12 @@ var (
 	startCounterRe = regexp.MustCompile(`"StartCounter"\s*:\s*(\d+)`)
 )
 
-// GetDomainGames fetches the domain's list of available games.
-// It prefers the JSON endpoint (/home/?json=1), then mobile HTML, then desktop HTML.
-func (c *Client) GetDomainGames(ctx context.Context) ([]DomainGame, error) {
+// legacyGetDomainGames fetches the domain's list of available games from the
+// ASP.NET engine: the JSON endpoint (/home/?json=1) first, then mobile HTML,
+// then desktop HTML.
+func (c *Client) legacyGetDomainGames(ctx context.Context) ([]DomainGame, error) {
 	c.debugf("encx games: trying JSON catalog at %s/home/?json=1", c.baseURL())
-	list, err := c.GetGameList(ctx)
+	list, err := c.legacyGetGameList(ctx)
 	if err == nil {
 		games := domainGamesFromList(list)
 		if len(games) > 0 {
@@ -103,10 +104,9 @@ func (c *Client) fetchGames(ctx context.Context, u string, re *regexp.Regexp) ([
 	return games, nil
 }
 
-// GetGameList fetches the full game list via the JSON endpoint GET /home/?json=1.
-// Returns structured data with ComingGames and ActiveGames.
-// An optional page number can be passed for pagination (1-based).
-func (c *Client) GetGameList(ctx context.Context, page ...int) (*GameListResponse, error) {
+// legacyGetGameList fetches the full game list from the ASP.NET engine via
+// GET /home/?json=1. An optional page number can be passed (1-based).
+func (c *Client) legacyGetGameList(ctx context.Context, page ...int) (*GameListResponse, error) {
 	pageNum := 1
 	if len(page) > 0 && page[0] > 0 {
 		pageNum = page[0]
@@ -144,9 +144,10 @@ func (c *Client) GetGameList(ctx context.Context, page ...int) (*GameListRespons
 	return &result, nil
 }
 
-// GetTimeoutToGame fetches the game page (HTML) and extracts the StartCounter value,
-// which indicates seconds until the game starts. Returns nil if no counter is found.
-func (c *Client) GetTimeoutToGame(ctx context.Context, gameId int) (*int, error) {
+// legacyGetTimeoutToGame fetches the game page (HTML) and extracts the
+// StartCounter value, the seconds until the game starts. Returns nil if no
+// counter is found.
+func (c *Client) legacyGetTimeoutToGame(ctx context.Context, gameId int) (*int, error) {
 	u, err := url.Parse(fmt.Sprintf("%s/gameengines/encounter/play/%d", c.mobileBaseURL(), gameId))
 	if err != nil {
 		return nil, fmt.Errorf("encx: parse timeout URL: %w", err)

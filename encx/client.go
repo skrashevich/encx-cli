@@ -31,6 +31,10 @@ type Client struct {
 	antiSpamRecovery     atomic.Int32 // >0 suppresses handler during anti-spam recovery Login
 	adminDelayDuration   time.Duration
 	adminDelayConfigured bool
+
+	// engineState selects between the legacy ASP.NET engine and the new
+	// Go backend REST API; see engine.go.
+	engineState
 }
 
 // switchableTransport allows swapping the transport chain atomically while
@@ -173,8 +177,11 @@ func New(domain string, opts ...Option) *Client {
 				return http.ErrUseLastResponse
 			},
 		},
+		engineState: engineState{engineMode: engineModeFromEnv()},
 	}
 	c.httpClient.Transport = c.transport
+	c.legacy = &legacyEngine{c: c}
+	c.modern = &newEngine{c: c}
 
 	for _, opt := range opts {
 		opt(c)

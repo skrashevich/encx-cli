@@ -45,6 +45,8 @@ type config struct {
 	mcpSecurity       string            // engine access policy for the mcp subcommand
 	importDryRun      bool
 	importSyncMissing bool
+	engine            string // legacy | new | auto (env: ENCX_ENGINE)
+	apiBaseURL        string // new-engine API host (env: ENCX_API_BASE_URL)
 }
 
 func main() {
@@ -74,6 +76,7 @@ func main() {
 			fs.BoolVar(&cfg.useHTTP, "http", false, "Use plain HTTP")
 			fs.BoolVar(&cfg.debug, "debug", envBool("ENCX_DEBUG"), "Enable debug logging")
 			registerHARFlags(fs, cfg)
+			registerEngineFlag(fs, cfg)
 			fs.BoolVar(&cfg.agentReadonly, "readonly", false, "Agent: block tools that modify or delete data")
 			fs.StringVar(&webAddr, "web-addr", cmp.Or(os.Getenv("ENCLI_WEB_ADDR"), defaultWebAddr), "Web UI listen address")
 			if cfg.agentReadonly {
@@ -115,6 +118,7 @@ func main() {
 			fs.BoolVar(&cfg.jsonOutput, "json", false, "Output as JSON")
 			fs.BoolVar(&cfg.debug, "debug", envBool("ENCX_DEBUG"), "Enable debug logging")
 			registerHARFlags(fs, cfg)
+			registerEngineFlag(fs, cfg)
 			fs.BoolVar(&cfg.agentReadonly, "readonly", false, "Block agent tools that modify or delete data")
 			fs.Parse(flagArgs)
 			debugMode = cfg.debug
@@ -177,6 +181,7 @@ func main() {
 	fs.BoolVar(&cfg.jsonOutput, "json", false, "Output results as JSON")
 	fs.BoolVar(&cfg.debug, "debug", envBool("ENCX_DEBUG"), "Enable debug logging (env: ENCX_DEBUG)")
 	registerHARFlags(fs, cfg)
+	registerEngineFlag(fs, cfg)
 	fs.BoolVar(&cfg.importDryRun, "dry-run", false, "Dry run for import-scenario (parse only, do not modify game)")
 	fs.BoolVar(&cfg.importSyncMissing, "sync-missing", false, "Align existing import-scenario levels with the export (no full wipe)")
 	fs.StringVar(&cfg.mcpSecurity, "security", "", "Engine access for the mcp command: readonly (default), approve, full")

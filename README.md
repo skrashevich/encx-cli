@@ -207,6 +207,43 @@ func main() {
 | `WithTimeout(d)` | Установить таймаут HTTP-клиента |
 | `WithUserAgent(ua)` | Установить User-Agent |
 | `WithLang(lang)` | Язык запросов (по умолчанию: `ru`) |
+| `WithEngine(mode)` | Движок Encounter: `EngineAuto` (по умолчанию), `EngineLegacy`, `EngineNew` |
+| `WithAPIBaseURL(url)` | Хост нового движка (по умолчанию выводится из домена: `tech.en.cx` → `api.en.cx`) |
+
+### Старый и новый движок
+
+Encounter переезжает с ASP.NET на новый REST-бэкенд. `encx` реализует оба и
+переключается между ними прозрачно: сигнатуры методов и возвращаемые типы
+одинаковы, меняется только то, кто отвечает на запрос.
+
+По умолчанию движок определяется автоматически: клиент один раз спрашивает
+`GET {api}/sites/domain/{domain}` — новый бэкенд отвечает описанием сайта для
+доменов, которые уже переехали, и `404 domain_unregistered` для остальных.
+Вопрос именно про домен, а не про хост: один API-хост обслуживает всю зону и
+отвечает на любой запрос, поэтому проверка доступности хоста объявила бы
+переехавшими вообще все сайты.
+
+```go
+c := encx.New("tech.en.cx")            // auto: определит сам
+fmt.Println(c.Engine())                // legacy | new
+
+c := encx.New("demo.en.cx", encx.WithEngine(encx.EngineNew))   // принудительно
+c := encx.New("tech.en.cx", encx.WithEngine(encx.EngineLegacy))
+```
+
+То же самое даёт переменная окружения `ENCX_ENGINE=legacy|new|auto` и флаг
+`encli -engine`. Хост нового движка выводится из домена (`demo.en.cx` →
+`api.en.cx`); для локального mock-сервера или своей инсталляции его задают
+через `encx.WithAPIBaseURL(...)`, флаг `-api-base-url` или `ENCX_API_BASE_URL`.
+Хост нового движка выводится только для зон Encounter (`en.cx`, `encounter.cx`,
+`encounter.ru`, `en-world.org`, `quest.ua`), и сайт в ответе обязан сам назвать
+запрошенный домен — иначе на неподтверждённый хост не уходят ни заголовок
+сайта, ни учётные данные. Для домена вне этих зон хост не выводится: в `auto`
+клиент останется на старом движке, а при явном `new` вернёт ошибку с просьбой
+указать `-api-base-url`.
+
+Спецификация нового API, протокол WebSocket движка и матрица паритета методов —
+в [docs/newengine](docs/newengine/README.md).
 
 ## iOS
 
@@ -709,6 +746,8 @@ encli import-scenario -game-id 82307 --sync-missing "/Users/svk/Downloads/moscow
 | `-game-id` | `ENCX_GAME_ID` | ID игры |
 | `-insecure` | `ENCX_INSECURE` | Пропустить проверку TLS-сертификата |
 | `-http` | — | Использовать HTTP вместо HTTPS |
+| `-engine` | `ENCX_ENGINE` | Движок Encounter: `auto` (по умолчанию), `legacy`, `new` |
+| `-api-base-url` | `ENCX_API_BASE_URL` | Хост нового движка (по умолчанию выводится из домена) |
 | `-json` | — | Выводить результат в формате JSON |
 | `-debug` | `ENCX_DEBUG` | Включить отладочный вывод в `stderr` |
 | `-har` | `ENCX_HAR` | Записывать HTTP-трафик в HAR 1.2 |
@@ -755,6 +794,8 @@ go build -o encli ./cmd/encli/
 ## API
 
 Ниже краткая шпаргалка по основным методам, которые уже завернуты в клиент.
+Endpoint'ы в таблице — старого движка; чем каждый метод обслуживается на новом,
+перечислено в [матрице паритета](docs/newengine/parity.md).
 
 | Метод | Endpoint | Описание |
 |---|---|---|
