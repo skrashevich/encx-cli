@@ -13,7 +13,7 @@ import (
 
 const (
 	defaultLLMBaseURL  = "https://openrouter.ai/api/v1"
-	defaultLLMModel    = "openai/gpt-oss-120b:free"
+	defaultLLMModel    = "openrouter/free"
 	maxAgentTurns      = 200
 	maxToolItemsForLLM = 200
 	maxToolTextForLLM  = 240
