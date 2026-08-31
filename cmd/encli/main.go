@@ -42,6 +42,7 @@ type config struct {
 	harOut            string
 	agentReadonly     bool
 	agentSecurity     AgentSecurityMode // default for new web chats
+	mcpSecurity       string            // engine access policy for the mcp subcommand
 	importDryRun      bool
 	importSyncMissing bool
 }
@@ -178,6 +179,7 @@ func main() {
 	registerHARFlags(fs, cfg)
 	fs.BoolVar(&cfg.importDryRun, "dry-run", false, "Dry run for import-scenario (parse only, do not modify game)")
 	fs.BoolVar(&cfg.importSyncMissing, "sync-missing", false, "Align existing import-scenario levels with the export (no full wipe)")
+	fs.StringVar(&cfg.mcpSecurity, "security", "", "Engine access for the mcp command: readonly (default), approve, full")
 
 	fs.Usage = func() { printCommandHelp(cmd) }
 	fs.Parse(args)
@@ -287,6 +289,9 @@ func main() {
 	case "team-set-forum":
 		requireAuth(ctx, cfg, client)
 		cmdTeamSetForum(ctx, cfg, client, positional)
+	case "mcp":
+		requireAuth(ctx, cfg, client)
+		cmdMCP(ctx, cfg, client)
 	case "import-scenario":
 		if importScenarioNeedsAdmin(cfg, positional) {
 			requireAdminAuth(ctx, cfg, client)
@@ -465,6 +470,7 @@ Commands:
   team-set-site   Update team website URL
   team-set-forum  Update team external forum URL
   import-scenario  Import scenario from GameScenario HTML export
+  mcp         Serve the engine toolset over MCP on stdio (for PicoClaw and other agents)
 
 Admin commands (require game editor rights):
   admin-games              List your authored games
@@ -566,6 +572,11 @@ func printCommandHelp(cmd string) {
 	case "logout":
 		fmt.Fprintln(os.Stderr, "Usage: encli logout [-domain <domain>]")
 		fmt.Fprintln(os.Stderr, "  Clear saved session for the specified domain.")
+	case "mcp":
+		fmt.Fprintln(os.Stderr, "Usage: encli mcp [-domain <domain>] [-security readonly|approve|full]")
+		fmt.Fprintln(os.Stderr, "  Serve the engine toolset over MCP on stdin/stdout for PicoClaw and other MCP clients.")
+		fmt.Fprintln(os.Stderr, "  readonly (default) hides tools that change the game; approve asks the client to")
+		fmt.Fprintln(os.Stderr, "  confirm each mutation through MCP elicitation; full lets them run unattended.")
 	case "games":
 		fmt.Fprintln(os.Stderr, "Usage: encli games [-domain <domain>] [-insecure] [-http]")
 		fmt.Fprintln(os.Stderr, "  List available games by scraping domain HTML page.")

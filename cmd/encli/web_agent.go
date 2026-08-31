@@ -15,14 +15,12 @@ import (
 
 func resolveAgentConfig() (AgentConfig, error) {
 	baseURL := cmp.Or(os.Getenv("LLM_BASE_URL"), os.Getenv("OPENROUTER_BASE_URL"), defaultLLMBaseURL)
-	apiURL := strings.TrimRight(baseURL, "/") + "/chat/completions"
 	apiKey := cmp.Or(os.Getenv("LLM_API_KEY"), os.Getenv("OPENROUTER_API_KEY"))
 	if apiKey == "" && !strings.Contains(baseURL, "127.0.0.1") && !strings.Contains(baseURL, "localhost") {
 		return AgentConfig{}, fmt.Errorf("LLM_API_KEY (or OPENROUTER_API_KEY) is required for web agent mode")
 	}
 	model := cmp.Or(os.Getenv("LLM_MODEL"), os.Getenv("OPENROUTER_MODEL"), defaultLLMModel)
 	return AgentConfig{
-		APIURL:  apiURL,
 		APIKey:  apiKey,
 		Model:   model,
 		BaseURL: baseURL,
@@ -107,32 +105,32 @@ func runWebChatTurn(ctx context.Context, hub *webHub, chatID string) {
 	var runErr error
 	hub.registry.WithDomainLock(t.Domain, func() {
 		_, runErr = runAgentLoop(ctx, agentCfg, &loopIn, AgentCallbacks{
-		OnEvent: func(ev AgentEvent) {
-			hub.handleAgentEvent(chatID, t, ev)
-		},
-		OnStatus: func(phase, message string) {
-			hub.publishSSE(chatID, "status", map[string]any{
-				"phase":   phase,
-				"message": strings.TrimSpace(message),
-			})
-		},
-		Stderrf: func(format string, args ...any) {
-			line := strings.TrimSpace(fmt.Sprintf(format, args...))
-			if line == "" {
-				return
-			}
-			hub.publishSSE(chatID, "stderr", map[string]any{"line": line})
-			hub.publishSSE(chatID, "status", map[string]any{
-				"phase":   "log",
-				"message": line,
-			})
-		},
-		RunPendingApprovals: func(ctx context.Context, cfg *config, client *encx.Client, session *llmSession) {
-			runWebPendingFixApprovals(ctx, hub, chatID, cfg, client, session)
-		},
-		ApproveToolCall: func(ctx context.Context, toolName, argsJSON string) (bool, error) {
-			return runWebToolApproval(ctx, hub, chatID, toolName, argsJSON)
-		},
+			OnEvent: func(ev AgentEvent) {
+				hub.handleAgentEvent(chatID, t, ev)
+			},
+			OnStatus: func(phase, message string) {
+				hub.publishSSE(chatID, "status", map[string]any{
+					"phase":   phase,
+					"message": strings.TrimSpace(message),
+				})
+			},
+			Stderrf: func(format string, args ...any) {
+				line := strings.TrimSpace(fmt.Sprintf(format, args...))
+				if line == "" {
+					return
+				}
+				hub.publishSSE(chatID, "stderr", map[string]any{"line": line})
+				hub.publishSSE(chatID, "status", map[string]any{
+					"phase":   "log",
+					"message": line,
+				})
+			},
+			RunPendingApprovals: func(ctx context.Context, cfg *config, client *encx.Client, session *llmSession) {
+				runWebPendingFixApprovals(ctx, hub, chatID, cfg, client, session)
+			},
+			ApproveToolCall: func(ctx context.Context, toolName, argsJSON string) (bool, error) {
+				return runWebToolApproval(ctx, hub, chatID, toolName, argsJSON)
+			},
 		})
 	})
 

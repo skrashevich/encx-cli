@@ -2,10 +2,17 @@ package main
 
 import (
 	"context"
+	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
+	"sync"
 	"time"
 
+	"github.com/sipeed/picoclaw/pkg/logger"
+	"github.com/sipeed/picoclaw/pkg/providers"
+	"github.com/sipeed/picoclaw/pkg/tools"
+	toolshared "github.com/sipeed/picoclaw/pkg/tools/shared"
 	"github.com/skrashevich/encx-cli/encx"
 )
 
@@ -36,12 +43,15 @@ type AgentEvent struct {
 	PendingFixes []pendingAdminFix // approval_needed
 }
 
-// AgentConfig holds provider settings for chat/completions.
+// AgentConfig holds the PicoClaw provider settings.
 type AgentConfig struct {
-	APIURL  string
 	APIKey  string
 	Model   string
 	BaseURL string
+
+	// Provider overrides HTTP provider construction. It is used by tests and by
+	// callers that already own a PicoClaw provider.
+	Provider providers.LLMProvider
 }
 
 // AgentRunInput binds config, transport, mutable conversation state, and tool definitions.
@@ -182,196 +192,422 @@ func formatAgentExecutionReport(session *llmSession, model string, pricing *llmP
 	return report.String()
 }
 
+const levelReviewNudgeTool = "encx_continue_level_review"
+
+var (
+	disablePicoClawLogging sync.Once
+	// executeToolCallSafe temporarily replaces process-wide stdout and toggles a
+	// package-global fatal mode. PicoClaw executes a batch of tool calls in
+	// parallel, so every legacy CLI tool must share one process-wide lock.
+	legacyToolExecutionMu sync.Mutex
+)
+
+type agentRunStats struct {
+	mu               sync.Mutex
+	llmDuration      time.Duration
+	toolDuration     time.Duration
+	turns            int
+	toolCalls        int
+	promptTokens     int
+	completionTokens int
+}
+
+func (s *agentRunStats) addLLM(duration time.Duration, usage *providers.UsageInfo) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.llmDuration += duration
+	s.turns++
+	if usage != nil {
+		s.promptTokens += usage.PromptTokens
+		s.completionTokens += usage.CompletionTokens
+	}
+}
+
+func (s *agentRunStats) addTool(duration time.Duration) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.toolDuration += duration
+	s.toolCalls++
+}
+
+func (s *agentRunStats) snapshot() (time.Duration, time.Duration, int, int, int, int) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.llmDuration, s.toolDuration, s.turns, s.toolCalls, s.promptTokens, s.completionTokens
+}
+
+type observedPicoProvider struct {
+	delegate providers.LLMProvider
+	session  *llmSession
+	cb       AgentCallbacks
+	stats    *agentRunStats
+	lastUser string
+}
+
+func (p *observedPicoProvider) GetDefaultModel() string { return p.delegate.GetDefaultModel() }
+
+func (p *observedPicoProvider) Chat(
+	ctx context.Context,
+	messages []providers.Message,
+	toolDefs []providers.ToolDefinition,
+	model string,
+	options map[string]any,
+) (*providers.LLMResponse, error) {
+	_, _, completedTurns, _, _, _ := p.stats.snapshot()
+	turn := completedTurns + 1
+	emitStatus(p.cb, "llm", p.session.reviewText(
+		fmt.Sprintf("Step %d: waiting for model…", turn),
+		fmt.Sprintf("Шаг %d: ожидание ответа модели…", turn),
+	))
+	debugf("picoclaw turn=%d request: messages=%d tools=%d", turn, len(messages), len(toolDefs))
+
+	started := time.Now()
+	var response *providers.LLMResponse
+	var lastErr error
+	for attempt := range 3 {
+		if attempt > 0 {
+			delay := time.Duration(attempt) * 5 * time.Second
+			emitStatus(p.cb, "retry", p.session.reviewText(
+				fmt.Sprintf("Retrying in %s…", delay),
+				fmt.Sprintf("Повтор через %s…", delay),
+			))
+			timer := time.NewTimer(delay)
+			select {
+			case <-ctx.Done():
+				timer.Stop()
+				return nil, ctx.Err()
+			case <-timer.C:
+			}
+		}
+
+		response, lastErr = p.chatWithWait(ctx, messages, toolDefs, model, options)
+		if lastErr == nil {
+			break
+		}
+		if !isRetryableLLMError(lastErr) {
+			return nil, lastErr
+		}
+		stderrAgentf(p.cb, "LLM error (%d/3): %v\n", attempt+1, lastErr)
+	}
+	if lastErr != nil {
+		return nil, fmt.Errorf("LLM API error after 3 attempts: %w", lastErr)
+	}
+	if response == nil {
+		return nil, errors.New("LLM provider returned an empty response")
+	}
+
+	duration := time.Since(started)
+	p.stats.addLLM(duration, response.Usage)
+	debugf("picoclaw turn=%d response: finish_reason=%s tool_calls=%d content=%q duration=%s",
+		turn, response.FinishReason, len(response.ToolCalls), summarizeDebugText(response.Content, 0), duration.Round(time.Millisecond))
+
+	// Preserve the old completeness guard inside PicoClaw's own conversation.
+	// A hidden tool turns the nudge into a tool result, so RunToolLoop retains all
+	// preceding tool output while asking the model to continue.
+	if len(response.ToolCalls) == 0 {
+		if missing := missingLevelsForContentSummary(p.session, p.lastUser); len(missing) > 0 &&
+			p.session.levelCompletionNudges < maxLevelCompletionNudges {
+			p.session.levelCompletionNudges++
+			emitStatus(p.cb, "plan", p.session.reviewText(
+				"Loading remaining levels before answer…",
+				"Дозагружаю уровни перед ответом…",
+			))
+			return &providers.LLMResponse{
+				FinishReason: "tool_calls",
+				Usage:        response.Usage,
+				ToolCalls: []providers.ToolCall{{
+					ID:   fmt.Sprintf("encx-level-review-%d", p.session.levelCompletionNudges),
+					Name: levelReviewNudgeTool,
+					Arguments: map[string]any{
+						"message": buildLevelLoadNudge(p.session, missing),
+					},
+				}},
+			}, nil
+		}
+	}
+	return response, nil
+}
+
+func (p *observedPicoProvider) chatWithWait(
+	ctx context.Context,
+	messages []providers.Message,
+	toolDefs []providers.ToolDefinition,
+	model string,
+	options map[string]any,
+) (*providers.LLMResponse, error) {
+	done := make(chan struct{})
+	defer close(done)
+	go func() {
+		started := time.Now()
+		ticker := time.NewTicker(15 * time.Second)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ticker.C:
+				elapsed := time.Since(started).Round(time.Second)
+				emitStatus(p.cb, "llm_wait", p.session.reviewText(
+					fmt.Sprintf("Waiting for model… %s", elapsed),
+					fmt.Sprintf("Ожидание ответа модели… %s", elapsed),
+				))
+			case <-done:
+				return
+			}
+		}
+	}()
+	return p.delegate.Chat(ctx, messages, toolDefs, model, options)
+}
+
+type picoLegacyTool struct {
+	definition llmFunction
+	parameters map[string]any
+	runtime    *picoLegacyToolRuntime
+}
+
+func (t *picoLegacyTool) Name() string               { return t.definition.Name }
+func (t *picoLegacyTool) Description() string        { return t.definition.Description }
+func (t *picoLegacyTool) Parameters() map[string]any { return t.parameters }
+
+func (t *picoLegacyTool) Execute(ctx context.Context, args map[string]any) *toolshared.ToolResult {
+	argsJSON, err := json.Marshal(args)
+	if err != nil {
+		return toolshared.ErrorResult(fmt.Sprintf("encode %s arguments: %v", t.Name(), err)).WithError(err)
+	}
+	return t.runtime.execute(ctx, t.Name(), string(argsJSON))
+}
+
+type picoLegacyToolRuntime struct {
+	input *AgentRunInput
+	cb    AgentCallbacks
+	stats *agentRunStats
+}
+
+func (r *picoLegacyToolRuntime) execute(ctx context.Context, name, argsJSON string) *toolshared.ToolResult {
+	legacyToolExecutionMu.Lock()
+	defer legacyToolExecutionMu.Unlock()
+
+	if securityRequiresApproval(r.input.Session, name) {
+		if r.cb.ApproveToolCall == nil {
+			message := r.input.Session.reviewText(
+				"Tool approval required but no approval handler is configured",
+				"Требуется согласование, но обработчик подтверждения не настроен",
+			)
+			return toolshared.ErrorResult(message)
+		}
+		emitStatus(r.cb, "approval", r.input.Session.reviewText(
+			fmt.Sprintf("Waiting for approval: %s", name),
+			fmt.Sprintf("Ожидание согласования: %s", name),
+		))
+		allowed, err := r.cb.ApproveToolCall(ctx, name, argsJSON)
+		if err != nil {
+			return toolshared.ErrorResult(err.Error()).WithError(err)
+		}
+		if !allowed {
+			result := `{"skipped":true,"reason":"user denied tool execution"}`
+			emitAgent(r.cb, AgentEvent{Type: agentEventToolDone, ToolName: name, ToolArgs: argsJSON, ToolResult: result})
+			return toolshared.SilentResult(result)
+		}
+	}
+
+	emitStatus(r.cb, "tool", r.input.Session.reviewText(
+		fmt.Sprintf("Running tool: %s", name),
+		fmt.Sprintf("Вызов инструмента: %s", name),
+	))
+	emitAgent(r.cb, AgentEvent{Type: agentEventToolStart, ToolName: name, ToolArgs: argsJSON})
+	debugf("picoclaw tool call: name=%s args=%s", name, summarizeDebugArgs(argsJSON))
+
+	started := time.Now()
+	rawResult := executeToolCallSafe(ctx, r.input.Cfg, r.input.Client, r.input.Session, name, argsJSON)
+	r.stats.addTool(time.Since(started))
+	llmResult := prepareToolResultForLLM(name, rawResult)
+	if name == "admin_level_content" && !toolResultLooksLikeError(llmResult) {
+		markLevelContentLoaded(r.input.Session, name, argsJSON)
+	}
+	if name == "admin_levels" && !toolResultLooksLikeError(llmResult) {
+		recordLevelEnumeration(r.input.Session, llmResult)
+	}
+	emitAgent(r.cb, AgentEvent{Type: agentEventToolDone, ToolName: name, ToolArgs: argsJSON, ToolResult: llmResult})
+	debugf("picoclaw tool result: name=%s raw_bytes=%d llm_bytes=%d result=%q",
+		name, len(rawResult), len(llmResult), summarizeDebugText(llmResult, 0))
+
+	result := toolshared.SilentResult(llmResult)
+	result.IsError = toolResultLooksLikeError(llmResult)
+	return result
+}
+
+type picoLevelReviewNudgeTool struct{}
+
+func (*picoLevelReviewNudgeTool) Name() string        { return levelReviewNudgeTool }
+func (*picoLevelReviewNudgeTool) Description() string { return "Internal continuation guard." }
+func (*picoLevelReviewNudgeTool) Parameters() map[string]any {
+	return map[string]any{
+		"type": "object",
+		"properties": map[string]any{
+			"message": map[string]any{"type": "string"},
+		},
+		"required": []string{"message"},
+	}
+}
+func (*picoLevelReviewNudgeTool) Execute(_ context.Context, args map[string]any) *toolshared.ToolResult {
+	message, _ := args["message"].(string)
+	return toolshared.SilentResult(message)
+}
+
+func newPicoProvider(agentCfg AgentConfig) providers.LLMProvider {
+	if agentCfg.Provider != nil {
+		return agentCfg.Provider
+	}
+	provider := providers.NewHTTPProviderWithMaxTokensFieldAndRequestTimeout(
+		agentCfg.APIKey,
+		strings.TrimRight(agentCfg.BaseURL, "/"),
+		"",
+		"",
+		"encli/"+version,
+		600,
+		nil,
+		nil,
+	)
+	if strings.Contains(strings.ToLower(agentCfg.BaseURL), "openrouter.ai") {
+		provider.SetProviderName("openrouter")
+	}
+	return provider
+}
+
+func newPicoRegistry(input *AgentRunInput, cb AgentCallbacks, stats *agentRunStats) (*tools.ToolRegistry, error) {
+	registry := tools.NewToolRegistry()
+	runtime := &picoLegacyToolRuntime{input: input, cb: cb, stats: stats}
+	for _, definition := range input.Tools {
+		var parameters map[string]any
+		if err := json.Unmarshal(definition.Function.Parameters, &parameters); err != nil {
+			return nil, fmt.Errorf("decode schema for %s: %w", definition.Function.Name, err)
+		}
+		registry.Register(&picoLegacyTool{
+			definition: definition.Function,
+			parameters: parameters,
+			runtime:    runtime,
+		})
+	}
+	registry.RegisterHidden(&picoLevelReviewNudgeTool{})
+	return registry, nil
+}
+
+func picoMessages(messages []llmMessage) []providers.Message {
+	out := make([]providers.Message, 0, len(messages))
+	for _, message := range messages {
+		converted := providers.Message{
+			Role:       message.Role,
+			Content:    message.Content,
+			ToolCallID: message.ToolCallID,
+		}
+		for _, call := range message.ToolCalls {
+			var args map[string]any
+			_ = json.Unmarshal([]byte(call.Function.Arguments), &args)
+			converted.ToolCalls = append(converted.ToolCalls, providers.ToolCall{
+				ID:        call.ID,
+				Type:      call.Type,
+				Name:      call.Function.Name,
+				Arguments: args,
+				Function: &providers.FunctionCall{
+					Name:      call.Function.Name,
+					Arguments: call.Function.Arguments,
+				},
+			})
+		}
+		out = append(out, converted)
+	}
+	return out
+}
+
+func isRetryableLLMError(err error) bool {
+	if err == nil {
+		return false
+	}
+	var failover *providers.FailoverError
+	if errors.As(err, &failover) {
+		switch failover.Reason {
+		case providers.FailoverRateLimit, providers.FailoverNetwork,
+			providers.FailoverTimeout, providers.FailoverOverloaded:
+			return true
+		case providers.FailoverAuth, providers.FailoverBilling,
+			providers.FailoverFormat, providers.FailoverContextOverflow:
+			return false
+		}
+	}
+	s := strings.ToLower(err.Error())
+	for _, permanent := range []string{"unknown provider", "invalid model", "model not found", "unauthorized", "forbidden"} {
+		if strings.Contains(s, permanent) {
+			return false
+		}
+	}
+	for _, transient := range []string{
+		"context deadline exceeded", "http 429", "http 502", "http 503", "http 504", "connection reset", "eof",
+		"rate limit", "rate_limit", "overloaded", "temporarily unavailable", "failover(network)", "failover(timeout)",
+	} {
+		if strings.Contains(s, transient) {
+			return true
+		}
+	}
+	return false
+}
+
 func runAgentLoop(ctx context.Context, agentCfg AgentConfig, input *AgentRunInput, cb AgentCallbacks) ([]llmMessage, error) {
 	if input == nil {
 		return nil, fmt.Errorf("runAgentLoop: nil AgentRunInput")
 	}
+	if input.Session == nil {
+		input.Session = &llmSession{}
+	}
 
+	disablePicoClawLogging.Do(logger.DisableConsole)
+	stats := &agentRunStats{}
+	registry, err := newPicoRegistry(input, cb, stats)
+	if err != nil {
+		return input.Messages, err
+	}
 	pricing := fetchLLMPricing(ctx, agentCfg.BaseURL, agentCfg.APIKey, agentCfg.Model)
 	totalStart := time.Now()
-	var llmDuration time.Duration
-	var toolDuration time.Duration
-	var totalToolCalls int
-	var totalPromptTokens, totalCompletionTokens int
-	turns := 0
-
-	emitReport := func() {
-		totalElapsed := time.Since(totalStart)
-		txt := formatAgentExecutionReport(input.Session, agentCfg.Model, pricing,
-			totalElapsed, llmDuration, toolDuration,
-			turns, totalToolCalls, totalPromptTokens, totalCompletionTokens)
-		emitAgent(cb, AgentEvent{Type: agentEventReport, Report: txt})
-	}
-
-	messages := &input.Messages
 	resetLevelEnumeration(input.Session)
-	for turn := 0; turn < maxAgentTurns; turn++ {
-		debugf("llm turn=%d request: messages=%d", turn+1, len(*messages))
-		turnStart := time.Now()
-		var resp *llmResponse
-		var lastErr error
-		emitStatus(cb, "llm", input.Session.reviewText(
-			fmt.Sprintf("Step %d: waiting for model…", turn+1),
-			fmt.Sprintf("Шаг %d: ожидание ответа модели…", turn+1),
-		))
-		for attempt := range 3 {
-			if attempt > 0 {
-				delay := time.Duration(attempt) * 5 * time.Second
-				emitStatus(cb, "retry", input.Session.reviewText(
-					fmt.Sprintf("Retrying in %s…", delay),
-					fmt.Sprintf("Повтор через %s…", delay),
-				))
-				time.Sleep(delay)
-			}
-			resp, lastErr = callLLM(ctx, agentCfg.APIURL, agentCfg.APIKey, agentCfg.Model, *messages, input.Tools, func(elapsed time.Duration) {
-				emitStatus(cb, "llm_wait", input.Session.reviewText(
-					fmt.Sprintf("Waiting for model… %s", elapsed),
-					fmt.Sprintf("Ожидание ответа модели… %s", elapsed),
-				))
-			})
-			if lastErr == nil {
-				break
-			}
-			if !isRetryableLLMError(lastErr) {
-				emitAgent(cb, AgentEvent{Type: agentEventError, Err: lastErr, Message: lastErr.Error()})
-				return *messages, fmt.Errorf("LLM API error: %w", lastErr)
-			}
-			stderrAgentf(cb, "LLM error (%d/3): %v\n", attempt+1, lastErr)
-		}
-		if lastErr != nil {
-			emitAgent(cb, AgentEvent{Type: agentEventError, Err: lastErr, Message: lastErr.Error()})
-			return *messages, fmt.Errorf("LLM API error after 3 attempts: %w", lastErr)
-		}
-		llmDuration += time.Since(turnStart)
-		turns++
 
-		if resp.Usage != nil {
-			totalPromptTokens += resp.Usage.PromptTokens
-			totalCompletionTokens += resp.Usage.CompletionTokens
-		}
-
-		if len(resp.Choices) == 0 {
-			err := fmt.Errorf("LLM returned no choices")
-			emitAgent(cb, AgentEvent{Type: agentEventError, Err: err, Message: err.Error()})
-			return *messages, err
-		}
-
-		choice := resp.Choices[0]
-		debugf("llm turn=%d response: finish_reason=%s tool_calls=%d content=%q",
-			turn+1, choice.FinishReason, len(choice.Message.ToolCalls), summarizeDebugText(choice.Message.Content, 0))
-		debugf("llm turn=%d completed in %s", turn+1, time.Since(turnStart).Round(time.Millisecond))
-
-		if len(choice.Message.ToolCalls) == 0 {
-			lastUser := lastUserMessageContent(*messages)
-			if missing := missingLevelsForContentSummary(input.Session, lastUser); len(missing) > 0 &&
-				input.Session.levelCompletionNudges < maxLevelCompletionNudges {
-				input.Session.levelCompletionNudges++
-				nudge := buildLevelLoadNudge(input.Session, missing)
-				emitStatus(cb, "plan", input.Session.reviewText(
-					"Loading remaining levels before answer…",
-					"Дозагружаю уровни перед ответом…",
-				))
-				*messages = append(*messages, llmMessage{Role: "user", Content: nudge})
-				continue
-			}
-			if choice.Message.Content != "" {
-				emitAgent(cb, AgentEvent{Type: agentEventAssistantText, Text: choice.Message.Content})
-			}
-			if len(input.Session.pendingFixes) > 0 {
-				fixes := append([]pendingAdminFix(nil), input.Session.pendingFixes...)
-				emitAgent(cb, AgentEvent{Type: agentEventApprovalNeed, PendingFixes: fixes})
-				if cb.RunPendingApprovals != nil {
-					cb.RunPendingApprovals(ctx, input.Cfg, input.Client, input.Session)
-				} else {
-					runPendingFixApprovals(ctx, input.Cfg, input.Client, input.Session)
-				}
-			}
-			emitReport()
-			emitAgent(cb, AgentEvent{Type: agentEventDone})
-			return *messages, nil
-		}
-
-		*messages = append(*messages, llmMessage{
-			Role:      "assistant",
-			ToolCalls: choice.Message.ToolCalls,
-		})
-
-		for _, tc := range choice.Message.ToolCalls {
-			if securityRequiresApproval(input.Session, tc.Function.Name) {
-				if cb.ApproveToolCall == nil {
-					errMsg := input.Session.reviewText(
-						"Tool approval required but no approval handler is configured",
-						"Требуется согласование, но обработчик подтверждения не настроен",
-					)
-					emitAgent(cb, AgentEvent{Type: agentEventError, Message: errMsg})
-					return *messages, fmt.Errorf("%s", errMsg)
-				}
-				emitStatus(cb, "approval", input.Session.reviewText(
-					fmt.Sprintf("Waiting for approval: %s", tc.Function.Name),
-					fmt.Sprintf("Ожидание согласования: %s", tc.Function.Name),
-				))
-				allowed, apprErr := cb.ApproveToolCall(ctx, tc.Function.Name, tc.Function.Arguments)
-				if apprErr != nil {
-					emitAgent(cb, AgentEvent{Type: agentEventError, Err: apprErr, Message: apprErr.Error()})
-					return *messages, apprErr
-				}
-				if !allowed {
-					skipResult := `{"skipped": true, "reason": "user denied tool execution"}`
-					emitAgent(cb, AgentEvent{
-						Type:       agentEventToolDone,
-						ToolName:   tc.Function.Name,
-						ToolArgs:   tc.Function.Arguments,
-						ToolResult: skipResult,
-					})
-					*messages = append(*messages, llmMessage{
-						Role:       "tool",
-						Content:    skipResult,
-						ToolCallID: tc.ID,
-					})
-					continue
-				}
-			}
-
-			emitStatus(cb, "tool", input.Session.reviewText(
-				fmt.Sprintf("Running tool: %s", tc.Function.Name),
-				fmt.Sprintf("Вызов инструмента: %s", tc.Function.Name),
-			))
-			emitAgent(cb, AgentEvent{Type: agentEventToolStart, ToolName: tc.Function.Name, ToolArgs: tc.Function.Arguments})
-			debugf("llm tool call: id=%s name=%s args=%s", tc.ID, tc.Function.Name, summarizeDebugArgs(tc.Function.Arguments))
-
-			toolStart := time.Now()
-			result := executeToolCallSafe(ctx, input.Cfg, input.Client, input.Session, tc.Function.Name, tc.Function.Arguments)
-			toolDuration += time.Since(toolStart)
-			totalToolCalls++
-
-			llmResult := prepareToolResultForLLM(tc.Function.Name, result)
-			if tc.Function.Name == "admin_level_content" && !toolResultLooksLikeError(llmResult) {
-				markLevelContentLoaded(input.Session, tc.Function.Name, tc.Function.Arguments)
-			}
-			if tc.Function.Name == "admin_levels" && !toolResultLooksLikeError(llmResult) {
-				recordLevelEnumeration(input.Session, llmResult)
-			}
-			emitAgent(cb, AgentEvent{
-				Type:       agentEventToolDone,
-				ToolName:   tc.Function.Name,
-				ToolArgs:   tc.Function.Arguments,
-				ToolResult: llmResult,
-			})
-			debugf("llm tool result: id=%s name=%s raw_bytes=%d llm_bytes=%d result=%q",
-				tc.ID, tc.Function.Name, len(result), len(llmResult), summarizeDebugText(llmResult, 0))
-
-			*messages = append(*messages, llmMessage{
-				Role:       "tool",
-				Content:    llmResult,
-				ToolCallID: tc.ID,
-			})
-		}
-		debugf("llm turn=%d tools complete; waiting for next model step", turn+1)
+	provider := &observedPicoProvider{
+		delegate: newPicoProvider(agentCfg),
+		session:  input.Session,
+		cb:       cb,
+		stats:    stats,
+		lastUser: lastUserMessageContent(input.Messages),
+	}
+	result, err := tools.RunToolLoop(ctx, tools.ToolLoopConfig{
+		Provider:      provider,
+		Model:         agentCfg.Model,
+		Tools:         registry,
+		MaxIterations: maxAgentTurns,
+	}, picoMessages(input.Messages), "encli", "agent")
+	if err != nil {
+		emitAgent(cb, AgentEvent{Type: agentEventError, Err: err, Message: err.Error()})
+		return input.Messages, err
 	}
 
-	warn := "Warning: agent reached maximum iterations"
-	emitAgent(cb, AgentEvent{Type: agentEventWarning, Message: warn})
-	emitReport()
+	content := strings.TrimSpace(result.Content)
+	if content != "" {
+		input.Messages = append(input.Messages, llmMessage{Role: "assistant", Content: content})
+		emitAgent(cb, AgentEvent{Type: agentEventAssistantText, Text: content})
+	} else if result.Iterations >= maxAgentTurns {
+		emitAgent(cb, AgentEvent{Type: agentEventWarning, Message: "Warning: agent reached maximum iterations"})
+	}
+
+	if len(input.Session.pendingFixes) > 0 {
+		fixes := append([]pendingAdminFix(nil), input.Session.pendingFixes...)
+		emitAgent(cb, AgentEvent{Type: agentEventApprovalNeed, PendingFixes: fixes})
+		if cb.RunPendingApprovals != nil {
+			cb.RunPendingApprovals(ctx, input.Cfg, input.Client, input.Session)
+		} else {
+			runPendingFixApprovals(ctx, input.Cfg, input.Client, input.Session)
+		}
+	}
+
+	llmDuration, toolDuration, turns, toolCalls, promptTokens, completionTokens := stats.snapshot()
+	report := formatAgentExecutionReport(input.Session, agentCfg.Model, pricing,
+		time.Since(totalStart), llmDuration, toolDuration,
+		turns, toolCalls, promptTokens, completionTokens)
+	emitAgent(cb, AgentEvent{Type: agentEventReport, Report: report})
 	emitAgent(cb, AgentEvent{Type: agentEventDone})
-	return *messages, nil
+	return input.Messages, nil
 }

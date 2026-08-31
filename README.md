@@ -39,6 +39,25 @@
 - хотите написать свой тулинг поверх Encounter API — берите пакет `encx`;
 - хотите просто работать из терминала — ставьте `encli`.
 
+## Инструменты движка для ИИ-агентов
+
+Пакет [`agenttools`](agenttools/) превращает движок Encounter в каталог инструментов для
+LLM-агента, а [`agentmcp`](agentmcp/) отдаёт этот каталог наружу по MCP:
+
+```sh
+encli mcp -domain tech.en.cx                     # только чтение (по умолчанию)
+encli mcp -domain tech.en.cx -security approve   # мутации подтверждаются клиентом
+```
+
+Тот же каталог встроен в `Encx.xcframework` как агент [PicoClaw](https://github.com/sipeed/picoclaw)
+(MIT) — см. `EncClient.NewAgentSession` в `mobile/encxmobile`. Каталог, политики доступа
+(`readonly` / `approve` / `full`) и конфигурация внешнего PicoClaw описаны в
+[docs/agent-tools.md](docs/agent-tools.md).
+
+`encli --llm` и `encli -web` также работают на runtime и HTTP-провайдере PicoClaw.
+Их расширенный CLI-каталог (админские команды, локальные файлы и Wikipedia)
+подключён к `tools.ToolRegistry` через адаптер совместимости.
+
 ## Установка
 
 ### Готовые бинарники
@@ -487,7 +506,7 @@ encli admin-action-monitor -game-id 12345
 
 ## LLM-агент и OpenRouter
 
-`encli` встраивает агента с tool-calling: он читает состояние игры, вызывает admin-команды, ищет факты в Википедии и читает локальные файлы со сценарием. Агент доступен в CLI (`--llm`), в локальном Web UI (`-web`) и в Docker (через `-e`).
+`encli` встраивает [PicoClaw](https://github.com/sipeed/picoclaw) с tool-calling: агент читает состояние игры, вызывает admin-команды, ищет факты в Википедии и читает локальные файлы со сценарием. Один runtime используется в CLI (`--llm`), локальном Web UI (`-web`) и Docker (через `-e`).
 
 ### API-ключ и модель
 

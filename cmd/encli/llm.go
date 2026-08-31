@@ -30,7 +30,7 @@ type agentFatalError struct {
 	Message string
 }
 
-// llmTool defines an OpenAI-compatible function tool.
+// llmTool is the persisted CLI catalog definition adapted into a PicoClaw tool.
 type llmTool struct {
 	Type     string      `json:"type"`
 	Function llmFunction `json:"function"`
@@ -42,48 +42,11 @@ type llmFunction struct {
 	Parameters  json.RawMessage `json:"parameters"`
 }
 
-type llmRequest struct {
-	Model    string       `json:"model"`
-	Stream   bool         `json:"stream"`
-	Messages []llmMessage `json:"messages"`
-	Tools    []llmTool    `json:"tools,omitempty"`
-}
-
 type llmMessage struct {
 	Role       string        `json:"role"`
 	Content    string        `json:"content,omitempty"`
 	ToolCalls  []llmToolCall `json:"tool_calls,omitempty"`
 	ToolCallID string        `json:"tool_call_id,omitempty"`
-}
-
-type llmUsage struct {
-	PromptTokens     int `json:"prompt_tokens"`
-	CompletionTokens int `json:"completion_tokens"`
-	TotalTokens      int `json:"total_tokens"`
-}
-
-type llmResponse struct {
-	Choices []llmChoice `json:"choices"`
-	Usage   *llmUsage   `json:"usage,omitempty"`
-	Error   *struct {
-		Message string `json:"message"`
-	} `json:"error,omitempty"`
-}
-
-type llmErrorEnvelope struct {
-	Error *struct {
-		Message string `json:"message"`
-	} `json:"error,omitempty"`
-}
-
-type llmChoice struct {
-	Message      llmAssistantMessage `json:"message"`
-	FinishReason string              `json:"finish_reason"`
-}
-
-type llmAssistantMessage struct {
-	Content   string        `json:"content"`
-	ToolCalls []llmToolCall `json:"tool_calls"`
 }
 
 type llmToolCall struct {
@@ -110,7 +73,6 @@ type llmSession struct {
 
 func cmdLLM(ctx context.Context, cfg *config, client *encx.Client, prompt string) {
 	baseURL := cmp.Or(os.Getenv("LLM_BASE_URL"), os.Getenv("OPENROUTER_BASE_URL"), defaultLLMBaseURL)
-	apiURL := strings.TrimRight(baseURL, "/") + "/chat/completions"
 
 	apiKey := cmp.Or(os.Getenv("LLM_API_KEY"), os.Getenv("OPENROUTER_API_KEY"))
 	if apiKey == "" && !strings.Contains(baseURL, "127.0.0.1") && !strings.Contains(baseURL, "localhost") {
@@ -137,7 +99,7 @@ func cmdLLM(ctx context.Context, cfg *config, client *encx.Client, prompt string
 	}
 
 	tools := getToolsForSession(session)
-	debugf("llm mode initialized: url=%s model=%s review_mode=%v tools=%d prompt=%q", apiURL, model, session.reviewApprovalMode, len(tools), summarizeDebugText(prompt, 0))
+	debugf("picoclaw mode initialized: base_url=%s model=%s review_mode=%v tools=%d prompt=%q", baseURL, model, session.reviewApprovalMode, len(tools), summarizeDebugText(prompt, 0))
 
 	loopIn := AgentRunInput{
 		Cfg:      cfg,
@@ -147,7 +109,6 @@ func cmdLLM(ctx context.Context, cfg *config, client *encx.Client, prompt string
 		Tools:    tools,
 	}
 	ac := AgentConfig{
-		APIURL:  apiURL,
 		APIKey:  apiKey,
 		Model:   model,
 		BaseURL: baseURL,
