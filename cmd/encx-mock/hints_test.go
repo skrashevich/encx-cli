@@ -55,3 +55,53 @@ func TestScenarioHelpsLockedUntilDelay(t *testing.T) {
 		t.Fatalf("hint 2 remain=%v want 0", open[1]["RemainSeconds"])
 	}
 }
+
+func TestScenarioHelpsExposesPenaltyHints(t *testing.T) {
+	start := time.Date(2026, 6, 4, 12, 0, 0, 0, time.UTC)
+	st := &sessionState{LevelStartedAt: []time.Time{start}}
+	lvl := scenario.Level{
+		Hints: []scenario.Hint{{Text: "обычная", DelaySeconds: 900}},
+		PenaltyHints: []scenario.PenaltyHint{{
+			Text:           "D45R54",
+			DelaySeconds:   1800,
+			PenaltySeconds: 900,
+			RequestConfirm: true,
+			Comment:        "Код 1",
+		}},
+	}
+
+	helps := scenarioHelps(st, 0, lvl, start)
+	if len(helps) != 2 {
+		t.Fatalf("helps = %d, want 2 (regular + penalty)", len(helps))
+	}
+	if helps[0]["IsPenalty"] != false {
+		t.Error("regular hint reported as penalty")
+	}
+	penalty := helps[1]
+	if penalty["IsPenalty"] != true {
+		t.Error("penalty hint not marked as penalty")
+	}
+	if penalty["Penalty"] != 900 {
+		t.Errorf("Penalty = %v, want 900", penalty["Penalty"])
+	}
+	if penalty["RequestConfirm"] != true {
+		t.Error("RequestConfirm lost")
+	}
+	if penalty["PenaltyComment"] != "Код 1" {
+		t.Errorf("PenaltyComment = %v, want %q", penalty["PenaltyComment"], "Код 1")
+	}
+	if penalty["RemainSeconds"] != 1800 {
+		t.Errorf("RemainSeconds = %v, want 1800", penalty["RemainSeconds"])
+	}
+	if penalty["HelpText"] != nil {
+		t.Error("penalty hint text exposed before its delay elapsed")
+	}
+	if helps[0]["HelpId"] == penalty["HelpId"] {
+		t.Error("penalty hint reuses a regular hint id")
+	}
+
+	opened := scenarioHelps(st, 0, lvl, start.Add(30*time.Minute))
+	if opened[1]["HelpText"] != "D45R54" {
+		t.Errorf("penalty hint text = %v, want D45R54", opened[1]["HelpText"])
+	}
+}

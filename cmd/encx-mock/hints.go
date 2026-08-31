@@ -19,12 +19,16 @@ func scenarioHelps(st *sessionState, levelIdx int, lvl scenario.Level, now time.
 		elapsed = 0
 	}
 
-	helps := make([]map[string]any, 0, len(lvl.Hints))
-	for i, hint := range lvl.Hints {
-		remain := hint.DelaySeconds - elapsed
-		if remain < 0 {
-			remain = 0
+	remaining := func(delaySeconds int) int {
+		if remain := delaySeconds - elapsed; remain > 0 {
+			return remain
 		}
+		return 0
+	}
+
+	helps := make([]map[string]any, 0, len(lvl.Hints)+len(lvl.PenaltyHints))
+	for i, hint := range lvl.Hints {
+		remain := remaining(hint.DelaySeconds)
 		var helpText any
 		if remain == 0 {
 			helpText = hint.Text
@@ -37,6 +41,29 @@ func scenarioHelps(st *sessionState, levelIdx int, lvl scenario.Level, now time.
 			"Penalty":          0,
 			"PenaltyComment":   nil,
 			"RequestConfirm":   false,
+			"PenaltyHelpState": 0,
+			"RemainSeconds":    remain,
+			"PenaltyMessage":   nil,
+		})
+	}
+	for i, hint := range lvl.PenaltyHints {
+		remain := remaining(hint.DelaySeconds)
+		var helpText any
+		if remain == 0 {
+			helpText = hint.Text
+		}
+		var comment any
+		if hint.Comment != "" {
+			comment = hint.Comment
+		}
+		helps = append(helps, map[string]any{
+			"HelpId":           2000 + levelIdx*100 + i + 1,
+			"Number":           i + 1,
+			"HelpText":         helpText,
+			"IsPenalty":        true,
+			"Penalty":          hint.PenaltySeconds,
+			"PenaltyComment":   comment,
+			"RequestConfirm":   hint.RequestConfirm,
 			"PenaltyHelpState": 0,
 			"RemainSeconds":    remain,
 			"PenaltyMessage":   nil,

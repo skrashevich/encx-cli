@@ -21,6 +21,16 @@ type Hint struct {
 	DelaySeconds int    `json:"delay_seconds"`
 }
 
+// PenaltyHint is a parsed penalty hint (штрафная подсказка) from a level block.
+type PenaltyHint struct {
+	Title          string `json:"title,omitempty"`
+	Text           string `json:"text"`
+	DelaySeconds   int    `json:"delay_seconds"`
+	PenaltySeconds int    `json:"penalty_seconds,omitempty"`
+	RequestConfirm bool   `json:"request_confirm,omitempty"`
+	Comment        string `json:"comment,omitempty"`
+}
+
 // Bonus is a parsed bonus block from a GameScenario export.
 type Bonus struct {
 	Number       int      `json:"number"`
@@ -40,17 +50,18 @@ type Sector struct {
 
 // Level is one level block from a GameScenario export.
 type Level struct {
-	Number                int        `json:"number"`
-	Name                  string     `json:"name"`
-	AutopassSecond        int        `json:"autopass_seconds,omitempty"`
-	AutopassPenaltySecond int        `json:"autopass_penalty_seconds,omitempty"`
-	RequiredSectorsCount  int        `json:"required_sectors_count,omitempty"`
-	Comment               string     `json:"comment,omitempty"`
-	Tasks                 []string   `json:"tasks,omitempty"`
-	Hints                 []Hint     `json:"hints,omitempty"`
-	Sectors               []Sector   `json:"sectors,omitempty"`
-	SectorAnswers         [][]string `json:"sector_answers,omitempty"`
-	Bonuses               []Bonus    `json:"bonuses,omitempty"`
+	Number                int           `json:"number"`
+	Name                  string        `json:"name"`
+	AutopassSecond        int           `json:"autopass_seconds,omitempty"`
+	AutopassPenaltySecond int           `json:"autopass_penalty_seconds,omitempty"`
+	RequiredSectorsCount  int           `json:"required_sectors_count,omitempty"`
+	Comment               string        `json:"comment,omitempty"`
+	Tasks                 []string      `json:"tasks,omitempty"`
+	Hints                 []Hint        `json:"hints,omitempty"`
+	PenaltyHints          []PenaltyHint `json:"penalty_hints,omitempty"`
+	Sectors               []Sector      `json:"sectors,omitempty"`
+	SectorAnswers         [][]string    `json:"sector_answers,omitempty"`
+	Bonuses               []Bonus       `json:"bonuses,omitempty"`
 }
 
 // Document is a parsed GameScenario.aspx HTML export.
@@ -75,16 +86,22 @@ var (
 	levelAnchorRe      = regexp.MustCompile(`(?is)<a id="LevelsScenarioRepeater_ctl\d+_lnkLevelAnchorPoint" name="\d+"></a>`)
 	levelTitleRe       = regexp.MustCompile(`(?is)Уровень №\s*(\d+)\s*(?:"([^"]*)")?`)
 	autopassRe         = regexp.MustCompile(`(?is)Автопереход:\s*через\s*([^<]+)`)
-	taskRe             = regexp.MustCompile(`(?is)<span[^>]*id="LevelsScenarioRepeater_ctl\d+_LevelTasksRepeater_ctl\d+_lblLevelTask"[^>]*>(.*?)</span>`)
-	hintPairRe         = regexp.MustCompile(`(?is)<span[^>]*id="LevelsScenarioRepeater_ctl\d+_LevelHelpsRepeater_ctl\d+_lblLevelHelpTitle"[^>]*>(.*?)</span>\s*<br\s*/?>\s*<span[^>]*id="LevelsScenarioRepeater_ctl\d+_LevelHelpsRepeater_ctl\d+_lblLevelHelp"[^>]*>(.*?)</span>`)
+	taskOpenRe         = regexp.MustCompile(`(?is)<span[^>]*id="LevelsScenarioRepeater_ctl\d+_LevelTasksRepeater_ctl\d+_lblLevelTask"[^>]*>`)
+	hintTitleOpenRe    = regexp.MustCompile(`(?is)<span[^>]*id="LevelsScenarioRepeater_ctl(\d+)_LevelHelpsRepeater_ctl(\d+)_lblLevelHelpTitle"[^>]*>`)
+	hintTextOpenRe     = regexp.MustCompile(`(?is)<span[^>]*id="LevelsScenarioRepeater_ctl(\d+)_LevelHelpsRepeater_ctl(\d+)_lblLevelHelp"[^>]*>`)
+	penaltyTitleOpenRe = regexp.MustCompile(`(?is)<span[^>]*id="LevelsScenarioRepeater_ctl(\d+)_LevelPenaltyHelpsRepeater_ctl(\d+)_lblLevelHelpTitle"[^>]*>`)
+	penaltyTextOpenRe  = regexp.MustCompile(`(?is)<span[^>]*id="LevelsScenarioRepeater_ctl(\d+)_LevelPenaltyHelpsRepeater_ctl(\d+)_lblLevelHelp"[^>]*>`)
+	penaltyTimeRe      = regexp.MustCompile(`(?is)Штрафное\s+время:\s*</span>\s*<span[^>]*>([^<]*)</span>`)
+	penaltyConfirmRe   = regexp.MustCompile(`(?is)запрашивать\s+дополнительное\s+подтверждение:\s*</span>\s*<span[^>]*>([^<]*)</span>`)
+	penaltyCommentRe   = regexp.MustCompile(`(?is)Описание:\s*<span[^>]*>`)
 	requiredSectorsRe  = regexp.MustCompile(`(?is)для\s+прохождения\s+задания\s+необходимо\s+выполнить\s+(все|\d+)\s+сектор`)
-	sectorNameRe       = regexp.MustCompile(`(?is)<div[^>]*id="LevelsScenarioRepeater_ctl\d+_SectorsRepeater_ctl(\d+)_divSectorName"[^>]*>(.*?)</div>`)
-	answerRe           = regexp.MustCompile(`(?is)<span[^>]*id="LevelsScenarioRepeater_ctl\d+_SectorsRepeater_ctl(\d+)_LevelAnswersRepeater_ctl\d+_lblLevelAnswer"[^>]*>(.*?)</span>\s*-\s*<span[^>]*id="LevelsScenarioRepeater_ctl\d+_SectorsRepeater_ctl\d+_LevelAnswersRepeater_ctl\d+_lblAnswerFor"`)
-	commentRe          = regexp.MustCompile(`(?is)<span[^>]*id="LevelsScenarioRepeater_ctl\d+_lblLevelComment"[^>]*>(.*?)</span>`)
-	bonusHeaderRe      = regexp.MustCompile(`(?is)<span[^>]*id="LevelsScenarioRepeater_ctl\d+_LevelBonusesRepeater_ctl\d+_lblBonusNum"[^>]*>(.*?)</span>`)
+	sectorNameOpenRe   = regexp.MustCompile(`(?is)<div[^>]*id="LevelsScenarioRepeater_ctl\d+_SectorsRepeater_ctl(\d+)_divSectorName"[^>]*>`)
+	answerOpenRe       = regexp.MustCompile(`(?is)<span[^>]*id="LevelsScenarioRepeater_ctl\d+_SectorsRepeater_ctl(\d+)_LevelAnswersRepeater_ctl\d+_lblLevelAnswer"[^>]*>`)
+	answerForRe        = regexp.MustCompile(`(?is)^\s*-\s*<span[^>]*id="LevelsScenarioRepeater_ctl\d+_SectorsRepeater_ctl\d+_LevelAnswersRepeater_ctl\d+_lblAnswerFor"`)
+	commentOpenRe      = regexp.MustCompile(`(?is)<span[^>]*id="LevelsScenarioRepeater_ctl\d+_lblLevelComment"[^>]*>`)
+	bonusHeaderOpenRe  = regexp.MustCompile(`(?is)<span[^>]*id="LevelsScenarioRepeater_ctl\d+_LevelBonusesRepeater_ctl\d+_lblBonusNum"[^>]*>`)
 	bonusAwardRe       = regexp.MustCompile(`(?is)(Бонусное|Штрафное)\s+время:\s*([^<]+)`)
 	bonusAnswerOpenRe  = regexp.MustCompile(`(?is)<span[^>]*id="LevelsScenarioRepeater_ctl\d+_LevelBonusesRepeater_ctl\d+_BonusAnswersRepeater_ctl\d+_lblBonusAnswer"[^>]*>`)
-	bonusAnswerTailRe  = regexp.MustCompile(`(?is)^\s*(?:<br|</div>|<span[^>]*BonusAnswersRepeater_ctl\d+_lblBonusAnswer|<span[^>]*lblBonusNum|$)`)
 	bonusTitleNumberRe = regexp.MustCompile(`(?is)Бонус\s*№\s*(\d+)`)
 	hintDelayRe        = regexp.MustCompile(`\(([^()]*)\)\s*$`)
 	durationRe         = regexp.MustCompile(`(?i)(\d+)\s*(день|дня|дней|час(?:а|ов)?|минут(?:а|ы)?|секунд(?:а|ы)?)`)
@@ -212,6 +229,146 @@ func (l Level) SectorCount() int {
 	return 1
 }
 
+// element is one HTML element located by its opening tag: the submatches of the
+// opening-tag pattern plus the element's inner HTML.
+type element struct {
+	groups []string
+	inner  string
+	start  int
+	end    int
+}
+
+// indexKey identifies a repeater field by its outer and inner ctl indices.
+func (e element) indexKey() string {
+	if len(e.groups) < 3 {
+		return ""
+	}
+	return e.groups[1] + "|" + e.groups[2]
+}
+
+// findElements locates every element in block whose opening tag matches openRe
+// and extracts its inner HTML honouring nesting of the same tag name. The
+// non-greedy `(.*?)</tag>` shape used previously truncated content at the first
+// nested closing tag, which silently dropped most of a task or hint body.
+func findElements(block string, openRe *regexp.Regexp, tag string) []element {
+	locs := openRe.FindAllStringSubmatchIndex(block, -1)
+	if len(locs) == 0 {
+		return nil
+	}
+	out := make([]element, 0, len(locs))
+	for _, loc := range locs {
+		inner, end, ok := extractBalanced(block, loc[1], tag)
+		if !ok {
+			continue
+		}
+		groups := make([]string, len(loc)/2)
+		for i := range groups {
+			if loc[2*i] >= 0 {
+				groups[i] = block[loc[2*i]:loc[2*i+1]]
+			}
+		}
+		out = append(out, element{groups: groups, inner: inner, start: loc[0], end: end})
+	}
+	return out
+}
+
+// extractBalanced returns the inner HTML of an element whose opening tag ends at
+// start and the offset just past the element. Nested elements with the same tag
+// name are counted.
+//
+// Level content is authored by game masters and is not guaranteed to be well
+// formed, so two fallback boundaries are remembered while scanning: the start of
+// the next repeater field and the end of the enclosing block. They are only
+// candidates — the element's own closing tag always wins, so a nested repeater
+// id or a stray </div> inside well-formed content is harmless. When the element
+// turns out to be unclosed, the earliest candidate bounds it, which keeps its
+// content without letting it swallow a neighbouring scenario field.
+func extractBalanced(s string, start int, tag string) (string, int, bool) {
+	openPrefix := "<" + tag
+	closePrefix := "</" + tag
+	trackBlockEnd := tag != "div"
+	nextField, blockEnd := -1, -1
+	guardDepth := 0
+	depth := 1
+	pos := start
+	for pos < len(s) {
+		rel := strings.IndexByte(s[pos:], '<')
+		if rel < 0 {
+			break
+		}
+		idx := pos + rel
+		rest := s[idx:]
+		gt := strings.IndexByte(rest, '>')
+		if gt < 0 {
+			break
+		}
+		if nextField < 0 && strings.Contains(rest[:gt], repeaterIDMarker) {
+			nextField = idx
+		}
+		switch {
+		case hasTagPrefix(rest, closePrefix):
+			depth--
+			if depth == 0 {
+				return s[start:idx], idx + gt + 1, true
+			}
+		case hasTagPrefix(rest, openPrefix):
+			if !strings.HasSuffix(strings.TrimSpace(rest[:gt]), "/") {
+				depth++
+			}
+		case trackBlockEnd && hasTagPrefix(rest, "<div"):
+			if !strings.HasSuffix(strings.TrimSpace(rest[:gt]), "/") {
+				guardDepth++
+			}
+		case trackBlockEnd && hasTagPrefix(rest, "</div"):
+			if guardDepth == 0 {
+				if blockEnd < 0 {
+					blockEnd = idx
+				}
+			} else {
+				guardDepth--
+			}
+		default:
+			pos = idx + 1
+			continue
+		}
+		pos = idx + gt + 1
+	}
+	if end := earliestBoundary(nextField, blockEnd); end >= 0 {
+		return s[start:end], end, true
+	}
+	// No boundary at all: keep the remainder rather than dropping the field
+	// silently, which is how the truncation bug stayed invisible.
+	return s[start:], len(s), true
+}
+
+// earliestBoundary picks the nearer of two optional offsets; -1 means absent.
+func earliestBoundary(a, b int) int {
+	if a < 0 {
+		return b
+	}
+	if b < 0 || a < b {
+		return a
+	}
+	return b
+}
+
+// repeaterIDMarker prefixes the id of every field the scenario export renders.
+const repeaterIDMarker = `id="LevelsScenarioRepeater_`
+
+func hasTagPrefix(s, prefix string) bool {
+	if len(s) < len(prefix) || !strings.EqualFold(s[:len(prefix)], prefix) {
+		return false
+	}
+	if len(s) == len(prefix) {
+		return true
+	}
+	switch s[len(prefix)] {
+	case '>', '/', ' ', '\t', '\n', '\r':
+		return true
+	}
+	return false
+}
+
 func parseLevels(raw string, state *assetRewriteState) ([]Level, error) {
 	anchors := levelAnchorRe.FindAllStringIndex(raw, -1)
 	if len(anchors) == 0 {
@@ -245,7 +402,9 @@ func parseLevelBlock(block string, state *assetRewriteState) (Level, bool) {
 	levelNum, _ := strconv.Atoi(strings.TrimSpace(title[1]))
 	levelName := ""
 	if len(title) >= 3 {
-		levelName = strings.TrimSpace(html.UnescapeString(title[2]))
+		// The export quotes the name verbatim; trimming here would silently
+		// rewrite names whose trailing spaces are part of the level name.
+		levelName = html.UnescapeString(title[2])
 	}
 	level := Level{
 		Number: levelNum,
@@ -262,60 +421,43 @@ func parseLevelBlock(block string, state *assetRewriteState) (Level, bool) {
 		}
 	}
 
-	if m := commentRe.FindStringSubmatch(block); len(m) >= 2 {
-		level.Comment = normalizeHTMLFragment(m[1], state)
+	if comments := findElements(block, commentOpenRe, "span"); len(comments) > 0 {
+		level.Comment = normalizeHTMLFragment(comments[0].inner, state)
 	}
 
-	for _, taskMatch := range taskRe.FindAllStringSubmatch(block, -1) {
-		if len(taskMatch) < 2 {
-			continue
-		}
-		taskHTML := normalizeHTMLFragment(taskMatch[1], state)
+	for _, task := range findElements(block, taskOpenRe, "span") {
+		taskHTML := normalizeHTMLFragment(task.inner, state)
 		if taskHTML != "" {
 			level.Tasks = append(level.Tasks, taskHTML)
 		}
 	}
 
-	for _, hintMatch := range hintPairRe.FindAllStringSubmatch(block, -1) {
-		if len(hintMatch) < 3 {
-			continue
-		}
-		titleText := cleanInlineText(hintMatch[1])
-		hintHTML := normalizeHTMLFragment(hintMatch[2], state)
-		if hintHTML == "" {
-			continue
-		}
-		level.Hints = append(level.Hints, Hint{
-			Title:        titleText,
-			Text:         hintHTML,
-			DelaySeconds: parseHintDelay(titleText),
-		})
-	}
+	level.Hints = parseHints(block, state)
+	level.PenaltyHints = parsePenaltyHints(block, state)
 
 	sectorNames := map[int]string{}
-	for _, nameMatch := range sectorNameRe.FindAllStringSubmatch(block, -1) {
-		if len(nameMatch) < 3 {
-			continue
-		}
-		sectorIdx, err := strconv.Atoi(nameMatch[1])
+	for _, nameEl := range findElements(block, sectorNameOpenRe, "div") {
+		sectorIdx, err := strconv.Atoi(nameEl.groups[1])
 		if err != nil {
 			continue
 		}
-		if name := cleanInlineText(nameMatch[2]); name != "" {
+		// Sector names are stored verbatim; collapsing runs of spaces here
+		// would make the re-exported scenario differ from the source.
+		if name := inlineText(nameEl.inner); strings.TrimSpace(name) != "" {
 			sectorNames[sectorIdx] = name
 		}
 	}
 
 	answersBySector := map[int][]string{}
-	for _, answerMatch := range answerRe.FindAllStringSubmatch(block, -1) {
-		if len(answerMatch) < 3 {
-			continue
-		}
-		sectorIdx, err := strconv.Atoi(answerMatch[1])
+	for _, answerEl := range findElements(block, answerOpenRe, "span") {
+		sectorIdx, err := strconv.Atoi(answerEl.groups[1])
 		if err != nil {
 			continue
 		}
-		answer := cleanInlineText(answerMatch[2])
+		if !answerForRe.MatchString(block[answerEl.end:]) {
+			continue
+		}
+		answer := cleanInlineText(answerEl.inner)
 		if answer == "" {
 			continue
 		}
@@ -351,6 +493,86 @@ func parseLevelBlock(block string, state *assetRewriteState) (Level, bool) {
 	return level, true
 }
 
+// parseHints pairs each hint title with the hint body carrying the same
+// repeater index. Penalty hints live in a separate repeater and are excluded.
+func parseHints(block string, state *assetRewriteState) []Hint {
+	texts := elementsByIndex(block, hintTextOpenRe)
+	var hints []Hint
+	for _, titleEl := range findElements(block, hintTitleOpenRe, "span") {
+		textEl, ok := texts[titleEl.indexKey()]
+		if !ok || textEl.start < titleEl.end {
+			continue
+		}
+		titleText := cleanInlineText(titleEl.inner)
+		hintHTML := normalizeHTMLFragment(textEl.inner, state)
+		if hintHTML == "" {
+			continue
+		}
+		hints = append(hints, Hint{
+			Title:        titleText,
+			Text:         hintHTML,
+			DelaySeconds: parseHintDelay(titleText),
+		})
+	}
+	return hints
+}
+
+// parsePenaltyHints reads the LevelPenaltyHelpsRepeater block, which carries the
+// penalty time, the confirmation flag and the admin-side description in between
+// the hint title and the hint body.
+func parsePenaltyHints(block string, state *assetRewriteState) []PenaltyHint {
+	texts := elementsByIndex(block, penaltyTextOpenRe)
+	var hints []PenaltyHint
+	for _, titleEl := range findElements(block, penaltyTitleOpenRe, "span") {
+		textEl, ok := texts[titleEl.indexKey()]
+		// The body always follows its title; anything else means the title
+		// consumed the body (unclosed markup) and the pair is unusable.
+		if !ok || textEl.start < titleEl.end {
+			continue
+		}
+		titleText := cleanInlineText(titleEl.inner)
+		hint := PenaltyHint{
+			Title:        titleText,
+			Text:         normalizeHTMLFragment(textEl.inner, state),
+			DelaySeconds: parseHintDelay(titleText),
+		}
+		if body := block[titleEl.end:textEl.start]; body != "" {
+			if m := penaltyTimeRe.FindStringSubmatch(body); len(m) >= 2 {
+				hint.PenaltySeconds = ParseRuDuration(html.UnescapeString(m[1]))
+			}
+			if m := penaltyConfirmRe.FindStringSubmatch(body); len(m) >= 2 {
+				hint.RequestConfirm = strings.EqualFold(strings.TrimSpace(m[1]), "Да")
+			}
+			if els := findElements(body, penaltyCommentRe, "span"); len(els) > 0 {
+				hint.Comment = cleanInlineText(els[0].inner)
+			}
+		}
+		if hint.Text == "" && hint.Comment == "" {
+			continue
+		}
+		hints = append(hints, hint)
+	}
+	return hints
+}
+
+// elementsByIndex maps the outer and inner repeater indices of openRe to the
+// matched element. Both indices are part of the key: a block delimited by level
+// anchors can still contain more than one outer index, and keying on the inner
+// one alone would pair a title with another level's body.
+func elementsByIndex(block string, openRe *regexp.Regexp) map[string]element {
+	out := map[string]element{}
+	for _, el := range findElements(block, openRe, "span") {
+		key := el.indexKey()
+		if key == "" {
+			continue
+		}
+		if _, seen := out[key]; !seen {
+			out[key] = el
+		}
+	}
+	return out
+}
+
 func parseAutopassParts(text string) (autopassSecond, penaltySecond int) {
 	text = strings.TrimSpace(html.UnescapeString(text))
 	parts := strings.SplitN(text, ",", 2)
@@ -364,21 +586,19 @@ func parseAutopassParts(text string) (autopassSecond, penaltySecond int) {
 }
 
 func parseBonuses(block string, state *assetRewriteState) []Bonus {
-	headers := bonusHeaderRe.FindAllStringSubmatchIndex(block, -1)
+	headers := findElements(block, bonusHeaderOpenRe, "span")
 	if len(headers) == 0 {
 		return nil
 	}
 	bonuses := make([]Bonus, 0, len(headers))
-	for i, loc := range headers {
-		titleHTML := block[loc[2]:loc[3]]
-		bodyStart := loc[1]
+	for i, header := range headers {
 		bodyEnd := len(block)
 		if i+1 < len(headers) {
-			bodyEnd = headers[i+1][0]
+			bodyEnd = headers[i+1].start
 		}
-		body := block[bodyStart:bodyEnd]
+		body := block[header.end:bodyEnd]
 
-		titleText := cleanInlineText(titleHTML)
+		titleText := cleanInlineText(header.inner)
 		num, name, ok := parseBonusTitle(titleText)
 		if !ok {
 			continue
@@ -429,32 +649,19 @@ func parseBonusTitle(titleText string) (int, string, bool) {
 }
 
 func extractBonusWhiteField(body, label string, state *assetRewriteState) string {
-	re := regexp.MustCompile(`(?is)<span\s+class="green">\s*` + regexp.QuoteMeta(label) + `\s*</span>\s*<br\s*/?>\s*<span\s+class="white"\s*>(.*?)</span>`)
-	m := re.FindStringSubmatch(body)
-	if len(m) < 2 {
+	re := regexp.MustCompile(`(?is)<span\s+class="green">\s*` + regexp.QuoteMeta(label) + `\s*</span>\s*<br\s*/?>\s*<span\s+class="white"\s*>`)
+	els := findElements(body, re, "span")
+	if len(els) == 0 {
 		return ""
 	}
-	return normalizeHTMLFragment(m[1], state)
+	return normalizeHTMLFragment(els[0].inner, state)
 }
 
 func parseBonusAnswers(body string) []string {
 	answers := make([]string, 0)
-	for _, open := range bonusAnswerOpenRe.FindAllStringIndex(body, -1) {
-		start := open[1]
-		pos := start
-		for pos < len(body) {
-			closeRel := strings.Index(body[pos:], "</span>")
-			if closeRel < 0 {
-				break
-			}
-			closeEnd := pos + closeRel + len("</span>")
-			if bonusAnswerTailRe.MatchString(body[closeEnd:]) {
-				if answer := cleanInlineText(body[start : pos+closeRel]); answer != "" {
-					answers = append(answers, answer)
-				}
-				break
-			}
-			pos = closeEnd
+	for _, el := range findElements(body, bonusAnswerOpenRe, "span") {
+		if answer := cleanInlineText(el.inner); answer != "" {
+			answers = append(answers, answer)
 		}
 	}
 	return answers
@@ -478,9 +685,13 @@ func normalizeBRAdjacentNewlines(fragment string) string {
 }
 
 func cleanInlineText(v string) string {
-	text := stripHTML(v)
-	text = html.UnescapeString(text)
-	return strings.Join(strings.Fields(strings.TrimSpace(text)), " ")
+	return strings.Join(strings.Fields(inlineText(v)), " ")
+}
+
+// inlineText strips markup and unescapes entities while keeping the original
+// spacing, so verbatim fields (sector names) survive a scenario round-trip.
+func inlineText(v string) string {
+	return html.UnescapeString(stripHTML(v))
 }
 
 func stripHTML(v string) string {

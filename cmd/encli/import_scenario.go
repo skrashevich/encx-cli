@@ -85,12 +85,14 @@ func cmdImportScenario(ctx context.Context, cfg *config, client *encx.Client, ar
 
 	totalTasks := 0
 	totalHints := 0
+	totalPenaltyHints := 0
 	totalBonuses := 0
 	totalSectors := 0
 	totalComments := 0
 	for _, lvl := range scenarioDoc.Levels {
 		totalTasks += len(lvl.Tasks)
 		totalHints += len(lvl.Hints)
+		totalPenaltyHints += len(lvl.PenaltyHints)
 		totalBonuses += len(lvl.Bonuses)
 		totalSectors += len(lvl.SectorAnswers)
 		if strings.TrimSpace(lvl.Comment) != "" {
@@ -110,6 +112,7 @@ func cmdImportScenario(ctx context.Context, cfg *config, client *encx.Client, ar
 				"levels":          len(scenarioDoc.Levels),
 				"tasks":           totalTasks,
 				"hints":           totalHints,
+				"penalty_hints":   totalPenaltyHints,
 				"bonuses":         totalBonuses,
 				"sectors":         totalSectors,
 				"comments":        totalComments,
@@ -123,7 +126,7 @@ func cmdImportScenario(ctx context.Context, cfg *config, client *encx.Client, ar
 		if opts.SyncMissing {
 			action = "sync"
 		}
-		fmt.Printf("Dry-run: would %s game %d with %d level(s), %d task(s), %d hint(s), %d bonus(es), %d sector(s), %d comment(s)\n", action, cfg.gameId, len(scenarioDoc.Levels), totalTasks, totalHints, totalBonuses, totalSectors, totalComments)
+		fmt.Printf("Dry-run: would %s game %d with %d level(s), %d task(s), %d hint(s), %d penalty hint(s), %d bonus(es), %d sector(s), %d comment(s)\n", action, cfg.gameId, len(scenarioDoc.Levels), totalTasks, totalHints, totalPenaltyHints, totalBonuses, totalSectors, totalComments)
 		fmt.Printf("Source: %s\n", scenarioDoc.SourcePath)
 		fmt.Printf("Embedded assets: %d\n", scenarioDoc.EmbeddedAssets)
 		if len(scenarioDoc.MissingAssets) > 0 {
@@ -244,23 +247,28 @@ func cmdImportScenario(ctx context.Context, cfg *config, client *encx.Client, ar
 		}
 
 		for _, hint := range lvl.Hints {
-			hintText := strings.TrimSpace(hint.Text)
-			if hintText == "" {
+			payload, ok := scenarioHintToAdminHint(hint)
+			if !ok {
 				continue
-			}
-			h, m, s := splitSeconds(hint.DelaySeconds)
-			payload := encx.AdminHint{
-				Text:      hintText,
-				ReplaceNl: !strings.Contains(hintText, "<"),
-				Hours:     h,
-				Minutes:   m,
-				Seconds:   s,
 			}
 			err := runWithAntiSpamRetry(fmt.Sprintf("create hint on level %d", levelNum), func() error {
 				return client.AdminCreateHint(ctx, cfg.gameId, levelNum, payload)
 			})
 			if err != nil {
 				fatal("Failed to create hint on level %d: %v", levelNum, err)
+			}
+		}
+
+		for _, hint := range lvl.PenaltyHints {
+			payload, ok := scenarioPenaltyHintToAdminHint(hint)
+			if !ok {
+				continue
+			}
+			err := runWithAntiSpamRetry(fmt.Sprintf("create penalty hint on level %d", levelNum), func() error {
+				return client.AdminCreateHint(ctx, cfg.gameId, levelNum, payload)
+			})
+			if err != nil {
+				fatal("Failed to create penalty hint on level %d: %v", levelNum, err)
 			}
 		}
 
@@ -311,6 +319,7 @@ func cmdImportScenario(ctx context.Context, cfg *config, client *encx.Client, ar
 			"levels":          len(scenarioDoc.Levels),
 			"tasks":           totalTasks,
 			"hints":           totalHints,
+			"penalty_hints":   totalPenaltyHints,
 			"bonuses":         totalBonuses,
 			"sectors":         totalSectors,
 			"comments":        totalComments,
@@ -320,7 +329,7 @@ func cmdImportScenario(ctx context.Context, cfg *config, client *encx.Client, ar
 		return
 	}
 
-	fmt.Printf("Scenario imported: %d levels, %d tasks, %d hints, %d bonuses, %d sectors, %d comments\n", len(scenarioDoc.Levels), totalTasks, totalHints, totalBonuses, totalSectors, totalComments)
+	fmt.Printf("Scenario imported: %d levels, %d tasks, %d hints, %d penalty hints, %d bonuses, %d sectors, %d comments\n", len(scenarioDoc.Levels), totalTasks, totalHints, totalPenaltyHints, totalBonuses, totalSectors, totalComments)
 }
 
 func importScenarioNeedsAdmin(cfg *config, args []string) bool {
@@ -458,6 +467,18 @@ func hintDelayTextKey(delaySec int, text string) string {
 	return fmt.Sprintf("%d|%s", delaySec, scenario.NormalizeComparableText(text))
 }
 
+func penaltyHintKey(delaySec, penaltySec int, confirm bool, comment, text string) string {
+	return fmt.Sprintf("p:%d:%d:%t:%s|%s", delaySec, penaltySec, confirm,
+		scenario.NormalizeComparableText(comment), scenario.NormalizeComparableText(text))
+}
+
+// namesEquivalent compares level and sector names the way the engine may store
+// them: case-insensitively and with runs of whitespace collapsed. Names are
+// still written verbatim, so a scenario round-trip keeps the original spacing.
+func namesEquivalent(a, b string) bool {
+	return strings.EqualFold(strings.Join(strings.Fields(a), " "), strings.Join(strings.Fields(b), " "))
+}
+
 func scenarioHintKeys(src scenario.Level) []string {
 	var out []string
 	for _, h := range src.Hints {
@@ -467,7 +488,51 @@ func scenarioHintKeys(src scenario.Level) []string {
 		}
 		out = append(out, hintDelayTextKey(h.DelaySeconds, text))
 	}
+	for _, h := range src.PenaltyHints {
+		text := strings.TrimSpace(h.Text)
+		if text == "" {
+			continue
+		}
+		out = append(out, penaltyHintKey(h.DelaySeconds, h.PenaltySeconds, h.RequestConfirm, h.Comment, text))
+	}
 	return out
+}
+
+func scenarioHintToAdminHint(src scenario.Hint) (encx.AdminHint, bool) {
+	text := strings.TrimSpace(src.Text)
+	if text == "" {
+		return encx.AdminHint{}, false
+	}
+	h, m, s := splitSeconds(src.DelaySeconds)
+	return encx.AdminHint{
+		Text:      text,
+		ReplaceNl: !strings.Contains(text, "<"),
+		Hours:     h,
+		Minutes:   m,
+		Seconds:   s,
+	}, true
+}
+
+func scenarioPenaltyHintToAdminHint(src scenario.PenaltyHint) (encx.AdminHint, bool) {
+	text := strings.TrimSpace(src.Text)
+	if text == "" {
+		return encx.AdminHint{}, false
+	}
+	h, m, s := splitSeconds(src.DelaySeconds)
+	ph, pm, ps := splitSeconds(src.PenaltySeconds)
+	return encx.AdminHint{
+		Text:           text,
+		ReplaceNl:      !strings.Contains(text, "<"),
+		Hours:          h,
+		Minutes:        m,
+		Seconds:        s,
+		IsPenalty:      true,
+		PenaltyHours:   ph,
+		PenaltyMinutes: pm,
+		PenaltySeconds: ps,
+		PenaltyComment: strings.TrimSpace(src.Comment),
+		RequestConfirm: src.RequestConfirm,
+	}, true
 }
 
 func scenarioBonusToAdminBonus(src scenario.Bonus, levelID int) (encx.AdminBonus, bool) {
@@ -600,8 +665,10 @@ func scenarioAdminSectors(src scenario.Level) []encx.AdminSector {
 			if len(answers) == 0 {
 				continue
 			}
-			name := strings.TrimSpace(sector.Name)
-			if name == "" {
+			// Kept verbatim: the engine stores sector names as typed, so
+			// trimming here would break scenario round-trip fidelity.
+			name := sector.Name
+			if strings.TrimSpace(name) == "" {
 				name = fmt.Sprintf("Сектор %d", i+1)
 			}
 			out = append(out, encx.AdminSector{Name: name, Answers: answers})
@@ -678,7 +745,7 @@ func sectorGroupsMatch(src scenario.Level, gameSectors []encx.AdminSector) bool 
 		return false
 	}
 	for i, expected := range want {
-		if !strings.EqualFold(strings.TrimSpace(expected.Name), strings.TrimSpace(gameSectors[i].Name)) {
+		if !namesEquivalent(expected.Name, gameSectors[i].Name) {
 			return false
 		}
 		if !answerSetsEqual(expected.Answers, gameSectors[i].Answers) {
@@ -788,6 +855,11 @@ func syncLevelHintsToScenario(ctx context.Context, client *encx.Client, gameID, 
 			if text == "" {
 				continue
 			}
+			if hint.IsPenalty {
+				penaltySec := hint.PenaltyHours*3600 + hint.PenaltyMinutes*60 + hint.PenaltySeconds
+				existing = append(existing, penaltyHintKey(sec, penaltySec, hint.RequestConfirm, hint.PenaltyComment, text))
+				continue
+			}
 			existing = append(existing, hintDelayTextKey(sec, text))
 		}
 		if taskNormsMatch(existing, want) {
@@ -805,13 +877,24 @@ func syncLevelHintsToScenario(ctx context.Context, client *encx.Client, gameID, 
 		stats.HintsDeleted++
 	}
 	for _, srcHint := range src.Hints {
-		text := strings.TrimSpace(srcHint.Text)
-		if text == "" {
+		payload, ok := scenarioHintToAdminHint(srcHint)
+		if !ok {
 			continue
 		}
-		h, m, s := splitSeconds(srcHint.DelaySeconds)
-		payload := encx.AdminHint{Text: text, ReplaceNl: !strings.Contains(text, "<"), Hours: h, Minutes: m, Seconds: s}
 		err := runWithAntiSpamRetry(fmt.Sprintf("create hint on level %d", levelNum), func() error {
+			return client.AdminCreateHint(ctx, gameID, levelNum, payload)
+		})
+		if err != nil {
+			return err
+		}
+		stats.HintsCreated++
+	}
+	for _, srcHint := range src.PenaltyHints {
+		payload, ok := scenarioPenaltyHintToAdminHint(srcHint)
+		if !ok {
+			continue
+		}
+		err := runWithAntiSpamRetry(fmt.Sprintf("create penalty hint on level %d", levelNum), func() error {
 			return client.AdminCreateHint(ctx, gameID, levelNum, payload)
 		})
 		if err != nil {
@@ -1007,7 +1090,7 @@ func findCreatedSector(ctx context.Context, client *encx.Client, gameID, levelNu
 		if _, existed := beforeIDs[sec.ID]; existed {
 			continue
 		}
-		if strings.TrimSpace(sec.Name) == strings.TrimSpace(name) {
+		if namesEquivalent(sec.Name, name) {
 			return sec, nil
 		}
 	}
@@ -1174,7 +1257,10 @@ func syncMissingScenario(ctx context.Context, cfg *config, client *encx.Client, 
 			return stats, err
 		}
 		targetComment := strings.TrimSpace(src.Comment)
-		if strings.TrimSpace(curName) != levelName || strings.TrimSpace(curComment) != targetComment {
+		// Names are written verbatim but compared loosely: the engine may
+		// normalise whitespace on save, and an asymmetric comparison would
+		// rewrite the same name on every sync run.
+		if !namesEquivalent(curName, levelName) || strings.TrimSpace(curComment) != targetComment {
 			err := runWithAntiSpamRetry(fmt.Sprintf("update level %d name", levelNum), func() error {
 				return client.AdminUpdateComment(ctx, cfg.gameId, levelNum, levelName, targetComment)
 			})
@@ -1258,8 +1344,10 @@ func syncMissingScenario(ctx context.Context, cfg *config, client *encx.Client, 
 }
 
 func importLevelName(levelNum int, name string) string {
-	if levelName := strings.TrimSpace(name); levelName != "" {
-		return levelName
+	// The name is sent verbatim so that a re-exported scenario matches the
+	// source file byte for byte, including trailing spaces.
+	if strings.TrimSpace(name) != "" {
+		return name
 	}
 	return fmt.Sprintf("Уровень %d", levelNum)
 }
@@ -1280,6 +1368,13 @@ func redactScenarioBinaryPayloads(levels []scenario.Level) []scenario.Level {
 			for j, hint := range level.Hints {
 				out[i].Hints[j] = hint
 				out[i].Hints[j].Text = redactBinaryPayloads(hint.Text)
+			}
+		}
+		if len(level.PenaltyHints) > 0 {
+			out[i].PenaltyHints = make([]scenario.PenaltyHint, len(level.PenaltyHints))
+			for j, hint := range level.PenaltyHints {
+				out[i].PenaltyHints[j] = hint
+				out[i].PenaltyHints[j].Text = redactBinaryPayloads(hint.Text)
 			}
 		}
 		if len(level.Bonuses) > 0 {
@@ -1331,6 +1426,19 @@ func printDryRunLevel(level scenario.Level) {
 				fmt.Printf("  [Hint %d] %s (delay %02d:%02d:%02d)\n", i+1, hint.Title, h, m, s)
 			} else {
 				fmt.Printf("  [Hint %d] (delay %02d:%02d:%02d)\n", i+1, h, m, s)
+			}
+			fmt.Println(indentBlock(hint.Text, "    "))
+		}
+	}
+	if len(level.PenaltyHints) > 0 {
+		fmt.Printf("Penalty hints (%d):\n", len(level.PenaltyHints))
+		for i, hint := range level.PenaltyHints {
+			h, m, s := splitSeconds(hint.DelaySeconds)
+			ph, pm, ps := splitSeconds(hint.PenaltySeconds)
+			fmt.Printf("  [Penalty hint %d] %s (delay %02d:%02d:%02d, penalty %02d:%02d:%02d, confirm %t)\n",
+				i+1, hint.Title, h, m, s, ph, pm, ps, hint.RequestConfirm)
+			if strings.TrimSpace(hint.Comment) != "" {
+				fmt.Printf("    Description: %s\n", hint.Comment)
 			}
 			fmt.Println(indentBlock(hint.Text, "    "))
 		}
