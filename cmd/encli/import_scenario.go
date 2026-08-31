@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"net"
 	"os"
 	"regexp"
@@ -211,6 +212,7 @@ func cmdImportScenario(ctx context.Context, cfg *config, client *encx.Client, ar
 	for idx, lvl := range scenarioDoc.Levels {
 		levelNum := idx + 1
 		levelName := importLevelName(levelNum, lvl.Name)
+		sectorCreator := newScenarioSectorCreator(client, cfg.gameId, levelNum)
 
 		err := runWithAntiSpamRetry(fmt.Sprintf("set name for level %d", levelNum), func() error {
 			return client.AdminUpdateComment(ctx, cfg.gameId, levelNum, levelName, strings.TrimSpace(lvl.Comment))
@@ -295,8 +297,13 @@ func cmdImportScenario(ctx context.Context, cfg *config, client *encx.Client, ar
 			if len(sector.Answers) == 0 {
 				continue
 			}
-			if err := createScenarioSector(ctx, client, cfg.gameId, levelNum, sector); err != nil {
+			if err := sectorCreator.create(ctx, sector); err != nil {
 				fatal("Failed to create sector on level %d: %v", levelNum, err)
+			}
+		}
+		if sectorCreator.needsVerification() {
+			if err := sectorCreator.verifyLevel(ctx, lvl); err != nil {
+				fatal("Failed to verify sectors on level %d: %v", levelNum, err)
 			}
 		}
 		if lvl.RequiredSectorsCount > 0 {
@@ -363,6 +370,9 @@ func isTransientImportError(err error) bool {
 	if errors.Is(err, context.DeadlineExceeded) || os.IsTimeout(err) {
 		return true
 	}
+	if errors.Is(err, io.EOF) || errors.Is(err, io.ErrUnexpectedEOF) {
+		return true
+	}
 	var netErr net.Error
 	if errors.As(err, &netErr) && netErr.Timeout() {
 		return true
@@ -370,7 +380,9 @@ func isTransientImportError(err error) bool {
 	msg := strings.ToLower(err.Error())
 	return strings.Contains(msg, "client.timeout exceeded") ||
 		strings.Contains(msg, "timeout exceeded") ||
-		strings.Contains(msg, "context deadline exceeded")
+		strings.Contains(msg, "context deadline exceeded") ||
+		strings.Contains(msg, "connection reset") ||
+		strings.Contains(msg, "broken pipe")
 }
 
 func parseImportScenarioArgs(args []string) (importScenarioOptions, error) {
@@ -984,107 +996,144 @@ func syncLevelSectorsToScenario(ctx context.Context, client *encx.Client, gameID
 	}
 	stats.SectorsDeleted += len(sectors)
 
+	sectorCreator := newScenarioSectorCreator(client, gameID, levelNum)
 	for i, sector := range wantSectors {
-		if err := createScenarioSector(ctx, client, gameID, levelNum, sector); err != nil {
+		if err := sectorCreator.create(ctx, sector); err != nil {
 			return fmt.Errorf("level %d: create sector %d: %w", levelNum, i+1, err)
 		}
 		stats.SectorsCreated++
 	}
 
-	err = runWithAntiSpamRetry(fmt.Sprintf("read level %d sectors", levelNum), func() error {
-		var callErr error
-		sectors, callErr = client.AdminGetSectorAnswers(ctx, gameID, levelNum)
-		return callErr
-	})
-	if err != nil {
-		return err
-	}
-	if !sectorGroupsMatch(src, sectors) {
-		return fmt.Errorf("level %d: sectors still differ after sync: %s",
-			levelNum, formatAdminSectorsSummary(gameSectorsWithAnswers(sectors)))
+	if err := sectorCreator.verifyLevel(ctx, src); err != nil {
+		return fmt.Errorf("level %d: sectors still differ after sync: %w", levelNum, err)
 	}
 	return nil
 }
 
-func createScenarioSector(ctx context.Context, client *encx.Client, gameID, levelNum int, sector encx.AdminSector) error {
-	if len(sector.Answers) <= 1 {
-		return runWithAntiSpamRetry(fmt.Sprintf("create sector on level %d", levelNum), func() error {
-			return client.AdminCreateSector(ctx, gameID, levelNum, sector)
-		})
-	}
+type scenarioSectorCreator struct {
+	client             *encx.Client
+	gameID             int
+	levelNum           int
+	knownIDs           map[int]struct{}
+	refsInitialized    bool
+	multiAnswerCreated bool
+}
 
-	var before []encx.AdminSector
-	if err := runWithAntiSpamRetry(fmt.Sprintf("read level %d sectors before create", levelNum), func() error {
-		var callErr error
-		before, callErr = client.AdminGetSectorAnswers(ctx, gameID, levelNum)
-		return callErr
-	}); err != nil {
+func newScenarioSectorCreator(client *encx.Client, gameID, levelNum int) *scenarioSectorCreator {
+	return &scenarioSectorCreator{
+		client:   client,
+		gameID:   gameID,
+		levelNum: levelNum,
+		knownIDs: make(map[int]struct{}),
+	}
+}
+
+func (c *scenarioSectorCreator) create(ctx context.Context, sector encx.AdminSector) error {
+	if len(sector.Answers) <= 1 {
+		err := runWithAntiSpamRetry(fmt.Sprintf("create sector on level %d", c.levelNum), func() error {
+			return c.client.AdminCreateSector(ctx, c.gameID, c.levelNum, sector)
+		})
+		// The create response does not expose the new ID. If a later sector has
+		// multiple answers, refresh the lightweight ID list before creating it.
+		c.refsInitialized = false
 		return err
 	}
-	beforeIDs := make(map[int]struct{}, len(before))
-	for _, sec := range before {
-		if sec.ID > 0 {
-			beforeIDs[sec.ID] = struct{}{}
-		}
+
+	if err := c.ensureSectorRefs(ctx); err != nil {
+		return err
 	}
 
 	initial := sector
-	if len(initial.Answers) > 1 {
-		initial.Answers = initial.Answers[:1]
-	}
-	if err := runWithAntiSpamRetry(fmt.Sprintf("create sector on level %d", levelNum), func() error {
-		return client.AdminCreateSector(ctx, gameID, levelNum, initial)
+	initial.Answers = initial.Answers[:1]
+	if err := runWithAntiSpamRetry(fmt.Sprintf("create sector on level %d", c.levelNum), func() error {
+		return c.client.AdminCreateSector(ctx, c.gameID, c.levelNum, initial)
 	}); err != nil {
 		return err
 	}
 
-	created, err := findCreatedSector(ctx, client, gameID, levelNum, beforeIDs, sector.Name)
+	refs, err := c.readSectorRefs(ctx, "after create")
+	if err != nil {
+		return err
+	}
+	created, err := findCreatedSector(refs, c.knownIDs, sector.Name)
 	if err != nil {
 		return err
 	}
 	if created.ID <= 0 {
 		return fmt.Errorf("created sector %q has no ID", sector.Name)
 	}
-	if !answerSetsEqual(created.Answers, sector.Answers) {
-		remaining := remainingSectorAnswers(created.Answers, sector.Answers)
-		if len(remaining) == 0 {
-			return fmt.Errorf("sector %q answers differ after create: got %v, want %v", sector.Name, created.Answers, sector.Answers)
-		}
-		if err := runWithAntiSpamRetry(fmt.Sprintf("add %d answer(s) to sector %d on level %d", len(remaining), created.ID, levelNum), func() error {
-			return client.AdminAddSectorAnswers(ctx, gameID, levelNum, created.ID, remaining)
-		}); err != nil {
-			return err
+	for _, ref := range refs {
+		if ref.ID > 0 {
+			c.knownIDs[ref.ID] = struct{}{}
 		}
 	}
+	c.refsInitialized = true
+	c.multiAnswerCreated = true
 
-	var after []encx.AdminSector
-	if err := runWithAntiSpamRetry(fmt.Sprintf("read level %d sectors after update", levelNum), func() error {
+	remaining := remainingSectorAnswers(initial.Answers, sector.Answers)
+	if len(remaining) == 0 {
+		return fmt.Errorf("sector %q has no additional answers after its initial answer", sector.Name)
+	}
+	if err := runWithAntiSpamRetry(fmt.Sprintf("add %d answer(s) to sector %d on level %d", len(remaining), created.ID, c.levelNum), func() error {
+		return c.client.AdminAddSectorAnswers(ctx, c.gameID, c.levelNum, created.ID, remaining)
+	}); err != nil {
+		return err
+	}
+	return nil
+}
+
+func (c *scenarioSectorCreator) ensureSectorRefs(ctx context.Context) error {
+	if c.refsInitialized {
+		return nil
+	}
+	refs, err := c.readSectorRefs(ctx, "before create")
+	if err != nil {
+		return err
+	}
+	clear(c.knownIDs)
+	for _, sector := range refs {
+		if sector.ID > 0 {
+			c.knownIDs[sector.ID] = struct{}{}
+		}
+	}
+	c.refsInitialized = true
+	return nil
+}
+
+func (c *scenarioSectorCreator) readSectorRefs(ctx context.Context, phase string) ([]encx.AdminSector, error) {
+	var refs []encx.AdminSector
+	if err := runWithAntiSpamRetry(fmt.Sprintf("read level %d sector IDs %s", c.levelNum, phase), func() error {
 		var callErr error
-		after, callErr = client.AdminGetSectorAnswers(ctx, gameID, levelNum)
+		refs, callErr = c.client.AdminGetSectorRefs(ctx, c.gameID, c.levelNum)
+		return callErr
+	}); err != nil {
+		return nil, err
+	}
+	return refs, nil
+}
+
+func (c *scenarioSectorCreator) needsVerification() bool {
+	return c.multiAnswerCreated
+}
+
+func (c *scenarioSectorCreator) verifyLevel(ctx context.Context, src scenario.Level) error {
+	var sectors []encx.AdminSector
+	if err := runWithAntiSpamRetry(fmt.Sprintf("verify level %d sectors", c.levelNum), func() error {
+		var callErr error
+		sectors, callErr = c.client.AdminGetSectorAnswers(ctx, c.gameID, c.levelNum)
 		return callErr
 	}); err != nil {
 		return err
 	}
-	for _, sec := range after {
-		if sec.ID == created.ID {
-			if answerSetsEqual(sec.Answers, sector.Answers) {
-				return nil
-			}
-			return fmt.Errorf("sector %q answers differ after create: got %v, want %v", sector.Name, sec.Answers, sector.Answers)
-		}
+	if !sectorGroupsMatch(src, sectors) {
+		return fmt.Errorf("got %s, want %s",
+			formatAdminSectorsSummary(gameSectorsWithAnswers(sectors)),
+			formatAdminSectorsSummary(scenarioAdminSectors(src)))
 	}
-	return fmt.Errorf("created sector %q disappeared after update", sector.Name)
+	return nil
 }
 
-func findCreatedSector(ctx context.Context, client *encx.Client, gameID, levelNum int, beforeIDs map[int]struct{}, name string) (encx.AdminSector, error) {
-	var sectors []encx.AdminSector
-	if err := runWithAntiSpamRetry(fmt.Sprintf("read level %d sectors after create", levelNum), func() error {
-		var callErr error
-		sectors, callErr = client.AdminGetSectorAnswers(ctx, gameID, levelNum)
-		return callErr
-	}); err != nil {
-		return encx.AdminSector{}, err
-	}
+func findCreatedSector(sectors []encx.AdminSector, beforeIDs map[int]struct{}, name string) (encx.AdminSector, error) {
 	for i := len(sectors) - 1; i >= 0; i-- {
 		sec := sectors[i]
 		if _, existed := beforeIDs[sec.ID]; existed {

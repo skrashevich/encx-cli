@@ -512,23 +512,20 @@ func (c *Client) AdminGetMessage(ctx context.Context, gameId, levelNum, messageI
 	return msg, nil
 }
 
-// AdminGetSectorAnswers reads sector answers from the ALoader endpoint.
-func (c *Client) AdminGetSectorAnswers(ctx context.Context, gameId, levelNum int) ([]AdminSector, error) {
+// AdminGetSectorRefs reads only sector IDs and names from the ALoader endpoint.
+// Unlike AdminGetSectorAnswers, it does not fetch every sector's answers.
+func (c *Client) AdminGetSectorRefs(ctx context.Context, gameId, levelNum int) ([]AdminSector, error) {
 	u := fmt.Sprintf("%s/ALoader/LevelInfo.aspx?gid=%d&level=%d&object=3", c.baseURL(), gameId, levelNum)
 	body, err := c.doGet(ctx, u)
 	if err != nil {
-		return nil, fmt.Errorf("encx: admin get sectors: %w", err)
+		return nil, fmt.Errorf("encx: admin get sector refs: %w", err)
 	}
+	return parseAdminSectorRefs(body), nil
+}
 
-	// Parse sector options
+func parseAdminSectorRefs(body string) []AdminSector {
 	optRe := regexp.MustCompile(`(?i)<option\s+value="([^"]*)"[^>]*>([^<]*)</option>`)
 	opts := optRe.FindAllStringSubmatch(body, -1)
-
-	if len(opts) == 0 {
-		// No named sectors — try reading direct answers from object=2
-		return c.adminGetDirectAnswers(ctx, gameId, levelNum)
-	}
-
 	sectors := make([]AdminSector, 0, len(opts))
 	for _, opt := range opts {
 		sectorVal := strings.TrimSpace(opt[1])
@@ -540,7 +537,27 @@ func (c *Client) AdminGetSectorAnswers(ctx context.Context, gameId, levelNum int
 		if sectorID <= 0 {
 			continue
 		}
+		sectors = append(sectors, AdminSector{ID: sectorID, Name: sectorName})
+	}
+	return sectors
+}
 
+// AdminGetSectorAnswers reads sector answers from the ALoader endpoint.
+func (c *Client) AdminGetSectorAnswers(ctx context.Context, gameId, levelNum int) ([]AdminSector, error) {
+	u := fmt.Sprintf("%s/ALoader/LevelInfo.aspx?gid=%d&level=%d&object=3", c.baseURL(), gameId, levelNum)
+	body, err := c.doGet(ctx, u)
+	if err != nil {
+		return nil, fmt.Errorf("encx: admin get sectors: %w", err)
+	}
+
+	sectors := parseAdminSectorRefs(body)
+	if len(sectors) == 0 {
+		// No named sectors — try reading direct answers from object=2
+		return c.adminGetDirectAnswers(ctx, gameId, levelNum)
+	}
+
+	for i := range sectors {
+		sectorVal := strconv.Itoa(sectors[i].ID)
 		// Fetch answers for this sector
 		ansURL := fmt.Sprintf("%s/ALoader/LevelInfo.aspx?gid=%d&level=%d&object=3&sector=%s",
 			c.baseURL(), gameId, levelNum, sectorVal)
@@ -550,11 +567,7 @@ func (c *Client) AdminGetSectorAnswers(ctx context.Context, gameId, levelNum int
 		}
 
 		answers := parseAnswerInputs(ansBody)
-		sectors = append(sectors, AdminSector{
-			ID:      sectorID,
-			Name:    sectorName,
-			Answers: answers,
-		})
+		sectors[i].Answers = answers
 	}
 
 	return c.fillSectorAnswersFromListPage(ctx, gameId, levelNum, sectors)

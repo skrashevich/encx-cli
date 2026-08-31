@@ -2,6 +2,9 @@ package main
 
 import (
 	"context"
+	"errors"
+	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -392,7 +395,7 @@ func TestSyncLevelBonusesDiffsCurrentScenarioSnapshot(t *testing.T) {
 	}
 }
 
-func TestCreateScenarioSectorSingleAnswerUsesSingleCreate(t *testing.T) {
+func TestScenarioSectorCreatorSingleAnswerUsesSingleCreate(t *testing.T) {
 	var posts int
 	var gets int
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -419,15 +422,128 @@ func TestCreateScenarioSectorSingleAnswerUsesSingleCreate(t *testing.T) {
 	defer srv.Close()
 
 	client := encx.New(strings.TrimPrefix(srv.URL, "http://"), encx.WithHTTP(), encx.WithAdminDelay(0))
-	err := createScenarioSector(context.Background(), client, 1, 2, encx.AdminSector{
+	creator := newScenarioSectorCreator(client, 1, 2)
+	err := creator.create(context.Background(), encx.AdminSector{
 		Name:    "Сектор 1",
 		Answers: []string{"solo"},
 	})
 	if err != nil {
-		t.Fatalf("createScenarioSector: %v", err)
+		t.Fatalf("create sector: %v", err)
 	}
 	if posts != 1 || gets != 0 {
 		t.Fatalf("posts=%d gets=%d, want posts=1 gets=0", posts, gets)
+	}
+}
+
+func TestScenarioSectorCreatorUsesLinearReads(t *testing.T) {
+	type storedSector struct {
+		id      int
+		name    string
+		answers []string
+	}
+
+	var sectors []storedSector
+	listReads := 0
+	detailReads := 0
+	editReads := 0
+	posts := 0
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/ALoader/LevelInfo.aspx" && r.URL.Query().Get("sector") == "":
+			listReads++
+			var body strings.Builder
+			body.WriteString(`<select><option value="all">all</option>`)
+			for _, sector := range sectors {
+				fmt.Fprintf(&body, `<option value="%d">%s</option>`, sector.id, sector.name)
+			}
+			body.WriteString(`</select>`)
+			_, _ = w.Write([]byte(body.String()))
+
+		case r.Method == http.MethodGet && r.URL.Path == "/ALoader/LevelInfo.aspx":
+			detailReads++
+			sectorID := r.URL.Query().Get("sector")
+			for _, sector := range sectors {
+				if fmt.Sprint(sector.id) != sectorID {
+					continue
+				}
+				var body strings.Builder
+				for i, answer := range sector.answers {
+					fmt.Fprintf(&body, `<input name="txtAnswer_%d" value="%s">`, i, answer)
+				}
+				_, _ = w.Write([]byte(body.String()))
+				return
+			}
+			w.WriteHeader(http.StatusNotFound)
+
+		case r.Method == http.MethodGet && r.URL.Path == "/Administration/Games/LevelEditor.aspx":
+			editReads++
+			sectorID := r.URL.Query().Get("editanswers")
+			fmt.Fprintf(w, `<form><div id="divSectorsAddAnswersRows_%s"></div><input type="image" name="btnAddAnswers"></form>`, sectorID)
+
+		case r.Method == http.MethodPost && r.URL.Path == "/Administration/Games/LevelEditor.aspx":
+			posts++
+			if err := r.ParseForm(); err != nil {
+				t.Fatalf("ParseForm: %v", err)
+			}
+			if _, creating := r.Form["savesector"]; creating {
+				sectors = append(sectors, storedSector{
+					id:      100 + len(sectors) + 1,
+					name:    r.Form.Get("txtSectorName"),
+					answers: []string{r.Form.Get("txtAnswer_0")},
+				})
+				_, _ = w.Write([]byte("created"))
+				return
+			}
+			sectorID := r.Form.Get("ddlSector")
+			for i := range sectors {
+				if fmt.Sprint(sectors[i].id) == sectorID {
+					for answerIndex := 0; ; answerIndex++ {
+						key := fmt.Sprintf("txtAnswer_%d", answerIndex)
+						values, ok := r.Form[key]
+						if !ok {
+							break
+						}
+						if answer := strings.TrimSpace(values[0]); answer != "" {
+							sectors[i].answers = append(sectors[i].answers, answer)
+						}
+					}
+					_, _ = w.Write([]byte("updated"))
+					return
+				}
+			}
+			w.WriteHeader(http.StatusNotFound)
+
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer srv.Close()
+
+	client := encx.New(strings.TrimPrefix(srv.URL, "http://"), encx.WithHTTP(), encx.WithAdminDelay(0))
+	creator := newScenarioSectorCreator(client, 1, 2)
+	want := scenario.Level{Sectors: []scenario.Sector{
+		{Name: "Sector 1", Answers: []string{"one-a", "one-b"}},
+		{Name: "Sector 2", Answers: []string{"two-a", "two-b"}},
+		{Name: "Sector 3", Answers: []string{"three-a", "three-b"}},
+	}}
+	for _, sector := range scenarioAdminSectors(want) {
+		if err := creator.create(context.Background(), sector); err != nil {
+			t.Fatalf("create sector %q: %v", sector.Name, err)
+		}
+	}
+	if err := creator.verifyLevel(context.Background(), want); err != nil {
+		t.Fatalf("verifyLevel: %v", err)
+	}
+
+	if listReads != 5 {
+		t.Fatalf("list reads = %d, want 5 (initial + one per create + final verification)", listReads)
+	}
+	if detailReads != 3 {
+		t.Fatalf("detail reads = %d, want one per sector during final verification", detailReads)
+	}
+	if editReads != 3 || posts != 6 {
+		t.Fatalf("edit reads/posts = %d/%d, want 3/6", editReads, posts)
 	}
 }
 
@@ -470,6 +586,26 @@ func TestRunWithAntiSpamRetryTimeoutThenSuccess(t *testing.T) {
 	}
 	if calls != 2 {
 		t.Fatalf("expected 2 calls, got %d", calls)
+	}
+}
+
+func TestTransientImportErrorsIncludeDroppedConnections(t *testing.T) {
+	tests := []struct {
+		name string
+		err  error
+	}{
+		{name: "EOF", err: io.EOF},
+		{name: "wrapped EOF", err: fmt.Errorf("POST failed: %w", io.EOF)},
+		{name: "unexpected EOF", err: io.ErrUnexpectedEOF},
+		{name: "connection reset", err: errors.New("read: connection reset by peer")},
+		{name: "broken pipe", err: errors.New("write: broken pipe")},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			if !isTransientImportError(tc.err) {
+				t.Fatalf("isTransientImportError(%v) = false, want true", tc.err)
+			}
+		})
 	}
 }
 

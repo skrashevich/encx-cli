@@ -26,6 +26,24 @@ func TestParseSectorAnswerFields(t *testing.T) {
 	}
 }
 
+func TestParseAdminSectorRefsDoesNotRequireAnswerPages(t *testing.T) {
+	body := `<select>
+		<option value="all">Все сектора</option>
+		<option value="101">Сектор &amp; один</option>
+		<option value="102">Сектор два</option>
+	</select>`
+	refs := parseAdminSectorRefs(body)
+	if len(refs) != 2 {
+		t.Fatalf("refs = %+v, want 2 sectors", refs)
+	}
+	if refs[0].ID != 101 || refs[0].Name != "Сектор & один" || len(refs[0].Answers) != 0 {
+		t.Fatalf("unexpected first ref: %+v", refs[0])
+	}
+	if refs[1].ID != 102 || refs[1].Name != "Сектор два" || len(refs[1].Answers) != 0 {
+		t.Fatalf("unexpected second ref: %+v", refs[1])
+	}
+}
+
 func TestParseSectorDeleteIDs(t *testing.T) {
 	body := `<a href="/Administration/Games/LevelEditor.aspx?gid=1&level=2&swanswers=1&delsector=9">del</a>
 	<a href="LevelEditor.aspx?delsector=3&swanswers=1">x</a>
