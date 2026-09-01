@@ -186,7 +186,7 @@ func TestGameRequestsArePacedAcrossConcurrentCalls(t *testing.T) {
 	var mu sync.Mutex
 	var starts []time.Time
 
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	srv := httptest.NewTestServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/gameengines/encounter/play/42" {
 			http.NotFound(w, r)
 			return
@@ -197,7 +197,7 @@ func TestGameRequestsArePacedAcrossConcurrentCalls(t *testing.T) {
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte(`{"GameId":42}`))
 	}))
-	defer srv.Close()
+	srv.Start()
 
 	c := NewClientWithOptions(strings.TrimPrefix(srv.URL, "http://"), false, true, 5, "")
 	c.SetGameRequestMinIntervalMillis(100)

@@ -342,8 +342,8 @@ func newEngineAction(st *sessionState, levelIdx int, answer string, correct bool
 	action := &encx.EngineAction{
 		LevelNumber: levelNumber,
 		LevelAction: &encx.ActionResult{
-			Answer:          ptr(answer),
-			IsCorrectAnswer: ptr(correct),
+			Answer:          new(answer),
+			IsCorrectAnswer: new(correct),
 		},
 		BonusAction: &encx.ActionResult{
 			Answer:          nil,
@@ -360,8 +360,8 @@ func newEngineAction(st *sessionState, levelIdx int, answer string, correct bool
 		action.LevelNumber = 0
 		action.LevelAction = &encx.ActionResult{Answer: nil, IsCorrectAnswer: nil}
 		action.BonusAction = &encx.ActionResult{
-			Answer:          ptr(answer),
-			IsCorrectAnswer: ptr(correct),
+			Answer:          new(answer),
+			IsCorrectAnswer: new(correct),
 		}
 	}
 	return action

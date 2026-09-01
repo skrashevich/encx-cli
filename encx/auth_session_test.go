@@ -17,10 +17,10 @@ func TestGuardHTTPLoginRedirect(t *testing.T) {
 }
 
 func TestDoGetRejectsAdminLoginRedirect(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	srv := httptest.NewTestServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		http.Redirect(w, r, "/Login.aspx?return=%2fAdministration%2f", http.StatusFound)
 	}))
-	defer srv.Close()
+	srv.Start()
 
 	host := strings.TrimPrefix(srv.URL, "http://")
 	client := New(host, WithHTTP())
@@ -32,7 +32,7 @@ func TestDoGetRejectsAdminLoginRedirect(t *testing.T) {
 
 func TestLoginCompleteUsesLoginPage(t *testing.T) {
 	var formPosts int
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	srv := httptest.NewTestServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch {
 		case r.Method == http.MethodGet && r.URL.Path == "/Login.aspx" && r.URL.Query().Get("checkcookie") == "1":
 			http.Redirect(w, r, "/home/", http.StatusFound)
@@ -51,7 +51,7 @@ func TestLoginCompleteUsesLoginPage(t *testing.T) {
 			w.WriteHeader(http.StatusOK)
 		}
 	}))
-	defer srv.Close()
+	srv.Start()
 
 	host := strings.TrimPrefix(srv.URL, "http://")
 	client := New(host, WithHTTP())
@@ -64,10 +64,10 @@ func TestLoginCompleteUsesLoginPage(t *testing.T) {
 }
 
 func TestAdminGetLevelsRejectsGamesManagerRedirect(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	srv := httptest.NewTestServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		http.Redirect(w, r, "/Administration/GamesManager.aspx", http.StatusFound)
 	}))
-	defer srv.Close()
+	srv.Start()
 
 	client := New(strings.TrimPrefix(srv.URL, "http://"), WithHTTP())
 	_, err := client.AdminGetLevels(context.Background(), 82442)
@@ -77,12 +77,12 @@ func TestAdminGetLevelsRejectsGamesManagerRedirect(t *testing.T) {
 }
 
 func TestAdminGetLevelsAllowsRealEmptyLevelManager(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	srv := httptest.NewTestServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		_, _ = fmt.Fprintf(w, `<form action="LevelManager.aspx?levels=create">
 			<select name="ddlCreateLevelsNum"><option value="1">1</option></select>
 		</form>`)
 	}))
-	defer srv.Close()
+	srv.Start()
 
 	client := New(strings.TrimPrefix(srv.URL, "http://"), WithHTTP())
 	levels, err := client.AdminGetLevels(context.Background(), 82442)

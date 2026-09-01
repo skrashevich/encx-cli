@@ -44,7 +44,7 @@ func TestProfileLoginSkipsDashLink(t *testing.T) {
 }
 
 func TestGetProfileParsesBoldRank(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := httptest.NewTestServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/UserDetails.aspx" {
 			t.Fatalf("path = %q, want /UserDetails.aspx", r.URL.Path)
 		}
@@ -56,7 +56,7 @@ func TestGetProfileParsesBoldRank(t *testing.T) {
 			<a href="/Teams/TeamDetails.aspx?tid=200714">svk team</a>
 		`))
 	}))
-	defer server.Close()
+	server.Start()
 
 	client := newContractTestClient(server.URL)
 	profile, err := client.GetProfile(t.Context())

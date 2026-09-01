@@ -641,11 +641,11 @@ func parseBonusTitle(titleText string) (int, string, bool) {
 	if !strings.HasPrefix(rest, `"`) {
 		return num, "", true
 	}
-	end := strings.LastIndex(rest, `"`)
-	if end <= 0 {
+	quoted, _, ok := strings.CutLast(rest, `"`)
+	if !ok || quoted == "" {
 		return num, "", true
 	}
-	return num, strings.TrimSpace(rest[1:end]), true
+	return num, strings.TrimSpace(quoted[1:]), true
 }
 
 func extractBonusWhiteField(body, label string, state *assetRewriteState) string {

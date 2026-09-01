@@ -22,8 +22,8 @@ func TestWebApprovalFlow(t *testing.T) {
 		store:    store,
 		sse:      newSSEHub(),
 	}
-	srv := httptest.NewServer(hub.newMux())
-	t.Cleanup(srv.Close)
+	srv := httptest.NewTestServer(t, hub.newMux())
+	srv.Start()
 
 	res, err := http.Post(srv.URL+"/api/v1/chats", "application/json", stringsReader(`{"domain":"d","game_id":1}`))
 	if err != nil {

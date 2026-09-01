@@ -14,8 +14,8 @@ import (
 func newEngineClient(t *testing.T, handler http.HandlerFunc) *Client {
 	t.Helper()
 	t.Setenv(EngineEnvVar, "legacy")
-	srv := httptest.NewServer(handler)
-	t.Cleanup(srv.Close)
+	srv := httptest.NewTestServer(t, handler)
+	srv.Start()
 	host := strings.TrimPrefix(srv.URL, "http://")
 	return New(host, WithHTTP(), WithAdminDelay(0), WithAPIBaseURL(srv.URL), WithEngine(EngineNew))
 }

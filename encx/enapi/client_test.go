@@ -12,8 +12,8 @@ import (
 
 func newTestClient(t *testing.T, handler http.HandlerFunc, opts ...Option) *Client {
 	t.Helper()
-	srv := httptest.NewServer(handler)
-	t.Cleanup(srv.Close)
+	srv := httptest.NewTestServer(t, handler)
+	srv.Start()
 	return New(srv.Client(), srv.URL, "tech.en.cx", opts...)
 }
 

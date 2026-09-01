@@ -9,7 +9,7 @@ import (
 
 func TestAdminCreateHintSendsReplaceNlCheckboxWhenRequested(t *testing.T) {
 	var seen []string
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := httptest.NewTestServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
 			t.Fatalf("method = %q, want POST", r.Method)
 		}
@@ -22,7 +22,7 @@ func TestAdminCreateHintSendsReplaceNlCheckboxWhenRequested(t *testing.T) {
 		seen = append(seen, r.Form.Get("chkReplaceNlToBr"))
 		_, _ = w.Write([]byte("ok"))
 	}))
-	defer server.Close()
+	server.Start()
 
 	client := New(strings.TrimPrefix(server.URL, "http://"), WithHTTP(), WithAdminDelay(0))
 	err := client.AdminCreateHint(t.Context(), 1, 2, AdminHint{

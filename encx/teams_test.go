@@ -54,7 +54,7 @@ func TestParseTeamInvitations(t *testing.T) {
 func TestInviteTeamMemberPostsViewStateAndImageButton(t *testing.T) {
 	var got string
 	invited := false
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := httptest.NewTestServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.Method {
 		case http.MethodGet:
 			if invited {
@@ -83,7 +83,7 @@ func TestInviteTeamMemberPostsViewStateAndImageButton(t *testing.T) {
 			t.Fatalf("method = %s", r.Method)
 		}
 	}))
-	defer server.Close()
+	server.Start()
 
 	client := newContractTestClient(server.URL)
 	if err := client.InviteTeamMember(t.Context(), 200714, "demo_user"); err != nil {
@@ -98,7 +98,7 @@ func TestInviteTeamMemberPostsViewStateAndImageButton(t *testing.T) {
 
 func TestRequestTeamMembershipPostsTeamName(t *testing.T) {
 	var got string
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := httptest.NewTestServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
 			t.Fatalf("method = %s", r.Method)
 		}
@@ -111,7 +111,7 @@ func TestRequestTeamMembershipPostsTeamName(t *testing.T) {
 		got = r.Form.Encode()
 		_, _ = w.Write([]byte("ok"))
 	}))
-	defer server.Close()
+	server.Start()
 
 	client := newContractTestClient(server.URL)
 	if err := client.RequestTeamMembership(t.Context(), "svk team"); err != nil {
@@ -125,7 +125,7 @@ func TestRequestTeamMembershipPostsTeamName(t *testing.T) {
 }
 
 func TestAcceptTeamInvitationFailsWhenStateDoesNotChange(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := httptest.NewTestServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/Teams/TeamDetails.aspx" {
 			t.Fatalf("path = %s", r.URL.Path)
 		}
@@ -140,7 +140,7 @@ func TestAcceptTeamInvitationFailsWhenStateDoesNotChange(t *testing.T) {
 			<a href="/Teams/TeamDetails.aspx?action=accept_invitation&tid=2">Вступить</a>
 		`))
 	}))
-	defer server.Close()
+	server.Start()
 
 	client := newContractTestClient(server.URL)
 	err := client.AcceptTeamInvitation(t.Context(), 2)
@@ -154,7 +154,7 @@ func TestAcceptTeamInvitationFailsWhenStateDoesNotChange(t *testing.T) {
 
 func TestAcceptTeamInvitationSucceedsWhenCurrentTeamChanges(t *testing.T) {
 	accepted := false
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := httptest.NewTestServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/Teams/TeamDetails.aspx" {
 			t.Fatalf("path = %s", r.URL.Path)
 		}
@@ -174,7 +174,7 @@ func TestAcceptTeamInvitationSucceedsWhenCurrentTeamChanges(t *testing.T) {
 			<a href="/Teams/TeamDetails.aspx?action=accept_invitation&tid=2">Вступить</a>
 		`))
 	}))
-	defer server.Close()
+	server.Start()
 
 	client := newContractTestClient(server.URL)
 	if err := client.AcceptTeamInvitation(t.Context(), 2); err != nil {

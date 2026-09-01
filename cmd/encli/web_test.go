@@ -24,15 +24,15 @@ func TestWebChatCRUD(t *testing.T) {
 		registry: reg,
 		store:    store,
 		sse:      newSSEHub(),
-		runTurn:  func(ctx context.Context, h *webHub, chatID string) {
+		runTurn: func(ctx context.Context, h *webHub, chatID string) {
 			select {
 			case <-time.After(20 * time.Millisecond):
 			case <-ctx.Done():
 			}
 		},
 	}
-	srv := httptest.NewServer(hub.newMux())
-	t.Cleanup(srv.Close)
+	srv := httptest.NewTestServer(t, hub.newMux())
+	srv.Start()
 
 	// create
 	body := `{"domain":"tech.en.cx","game_id":7}`
@@ -133,8 +133,8 @@ func TestWebAuthStatus(t *testing.T) {
 	cfg := &config{}
 	reg := NewAuthRegistry()
 	hub := &webHub{cfg: cfg, registry: reg, store: NewChatStore(), sse: newSSEHub()}
-	srv := httptest.NewServer(hub.newMux())
-	t.Cleanup(srv.Close)
+	srv := httptest.NewTestServer(t, hub.newMux())
+	srv.Start()
 
 	res, err := http.Get(srv.URL + "/api/v1/auth/status")
 	if err != nil {
@@ -229,8 +229,8 @@ func TestWebPostMessageAndConflict(t *testing.T) {
 		sse:      newSSEHub(),
 		runTurn:  customTurn,
 	}
-	srv := httptest.NewServer(hub.newMux())
-	t.Cleanup(srv.Close)
+	srv := httptest.NewTestServer(t, hub.newMux())
+	srv.Start()
 
 	res, err := http.Post(srv.URL+"/api/v1/chats", "application/json", stringsReader(`{"domain":"d","game_id":1}`))
 	if err != nil {
@@ -293,8 +293,8 @@ func TestWebPostMessageAndConflict(t *testing.T) {
 func TestWebCatalogDomainsEmpty(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 	hub := &webHub{cfg: &config{}, registry: NewAuthRegistry(), store: NewChatStore(), sse: newSSEHub()}
-	srv := httptest.NewServer(hub.newMux())
-	t.Cleanup(srv.Close)
+	srv := httptest.NewTestServer(t, hub.newMux())
+	srv.Start()
 
 	res, err := http.Get(srv.URL + "/api/v1/catalog/domains")
 	if err != nil {
@@ -314,8 +314,8 @@ func TestWebCatalogDomainsEmpty(t *testing.T) {
 
 func TestWebStaticRoot(t *testing.T) {
 	hub := &webHub{cfg: &config{}, registry: NewAuthRegistry(), store: NewChatStore(), sse: newSSEHub()}
-	srv := httptest.NewServer(hub.newMux())
-	t.Cleanup(srv.Close)
+	srv := httptest.NewTestServer(t, hub.newMux())
+	srv.Start()
 
 	res, err := http.Get(srv.URL + "/")
 	if err != nil {
@@ -335,8 +335,8 @@ func TestWebAgentConfig(t *testing.T) {
 	t.Setenv("LLM_MODEL", "test/model-xyz")
 	t.Setenv("LLM_API_KEY", "sk-test")
 	hub := &webHub{cfg: &config{}, registry: NewAuthRegistry(), store: NewChatStore(), sse: newSSEHub()}
-	srv := httptest.NewServer(hub.newMux())
-	t.Cleanup(srv.Close)
+	srv := httptest.NewTestServer(t, hub.newMux())
+	srv.Start()
 
 	res, err := http.Get(srv.URL + "/api/v1/agent/config")
 	if err != nil {

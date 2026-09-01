@@ -15,7 +15,7 @@ func newContractTestClient(serverURL string) *Client {
 }
 
 func TestLoginUsesDocumentedFormParameters(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := httptest.NewTestServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
 			t.Fatalf("method = %q, want POST", r.Method)
 		}
@@ -43,7 +43,7 @@ func TestLoginUsesDocumentedFormParameters(t *testing.T) {
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte(`{"Error":0}`))
 	}))
-	defer server.Close()
+	server.Start()
 
 	client := newContractTestClient(server.URL)
 	resp, err := client.Login(t.Context(), "player", "secret", LoginOptions{Network: 2, MagicNumbers: "1234"})
@@ -56,7 +56,7 @@ func TestLoginUsesDocumentedFormParameters(t *testing.T) {
 }
 
 func TestGetGameModelUsesDocumentedGET(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := httptest.NewTestServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet {
 			t.Fatalf("method = %q, want GET", r.Method)
 		}
@@ -69,7 +69,7 @@ func TestGetGameModelUsesDocumentedGET(t *testing.T) {
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte(`{"Event":0,"GameId":2020}`))
 	}))
-	defer server.Close()
+	server.Start()
 
 	client := newContractTestClient(server.URL)
 	model, err := client.GetGameModel(t.Context(), 2020)
@@ -82,7 +82,7 @@ func TestGetGameModelUsesDocumentedGET(t *testing.T) {
 }
 
 func TestGetGameModelLevelAddsLevelQuery(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := httptest.NewTestServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet {
 			t.Fatalf("method = %q, want GET", r.Method)
 		}
@@ -92,7 +92,7 @@ func TestGetGameModelLevelAddsLevelQuery(t *testing.T) {
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte(`{"Event":0,"GameId":2020}`))
 	}))
-	defer server.Close()
+	server.Start()
 
 	client := newContractTestClient(server.URL)
 	if _, err := client.GetGameModelLevel(t.Context(), 2020, 3); err != nil {
@@ -101,7 +101,7 @@ func TestGetGameModelLevelAddsLevelQuery(t *testing.T) {
 }
 
 func TestGetGameModelLevelOmitsNonPositiveLevelQuery(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := httptest.NewTestServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet {
 			t.Fatalf("method = %q, want GET", r.Method)
 		}
@@ -111,7 +111,7 @@ func TestGetGameModelLevelOmitsNonPositiveLevelQuery(t *testing.T) {
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte(`{"Event":0,"GameId":2020}`))
 	}))
-	defer server.Close()
+	server.Start()
 
 	client := newContractTestClient(server.URL)
 	if _, err := client.GetGameModelLevel(t.Context(), 2020, 0); err != nil {
@@ -121,7 +121,7 @@ func TestGetGameModelLevelOmitsNonPositiveLevelQuery(t *testing.T) {
 
 func TestGetGameModelRetainsLegacyPostAndNoFormGet(t *testing.T) {
 	var methods []string
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := httptest.NewTestServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		methods = append(methods, r.Method)
 		if r.Method == http.MethodPost {
 			if err := r.ParseForm(); err != nil {
@@ -134,7 +134,7 @@ func TestGetGameModelRetainsLegacyPostAndNoFormGet(t *testing.T) {
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte(`{"Event":0,"GameId":2020}`))
 	}))
-	defer server.Close()
+	server.Start()
 
 	client := newContractTestClient(server.URL)
 	if _, err := client.GetGameModel(t.Context(), 2020, url.Values{"LegacyAction": {"1"}}); err != nil {
@@ -150,7 +150,7 @@ func TestGetGameModelRetainsLegacyPostAndNoFormGet(t *testing.T) {
 
 func TestSendCodeAndBonusUseExactDocumentedForms(t *testing.T) {
 	var seen []url.Values
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := httptest.NewTestServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
 			t.Fatalf("method = %q, want POST", r.Method)
 		}
@@ -161,7 +161,7 @@ func TestSendCodeAndBonusUseExactDocumentedForms(t *testing.T) {
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte(`{"Event":0,"GameId":2020}`))
 	}))
-	defer server.Close()
+	server.Start()
 
 	client := newContractTestClient(server.URL)
 	if _, err := client.SendCode(t.Context(), 2020, 1356, 2, "level-code"); err != nil {
@@ -193,11 +193,11 @@ func TestSendCodeAndBonusUseExactDocumentedForms(t *testing.T) {
 }
 
 func TestSendCodeReportsAntiBotRedirect(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := httptest.NewTestServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Location", "/NotHumanRequest.aspx?return=redacted")
 		w.WriteHeader(http.StatusFound)
 	}))
-	defer server.Close()
+	server.Start()
 
 	client := newContractTestClient(server.URL)
 	_, err := client.SendCode(t.Context(), 2020, 1356, 2, "level-code")

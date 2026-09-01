@@ -77,8 +77,8 @@ func fetchLLMPricing(ctx context.Context, baseURL, apiKey, model string) *llmPri
 
 	// Strip :free, :extended etc. suffixes for matching.
 	baseModel := model
-	if idx := strings.LastIndex(model, ":"); idx > 0 {
-		baseModel = model[:idx]
+	if before, _, ok := strings.CutLast(model, ":"); ok && before != "" {
+		baseModel = before
 	}
 
 	for _, m := range result.Data {

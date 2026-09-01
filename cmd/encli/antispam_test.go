@@ -31,7 +31,7 @@ func TestAntiSpamCredentials(t *testing.T) {
 }
 
 func TestHandleAntiSpamDoesNotReportAutoSignInWhenCredentialsMissing(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	srv := httptest.NewTestServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case "/NotHumanRequest.aspx":
 			_, _ = w.Write([]byte(`<html><a href="/Login.aspx?return=/ALoader/LevelInfo.aspx?gid=82443&level=10&object=3&sector=3496478">Войти</a></html>`))
@@ -39,7 +39,7 @@ func TestHandleAntiSpamDoesNotReportAutoSignInWhenCredentialsMissing(t *testing.
 			w.WriteHeader(http.StatusNotFound)
 		}
 	}))
-	defer srv.Close()
+	srv.Start()
 
 	host := srv.Listener.Addr().String()
 	client := encx.New(host, encx.WithHTTP())

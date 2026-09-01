@@ -11,14 +11,14 @@ import (
 
 func TestLoginForAntiSpamRecoveryDoesNotRecurseHandler(t *testing.T) {
 	var handlerCalls atomic.Int32
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	srv := httptest.NewTestServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/login/signin" {
 			http.Redirect(w, r, "/NotHumanRequest.aspx?return=%2f", http.StatusFound)
 			return
 		}
 		w.WriteHeader(http.StatusNotFound)
 	}))
-	defer srv.Close()
+	srv.Start()
 
 	host := srv.Listener.Addr().String()
 	client := encx.New(host, encx.WithHTTP(), encx.WithAntiSpamHandler(func(string) error {

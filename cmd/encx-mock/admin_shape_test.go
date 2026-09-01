@@ -132,8 +132,8 @@ func adminShapeServer(t *testing.T) *httptest.Server {
 	apiMux := http.NewServeMux()
 	s.registerNewAPIRoutes(apiMux, legacyMux)
 	s.registerAdminAPIRoutes(apiMux)
-	srv := httptest.NewServer(withCommonHeaders(newEngineFallbackMux(apiMux, legacyMux)))
-	t.Cleanup(srv.Close)
+	srv := httptest.NewTestServer(t, withCommonHeaders(newEngineFallbackMux(apiMux, legacyMux)))
+	srv.Start()
 	return srv
 }
 

@@ -22,10 +22,10 @@ func newMockServers(t *testing.T) (legacy, api *httptest.Server) {
 	s.registerNewAPIRoutes(apiMux, legacyMux)
 	s.registerAdminAPIRoutes(apiMux)
 
-	legacy = httptest.NewServer(withCommonHeaders(legacyMux))
-	api = httptest.NewServer(withCommonHeaders(newEngineFallbackMux(apiMux, legacyMux)))
-	t.Cleanup(legacy.Close)
-	t.Cleanup(api.Close)
+	legacy = httptest.NewTestServer(t, withCommonHeaders(legacyMux))
+	legacy.Start()
+	api = httptest.NewTestServer(t, withCommonHeaders(newEngineFallbackMux(apiMux, legacyMux)))
+	api.Start()
 	return legacy, api
 }
 
@@ -37,8 +37,8 @@ func adminClientFor(t *testing.T, s *server) *encx.Client {
 	apiMux := http.NewServeMux()
 	s.registerNewAPIRoutes(apiMux, legacyMux)
 	s.registerAdminAPIRoutes(apiMux)
-	srv := httptest.NewServer(withCommonHeaders(newEngineFallbackMux(apiMux, legacyMux)))
-	t.Cleanup(srv.Close)
+	srv := httptest.NewTestServer(t, withCommonHeaders(newEngineFallbackMux(apiMux, legacyMux)))
+	srv.Start()
 	return mockClient(t, srv, encx.EngineNew)
 }
 

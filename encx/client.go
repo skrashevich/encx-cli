@@ -177,7 +177,7 @@ func New(domain string, opts ...Option) *Client {
 				return http.ErrUseLastResponse
 			},
 		},
-		engineState: engineState{engineMode: engineModeFromEnv()},
+		engineMode: engineModeFromEnv(),
 	}
 	c.httpClient.Transport = c.transport
 	c.legacy = &legacyEngine{c: c}

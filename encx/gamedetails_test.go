@@ -12,7 +12,7 @@ func TestEnterGame_MakeGameFee(t *testing.T) {
 	t.Parallel()
 
 	const gameID = 42
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	srv := httptest.NewTestServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch {
 		case r.Method == http.MethodPost && r.URL.Path == "/gameengines/encounter/makefee/Login.aspx":
 			http.NotFound(w, r)
@@ -28,7 +28,7 @@ func TestEnterGame_MakeGameFee(t *testing.T) {
 			http.NotFound(w, r)
 		}
 	}))
-	defer srv.Close()
+	srv.Start()
 
 	host := strings.TrimPrefix(srv.URL, "http://")
 	client := New(host, WithHTTP())
@@ -45,7 +45,7 @@ func TestEnterGame_MakeGameFee(t *testing.T) {
 func TestEnterGame_EngineFallback(t *testing.T) {
 	t.Parallel()
 
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	srv := httptest.NewTestServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch {
 		case r.Method == http.MethodGet && r.URL.Path == "/MakeGameFee.aspx":
 			http.NotFound(w, r)
@@ -61,7 +61,7 @@ func TestEnterGame_EngineFallback(t *testing.T) {
 			http.NotFound(w, r)
 		}
 	}))
-	defer srv.Close()
+	srv.Start()
 
 	host := strings.TrimPrefix(srv.URL, "http://")
 	client := New(host, WithHTTP())
@@ -78,14 +78,14 @@ func TestEnterGame_EngineFallback(t *testing.T) {
 func TestEnterGame_LoginRedirect(t *testing.T) {
 	t.Parallel()
 
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	srv := httptest.NewTestServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/MakeGameFee.aspx" {
 			http.Redirect(w, r, "/Login.aspx?return=%2fMakeGameFee.aspx", http.StatusFound)
 			return
 		}
 		http.NotFound(w, r)
 	}))
-	defer srv.Close()
+	srv.Start()
 
 	host := strings.TrimPrefix(srv.URL, "http://")
 	client := New(host, WithHTTP())

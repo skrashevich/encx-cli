@@ -220,12 +220,7 @@ func (c *Client) LoginViaLoginPage(ctx context.Context, loginPageURL, login, pas
 		form.Network = strconv.Itoa(opts[0].Network)
 	}
 
-	payload := url.Values{}
-	for k, vals := range form.Hidden {
-		for _, v := range vals {
-			payload.Add(k, v)
-		}
-	}
+	payload := form.Hidden.Clone()
 	payload.Set("Login", login)
 	payload.Set("Password", password)
 	payload.Set("EnButton1", "Sign In")

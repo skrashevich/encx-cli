@@ -106,7 +106,7 @@ func TestAdminClearLevelSectorsRemovesEmptyShells(t *testing.T) {
 	alive := map[int]bool{1: true, 2: true, 3: true}
 	var deleted []int
 	listReads := 0
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	srv := httptest.NewTestServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch {
 		case strings.Contains(r.URL.Path, "ALoader/LevelInfo.aspx") && r.URL.Query().Get("object") == "3" && r.URL.Query().Get("sector") == "":
 			var b strings.Builder
@@ -136,7 +136,7 @@ func TestAdminClearLevelSectorsRemovesEmptyShells(t *testing.T) {
 			w.WriteHeader(http.StatusOK)
 		}
 	}))
-	defer srv.Close()
+	srv.Start()
 
 	host := strings.TrimPrefix(srv.URL, "http://")
 	client := New(host, WithHTTP(), WithAdminDelay(0))
@@ -154,7 +154,7 @@ func TestAdminClearLevelSectorsRemovesEmptyShells(t *testing.T) {
 
 func TestAdminGetSectorAnswersPacesGETReads(t *testing.T) {
 	var sectorHits []time.Time
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	srv := httptest.NewTestServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch {
 		case strings.Contains(r.URL.Path, "ALoader/LevelInfo.aspx") && r.URL.Query().Get("object") == "3" && r.URL.Query().Get("sector") == "":
 			_, _ = w.Write([]byte(`<option value="101">A</option><option value="102">B</option>`))
@@ -165,7 +165,7 @@ func TestAdminGetSectorAnswersPacesGETReads(t *testing.T) {
 			w.WriteHeader(http.StatusNotFound)
 		}
 	}))
-	defer srv.Close()
+	srv.Start()
 
 	host := strings.TrimPrefix(srv.URL, "http://")
 	client := New(host, WithHTTP())
@@ -189,7 +189,7 @@ func TestAdminGetSectorAnswersPacesGETReads(t *testing.T) {
 func TestAdminClearLevelSectorsRemovesEditorOrphansWhenALoaderEmpty(t *testing.T) {
 	alive := map[int]bool{99: true, 100: true}
 	var deleted []int
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	srv := httptest.NewTestServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch {
 		case strings.Contains(r.URL.Path, "ALoader/LevelInfo.aspx") && r.URL.Query().Get("object") == "3":
 			_, _ = w.Write([]byte(``))
@@ -210,7 +210,7 @@ func TestAdminClearLevelSectorsRemovesEditorOrphansWhenALoaderEmpty(t *testing.T
 			w.WriteHeader(http.StatusOK)
 		}
 	}))
-	defer srv.Close()
+	srv.Start()
 
 	host := strings.TrimPrefix(srv.URL, "http://")
 	client := New(host, WithHTTP(), WithAdminDelay(0))
@@ -226,7 +226,7 @@ func TestAdminClearLevelSectorsRemovesEditorOrphansWhenALoaderEmpty(t *testing.T
 func TestAdminClearLevelSectorsUsesDelsectorLinks(t *testing.T) {
 	alive := map[int]bool{5: true, 7: true}
 	var deleted []int
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	srv := httptest.NewTestServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch {
 		case strings.Contains(r.URL.Path, "ALoader/LevelInfo.aspx") && r.URL.Query().Get("object") == "3" && r.URL.Query().Get("sector") == "":
 			var b strings.Builder
@@ -255,7 +255,7 @@ func TestAdminClearLevelSectorsUsesDelsectorLinks(t *testing.T) {
 			w.WriteHeader(http.StatusOK)
 		}
 	}))
-	defer srv.Close()
+	srv.Start()
 
 	host := strings.TrimPrefix(srv.URL, "http://")
 	client := New(host, WithHTTP(), WithAdminDelay(0))
@@ -269,14 +269,14 @@ func TestAdminClearLevelSectorsUsesDelsectorLinks(t *testing.T) {
 }
 
 func TestAdminClearLevelSectorsReturnsStartedError(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	srv := httptest.NewTestServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Query().Get("delsector") != "" {
 			_, _ = w.Write([]byte(`Сектор не может быть удален, его начали проходить участники.`))
 			return
 		}
 		_, _ = w.Write([]byte(`<a href="?delsector=5">del</a>`))
 	}))
-	defer srv.Close()
+	srv.Start()
 
 	client := New(strings.TrimPrefix(srv.URL, "http://"), WithHTTP(), WithAdminDelay(0))
 	err := client.AdminClearLevelSectors(context.Background(), 1, 1)
@@ -288,7 +288,7 @@ func TestAdminClearLevelSectorsReturnsStartedError(t *testing.T) {
 func TestAdminUpdateSectorGrowsAnswerFields(t *testing.T) {
 	var saved []string
 	var postCount int
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	srv := httptest.NewTestServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method == http.MethodPost {
 			if err := r.ParseForm(); err != nil {
 				t.Fatalf("ParseForm: %v", err)
@@ -323,7 +323,7 @@ func TestAdminUpdateSectorGrowsAnswerFields(t *testing.T) {
 		}
 		_, _ = w.Write([]byte(b.String()))
 	}))
-	defer srv.Close()
+	srv.Start()
 
 	client := New(strings.TrimPrefix(srv.URL, "http://"), WithHTTP(), WithAdminDelay(0))
 	err := client.AdminUpdateSector(context.Background(), 1, 1, 10, AdminSector{

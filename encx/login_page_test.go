@@ -49,7 +49,7 @@ func TestIsLoginCheckCookieRedirect(t *testing.T) {
 }
 
 func TestLoginViaLoginPageCheckCookie(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	srv := httptest.NewTestServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch {
 		case r.Method == http.MethodGet && r.URL.Path == "/Login.aspx" && r.URL.Query().Get("checkcookie") == "1":
 			http.Redirect(w, r, "/home/", http.StatusFound)
@@ -64,7 +64,7 @@ func TestLoginViaLoginPageCheckCookie(t *testing.T) {
 			w.WriteHeader(http.StatusNotFound)
 		}
 	}))
-	defer srv.Close()
+	srv.Start()
 
 	host := srv.Listener.Addr().String()
 	client := New(host, WithHTTP())
@@ -75,7 +75,7 @@ func TestLoginViaLoginPageCheckCookie(t *testing.T) {
 }
 
 func TestLoginViaLoginPageSuccess(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	srv := httptest.NewTestServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch {
 		case r.Method == http.MethodGet && r.URL.Path == "/Login.aspx":
 			w.Header().Set("Content-Type", "text/html")
@@ -95,7 +95,7 @@ func TestLoginViaLoginPageSuccess(t *testing.T) {
 			w.WriteHeader(http.StatusNotFound)
 		}
 	}))
-	defer srv.Close()
+	srv.Start()
 
 	host := srv.Listener.Addr().String()
 	client := New(host, WithHTTP())
@@ -107,7 +107,7 @@ func TestLoginViaLoginPageSuccess(t *testing.T) {
 
 func TestLoginViaLoginPageKeepsHiddenFields(t *testing.T) {
 	var posted string
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	srv := httptest.NewTestServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch {
 		case r.Method == http.MethodGet && r.URL.Path == "/Login.aspx":
 			_, _ = fmt.Fprintf(w, `<form id="formMain" method="post" action="/Login.aspx?return=%%2f">
@@ -123,7 +123,7 @@ func TestLoginViaLoginPageKeepsHiddenFields(t *testing.T) {
 			w.WriteHeader(http.StatusNotFound)
 		}
 	}))
-	defer srv.Close()
+	srv.Start()
 
 	host := srv.Listener.Addr().String()
 	client := New(host, WithHTTP())
@@ -136,7 +136,7 @@ func TestLoginViaLoginPageKeepsHiddenFields(t *testing.T) {
 }
 
 func TestLoginViaLoginPageReportsAntiSpamRedirect(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	srv := httptest.NewTestServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch {
 		case r.Method == http.MethodGet && r.URL.Path == "/Login.aspx":
 			_, _ = fmt.Fprintf(w, `<form id="formMain" method="post" action="/Login.aspx?return=%%2f">
@@ -149,7 +149,7 @@ func TestLoginViaLoginPageReportsAntiSpamRedirect(t *testing.T) {
 			w.WriteHeader(http.StatusNotFound)
 		}
 	}))
-	defer srv.Close()
+	srv.Start()
 
 	host := srv.Listener.Addr().String()
 	client := New(host, WithHTTP())

@@ -10,14 +10,14 @@ import (
 )
 
 func TestHARRecorderCapturesRequestResponse(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := httptest.NewTestServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet {
 			t.Fatalf("method = %q", r.Method)
 		}
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte(`{"ok":true}`))
 	}))
-	defer server.Close()
+	server.Start()
 
 	client := New("example.test", WithHTTP(), WithHARRecording(true))
 
@@ -86,11 +86,11 @@ func TestHARRecorderClear(t *testing.T) {
 }
 
 func TestHARRedactsLoginPassword(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := httptest.NewTestServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte(`{"Error":0}`))
 	}))
-	defer server.Close()
+	server.Start()
 
 	host := strings.TrimPrefix(server.URL, "http://")
 	client := New(host, WithHTTP(), WithHARRecording(true))

@@ -100,10 +100,10 @@ func TestEngineAutoRequiresTheSiteToClaimTheDomain(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			srv := httptest.NewTestServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				_, _ = w.Write([]byte(tc.body))
 			}))
-			defer srv.Close()
+			srv.Start()
 
 			// No WithAPIBaseURL: the host was derived, so it has to prove itself.
 			c := New("demo.en.cx", WithHTTP())
@@ -121,7 +121,7 @@ func TestEngineAutoDoesNotCacheATransportFailure(t *testing.T) {
 	t.Setenv(EngineEnvVar, "auto")
 	// The flag is shared with the server goroutine.
 	var reachable atomic.Bool
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	srv := httptest.NewTestServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if !reachable.Load() {
 			// Close the connection the way a network failure would.
 			hj, ok := w.(http.Hijacker)
@@ -137,7 +137,7 @@ func TestEngineAutoDoesNotCacheATransportFailure(t *testing.T) {
 		}
 		_, _ = w.Write([]byte(`{"id":135,"primary_domain":"demo.en.cx"}`))
 	}))
-	defer srv.Close()
+	srv.Start()
 
 	c := New("demo.en.cx", WithHTTP())
 	c.apiBaseURL = srv.URL
@@ -157,12 +157,12 @@ func TestEngineAutoDoesNotCacheATransportFailure(t *testing.T) {
 func TestEngineAutoCachesADefinitiveAnswer(t *testing.T) {
 	t.Setenv(EngineEnvVar, "auto")
 	var probes atomic.Int32
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	srv := httptest.NewTestServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		probes.Add(1)
 		w.WriteHeader(http.StatusNotFound)
 		_, _ = w.Write([]byte(`{"error":"domain_unregistered","code":404}`))
 	}))
-	defer srv.Close()
+	srv.Start()
 
 	c := New("demo.en.cx", WithHTTP())
 	c.apiBaseURL = srv.URL
@@ -255,8 +255,8 @@ func (rec *engineRouteRecorder) handler(t *testing.T) http.HandlerFunc {
 
 func newRoutedClient(t *testing.T, rec *engineRouteRecorder, opts ...Option) *Client {
 	t.Helper()
-	srv := httptest.NewServer(rec.handler(t))
-	t.Cleanup(srv.Close)
+	srv := httptest.NewTestServer(t, rec.handler(t))
+	srv.Start()
 	host := strings.TrimPrefix(srv.URL, "http://")
 	opts = append([]Option{WithHTTP(), WithAdminDelay(0), WithAPIBaseURL(srv.URL)}, opts...)
 	return New(host, opts...)
@@ -349,10 +349,10 @@ func TestEngineAutoProbesAPIHostOnce(t *testing.T) {
 
 func TestEngineAutoFallsBackToLegacy(t *testing.T) {
 	t.Setenv(EngineEnvVar, "auto")
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	srv := httptest.NewTestServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusNotFound)
 	}))
-	defer srv.Close()
+	srv.Start()
 
 	host := strings.TrimPrefix(srv.URL, "http://")
 	c := New(host, WithHTTP(), WithAPIBaseURL(srv.URL))
@@ -383,11 +383,11 @@ func TestEngineAutoAsksAboutTheDomainNotTheHost(t *testing.T) {
 func TestEngineAutoProbeAsksForTheClientDomain(t *testing.T) {
 	t.Setenv(EngineEnvVar, "auto")
 	var probed string
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	srv := httptest.NewTestServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		probed = r.URL.Path
 		_, _ = w.Write([]byte(`{"id":135,"name":"Демо город"}`))
 	}))
-	defer srv.Close()
+	srv.Start()
 
 	c := New("demo.en.cx", WithHTTP(), WithAPIBaseURL(srv.URL))
 	if got := c.Engine(); got != EngineNew {
@@ -402,10 +402,10 @@ func TestEngineAutoProbeAsksForTheClientDomain(t *testing.T) {
 // with an empty body being read as a migrated domain.
 func TestEngineAutoIgnoresASiteWithoutAnID(t *testing.T) {
 	t.Setenv(EngineEnvVar, "auto")
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	srv := httptest.NewTestServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		_, _ = w.Write([]byte(`{}`))
 	}))
-	defer srv.Close()
+	srv.Start()
 
 	c := New("demo.en.cx", WithHTTP(), WithAPIBaseURL(srv.URL))
 	if got := c.Engine(); got != EngineLegacy {

@@ -806,10 +806,6 @@ func dt(t time.Time) *encx.DateTime {
 	}
 }
 
-func ptr[T any](v T) *T {
-	return &v
-}
-
 func credentialsKey(login, password string) string {
 	return login + "\x00" + password
 }

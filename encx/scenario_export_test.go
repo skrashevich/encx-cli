@@ -157,11 +157,11 @@ func TestLegacyGameScenarioParsesTheExportPage(t *testing.T) {
 	</body></html>`
 
 	var path string
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	srv := httptest.NewTestServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		path = r.URL.Path
 		_, _ = w.Write([]byte(page))
 	}))
-	defer srv.Close()
+	srv.Start()
 
 	c := New(strings.TrimPrefix(srv.URL, "http://"), WithHTTP(), WithAdminDelay(0))
 	doc, err := c.GetGameScenario(context.Background(), 82448)

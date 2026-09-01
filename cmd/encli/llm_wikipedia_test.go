@@ -12,8 +12,8 @@ import (
 
 func withWikipediaServer(t *testing.T, handler http.HandlerFunc, fn func()) {
 	t.Helper()
-	srv := httptest.NewServer(handler)
-	t.Cleanup(srv.Close)
+	srv := httptest.NewTestServer(t, handler)
+	srv.Start()
 
 	prev := wikipediaHTTPClient
 	wikipediaHTTPClient = srv.Client()
@@ -62,10 +62,10 @@ func TestWikipediaArticle(t *testing.T) {
 			"query": map[string]any{
 				"pages": map[string]any{
 					"42": map[string]any{
-						"pageid":   42,
-						"title":    "Moscow",
-						"extract":  "Moscow is the capital of Russia.",
-						"fullurl":  "https://en.wikipedia.org/wiki/Moscow",
+						"pageid":  42,
+						"title":   "Moscow",
+						"extract": "Moscow is the capital of Russia.",
+						"fullurl": "https://en.wikipedia.org/wiki/Moscow",
 					},
 				},
 			},

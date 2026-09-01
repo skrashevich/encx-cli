@@ -240,7 +240,7 @@ func TestScenarioBonusToAdminBonusPreservesNegative(t *testing.T) {
 func TestSyncLevelBonusesSkipsDetailReadsWhenCountsDiffer(t *testing.T) {
 	var editReads int
 	var deleted int
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	srv := httptest.NewTestServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch {
 		case strings.Contains(r.URL.Path, "LevelEditor.aspx"):
 			_, _ = w.Write([]byte(`<a data-bonusid="101"></a><a data-bonusid="102"></a>`))
@@ -254,7 +254,7 @@ func TestSyncLevelBonusesSkipsDetailReadsWhenCountsDiffer(t *testing.T) {
 			w.WriteHeader(http.StatusNotFound)
 		}
 	}))
-	defer srv.Close()
+	srv.Start()
 
 	client := encx.New(strings.TrimPrefix(srv.URL, "http://"), encx.WithHTTP(), encx.WithAdminDelay(0))
 	stats := &importSyncStats{}
@@ -273,7 +273,7 @@ func TestSyncLevelBonusesSkipsDetailReadsWithoutSnapshot(t *testing.T) {
 	var editReads int
 	var deleted int
 	var created int
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	srv := httptest.NewTestServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch {
 		case strings.Contains(r.URL.Path, "LevelEditor.aspx"):
 			_, _ = w.Write([]byte(`<a data-bonusid="101"></a><a data-bonusid="102"></a>`))
@@ -290,7 +290,7 @@ func TestSyncLevelBonusesSkipsDetailReadsWithoutSnapshot(t *testing.T) {
 			w.WriteHeader(http.StatusNotFound)
 		}
 	}))
-	defer srv.Close()
+	srv.Start()
 
 	client := encx.New(strings.TrimPrefix(srv.URL, "http://"), encx.WithHTTP(), encx.WithAdminDelay(0))
 	stats := &importSyncStats{}
@@ -313,7 +313,7 @@ func TestSyncLevelBonusesUsesCurrentScenarioSnapshot(t *testing.T) {
 	var editReads int
 	var deleted int
 	var created int
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	srv := httptest.NewTestServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch {
 		case strings.Contains(r.URL.Path, "LevelEditor.aspx"):
 			_, _ = w.Write([]byte(`<a data-bonusid="101"></a><a data-bonusid="102"></a>`))
@@ -330,7 +330,7 @@ func TestSyncLevelBonusesUsesCurrentScenarioSnapshot(t *testing.T) {
 			w.WriteHeader(http.StatusNotFound)
 		}
 	}))
-	defer srv.Close()
+	srv.Start()
 
 	client := encx.New(strings.TrimPrefix(srv.URL, "http://"), encx.WithHTTP(), encx.WithAdminDelay(0))
 	stats := &importSyncStats{}
@@ -356,7 +356,7 @@ func TestSyncLevelBonusesUsesCurrentScenarioSnapshot(t *testing.T) {
 func TestSyncLevelBonusesDiffsCurrentScenarioSnapshot(t *testing.T) {
 	var deleted []string
 	var created int
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	srv := httptest.NewTestServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch {
 		case strings.Contains(r.URL.Path, "LevelEditor.aspx"):
 			_, _ = w.Write([]byte(`<a data-bonusid="101"></a><a data-bonusid="102"></a>`))
@@ -372,7 +372,7 @@ func TestSyncLevelBonusesDiffsCurrentScenarioSnapshot(t *testing.T) {
 			w.WriteHeader(http.StatusNotFound)
 		}
 	}))
-	defer srv.Close()
+	srv.Start()
 
 	client := encx.New(strings.TrimPrefix(srv.URL, "http://"), encx.WithHTTP(), encx.WithAdminDelay(0))
 	stats := &importSyncStats{}
@@ -398,7 +398,7 @@ func TestSyncLevelBonusesDiffsCurrentScenarioSnapshot(t *testing.T) {
 func TestScenarioSectorCreatorSingleAnswerUsesSingleCreate(t *testing.T) {
 	var posts int
 	var gets int
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	srv := httptest.NewTestServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.Method {
 		case http.MethodPost:
 			posts++
@@ -419,7 +419,7 @@ func TestScenarioSectorCreatorSingleAnswerUsesSingleCreate(t *testing.T) {
 			t.Fatalf("unexpected method: %s", r.Method)
 		}
 	}))
-	defer srv.Close()
+	srv.Start()
 
 	client := encx.New(strings.TrimPrefix(srv.URL, "http://"), encx.WithHTTP(), encx.WithAdminDelay(0))
 	creator := newScenarioSectorCreator(client, 1, 2)
@@ -448,7 +448,7 @@ func TestScenarioSectorCreatorUsesLinearReads(t *testing.T) {
 	editReads := 0
 	posts := 0
 
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	srv := httptest.NewTestServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch {
 		case r.Method == http.MethodGet && r.URL.Path == "/ALoader/LevelInfo.aspx" && r.URL.Query().Get("sector") == "":
 			listReads++
@@ -518,7 +518,7 @@ func TestScenarioSectorCreatorUsesLinearReads(t *testing.T) {
 			w.WriteHeader(http.StatusNotFound)
 		}
 	}))
-	defer srv.Close()
+	srv.Start()
 
 	client := encx.New(strings.TrimPrefix(srv.URL, "http://"), encx.WithHTTP(), encx.WithAdminDelay(0))
 	creator := newScenarioSectorCreator(client, 1, 2)
