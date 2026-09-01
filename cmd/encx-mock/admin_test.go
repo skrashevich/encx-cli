@@ -18,7 +18,7 @@ import (
 func adminClient(t *testing.T) (*encx.Client, context.Context) {
 	t.Helper()
 	_, api := newMockServers(t)
-	return mockClient(t, api, encx.EngineNew), context.Background()
+	return signedInClient(t, api), context.Background()
 }
 
 func TestMockAdminLevelsRoundTrip(t *testing.T) {

@@ -22,7 +22,19 @@ const (
 
 // registerAdminAPIRoutes adds the /admin/** surface plus the two game routes the
 // admin client reads.
-func (s *server) registerAdminAPIRoutes(mux *http.ServeMux) {
+// The whole /admin/** surface needs a session. Anonymous calls to
+// /admin/games, /admin/games/{id}, /admin/games/{id}/levels and
+// /admin/games/{id}/lifecycle all answer
+// 401 {"error":"unauthorized","message":"Authorization required","code":401}
+// on api.en.cx (X-En-Domain: demo.en.cx, 2026-09-01). The guard is applied at
+// registration so no handler can be added to the group without it.
+//
+// The two game routes below are not part of that group and are not symmetric:
+// /games/{id}/monitoring is guarded like the admin surface, /games/{id}/
+// corrections answers 200 to anyone. Both measured the same day.
+func (s *server) registerAdminAPIRoutes(root *http.ServeMux) {
+	public := tolerantMux{root}
+	mux := guardedMux{mux: public, guard: s.requireAPISession}
 	mux.HandleFunc("GET /admin/games", s.handleAdminGames)
 	mux.HandleFunc("GET /admin/games/{id}", s.handleAdminGameEditor)
 	mux.HandleFunc("PATCH /admin/games/{id}", s.handleAdminGamePatch)
@@ -66,8 +78,8 @@ func (s *server) registerAdminAPIRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /admin/games/{id}/levels/{levelId}/answers/batch", s.handleAdminAnswersBatch)
 	mux.HandleFunc("DELETE /admin/games/{id}/levels/{levelId}/answers/{answerId}", s.handleAdminDeleteAnswer)
 
-	mux.HandleFunc("GET /games/{id}/corrections", s.handleAdminCorrections)
 	mux.HandleFunc("GET /games/{id}/monitoring", s.handleAdminMonitoring)
+	public.HandleFunc("GET /games/{id}/corrections", s.handleAdminCorrections)
 }
 
 // --- helpers ---

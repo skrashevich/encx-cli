@@ -39,7 +39,23 @@ func adminClientFor(t *testing.T, s *server) *encx.Client {
 	s.registerAdminAPIRoutes(apiMux)
 	srv := httptest.NewTestServer(t, withCommonHeaders(newEngineFallbackMux(apiMux, legacyMux)))
 	srv.Start()
-	return mockClient(t, srv, encx.EngineNew)
+	return signedInClient(t, srv)
+}
+
+// signedInClient returns a new-engine client that has signed in. The admin
+// surface requires a session, the way the live API does, so a test that drives
+// it has to log in first — exactly like the caller it stands in for.
+func signedInClient(t *testing.T, srv *httptest.Server) *encx.Client {
+	t.Helper()
+	c := mockClient(t, srv, encx.EngineNew)
+	resp, err := c.Login(context.Background(), mockAdminLogin, "secret")
+	if err != nil {
+		t.Fatalf("Login: %v", err)
+	}
+	if resp.Error != 0 {
+		t.Fatalf("Login: error %d: %s", resp.Error, resp.Message)
+	}
+	return c
 }
 
 func mockClient(t *testing.T, srv *httptest.Server, mode encx.EngineMode) *encx.Client {

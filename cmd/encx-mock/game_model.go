@@ -496,7 +496,10 @@ func countTrue(values []bool) int {
 	return n
 }
 
-func (s *server) buildGameInfoResponse(st *sessionState, now time.Time) (map[string]any, error) {
+// buildGameInfoResponse renders one catalog entry. It takes the completion flag
+// rather than a session because the catalog and the statistics are public: an
+// anonymous caller has no session to read it from.
+func (s *server) buildGameInfoResponse(completed bool, now time.Time) (map[string]any, error) {
 	info, err := cloneJSONObject(s.fixtures.gameInfoTemplate)
 	if err != nil {
 		return nil, err
@@ -505,8 +508,8 @@ func (s *server) buildGameInfoResponse(st *sessionState, now time.Time) (map[str
 	info["Title"] = s.gameTitle()
 	info["LevelNumber"] = s.levelCount()
 	info["Started"] = true
-	info["Finished"] = st.Completed
-	info["InProgress"] = !st.Completed
+	info["Finished"] = completed
+	info["InProgress"] = !completed
 	info["TSRemain"] = durationMap(3 * time.Hour)
 	info["StartDateTime"] = dt(now.Add(-1 * time.Hour))
 	info["FinishDateTime"] = dt(now.Add(3 * time.Hour))

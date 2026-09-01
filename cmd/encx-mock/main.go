@@ -8,6 +8,7 @@ import (
 	"html"
 	"log"
 	"net/http"
+	"net/url"
 	"os"
 	"strconv"
 	"strings"
@@ -27,6 +28,16 @@ const (
 	// report, so the new-engine routes describe the same account.
 	mockAPIUserID = 101
 	mockTeamName  = "MockTeam"
+	// The engine is not consistent about the case of the sign-in path and IIS
+	// does not care: the game engine route bounces to /login.aspx, the fee page
+	// to /Login.aspx (both measured on svk.en.cx, 2026-09-01). Go's ServeMux is
+	// case-sensitive, so the mock serves the page under both spellings.
+	enginePlayLoginPath = "/login.aspx"
+	makeFeeLoginPath    = "/Login.aspx"
+	// mockAnonymousLogin names the player in the public statistics an anonymous
+	// caller reads. The engine shows real player names there; the mock has one
+	// player and no identity to attribute the run to.
+	mockAnonymousLogin = "MockPlayer"
 
 	networkDropCode     = "PZDC"
 	networkDropDuration = time.Minute
@@ -275,21 +286,27 @@ func (s *server) handleUserDetails(w http.ResponseWriter, r *http.Request) {
 	_, _ = w.Write([]byte(s.renderUserDetails(login)))
 }
 
+// handleGameList serves the catalog. It is public: GET /home/?json=1 on
+// svk.en.cx answers 200 with the full ActiveGames list to a caller with no
+// cookies at all (2026-09-01). A signed-in caller sees their own progress
+// reflected in the game entry, an anonymous one sees the game as running.
 func (s *server) handleGameList(w http.ResponseWriter, r *http.Request) {
-	st, ok := s.requireSessionJSON(w, r)
-	if !ok {
+	completed := false
+	if st, ok := s.optionalSession(w, r); ok && st != nil {
+		st.mu.Lock()
+		completed = st.Completed
+		st.mu.Unlock()
+	} else if !ok {
 		return
 	}
-	st.mu.Lock()
-	defer st.mu.Unlock()
 	now := time.Now()
-	gameInfo, err := s.buildGameInfoResponse(st, now)
+	gameInfo, err := s.buildGameInfoResponse(completed, now)
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]any{"Error": 5, "Message": err.Error()})
 		return
 	}
 	active := []any{}
-	if !st.Completed {
+	if !completed {
 		active = append(active, gameInfo)
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
@@ -334,7 +351,7 @@ func (s *server) handleEnterGame(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *server) handleMakeGameFee(w http.ResponseWriter, r *http.Request) {
-	_, ok := s.requireSessionHTML(w, r)
+	_, ok := s.requireSessionRedirect(w, r, makeFeeLoginPath)
 	if !ok {
 		return
 	}
@@ -352,9 +369,11 @@ func (s *server) handleMakeGameFee(w http.ResponseWriter, r *http.Request) {
 	_, _ = w.Write([]byte(`<html><body>Team already accepted to the game.</body></html>`))
 }
 
+// handleGameDetails serves the game card, which is public: GET
+// /GameDetails.aspx?gid=82448 answers 200 to an anonymous caller with or
+// without json=1 (svk.en.cx, 2026-09-01).
 func (s *server) handleGameDetails(w http.ResponseWriter, r *http.Request) {
-	_, ok := s.requireSessionHTML(w, r)
-	if !ok {
+	if _, ok := s.optionalSession(w, r); !ok {
 		return
 	}
 	gid, _ := strconv.Atoi(r.URL.Query().Get("gid"))
@@ -384,10 +403,20 @@ func (s *server) handleTeamDetails(w http.ResponseWriter, r *http.Request) {
 	_, _ = fmt.Fprintf(w, `<html><body><h1>Team %d</h1><p>%s</p></body></html>`, tid, status)
 }
 
+// handleGameStatistics serves the full statistics, which Encounter publishes to
+// anyone: GET /gamestatistics/full/82448?json=1 answers 200 with the whole
+// document and no cookies (svk.en.cx, 2026-09-01).
+//
+// The mock keeps game progress per session, so an anonymous caller is shown the
+// game from the start rather than another player's position. That is a limit of
+// the mock's state model, not of the engine.
 func (s *server) handleGameStatistics(w http.ResponseWriter, r *http.Request) {
-	st, ok := s.requireSessionJSON(w, r)
+	st, ok := s.optionalSession(w, r)
 	if !ok {
 		return
+	}
+	if st == nil {
+		st = s.anonymousViewState()
 	}
 	st.mu.Lock()
 	defer st.mu.Unlock()
@@ -438,7 +467,7 @@ func (s *server) handleGameStatistics(w http.ResponseWriter, r *http.Request) {
 		curIdx = s.levelCount() - 1
 	}
 
-	gameInfo, err := s.buildGameInfoResponse(st, now)
+	gameInfo, err := s.buildGameInfoResponse(st.Completed, now)
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]any{"Error": 5, "Message": err.Error()})
 		return
@@ -499,7 +528,7 @@ func mapToGameInfo(m map[string]any) encx.GameInfo {
 }
 
 func (s *server) handleGamePlayGET(w http.ResponseWriter, r *http.Request) {
-	st, ok := s.requireSessionJSON(w, r)
+	st, ok := s.requireSessionRedirect(w, r, enginePlayLoginPath)
 	if !ok {
 		return
 	}
@@ -531,7 +560,7 @@ func (s *server) handleGamePlayGET(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *server) handleGamePlayPOST(w http.ResponseWriter, r *http.Request) {
-	st, ok := s.requireSessionJSON(w, r)
+	st, ok := s.requireSessionRedirect(w, r, enginePlayLoginPath)
 	if !ok {
 		return
 	}
@@ -697,12 +726,168 @@ func (s *server) requireSessionJSON(w http.ResponseWriter, r *http.Request) (*se
 	return st, true
 }
 
+// optionalSession serves the pages Encounter leaves open to anyone: the
+// catalog, the game card and the full statistics all answer 200 without a
+// session (measured on svk.en.cx, 2026-09-01). It returns a nil state for an
+// anonymous caller, and ok=false only when the request must be abandoned
+// because the network-drop emulation swallowed it.
+func (s *server) optionalSession(w http.ResponseWriter, r *http.Request) (*sessionState, bool) {
+	st, err := s.sessionFromRequest(r)
+	if err != nil {
+		return nil, true
+	}
+	if s.dropIfSilent(r, sessionAuthKey(st)) {
+		return nil, false
+	}
+	setProtocolCookies(w)
+	return st, true
+}
+
+// anonymousViewState is the throwaway state the public statistics are rendered
+// from. It is never stored, so an anonymous read cannot alter or leak any
+// player's progress.
+func (s *server) anonymousViewState() *sessionState {
+	now := time.Now()
+	st := &sessionState{
+		Login:           mockAnonymousLogin,
+		Passed:          s.newSessionPassedState(),
+		SectorPassed:    s.newSessionSectorState(),
+		SectorAnswers:   s.newSessionSectorAnswerState(),
+		LevelStartedAt:  make([]time.Time, s.levelCount()),
+		AnsweredBonuses: make(map[int]bool),
+		BonusAnswers:    make(map[int]string),
+		Actions:         []encx.CodeAction{},
+		UpdatedAt:       now,
+	}
+	s.ensureLevelStarted(st, 0, now)
+	return st
+}
+
+// requireSessionRedirect is the game engine route's answer to an anonymous
+// caller. The live ASP.NET engine does not report 401 there — it bounces to the
+// sign-in page:
+//
+//	GET /gameengines/encounter/play/82448?json=1&lang=ru
+//	302, Location: /login.aspx?return=%2fgameengines%2fencounter%2fplay%2f82448%3fjson%3d1%26lang%3dru
+//	GET /MakeGameFee.aspx?gid=82448&json=1
+//	302, Location: /Login.aspx?return=%2fMakeGameFee.aspx%3fgid%3d82448%26json%3d1
+//
+// measured against svk.en.cx on 2026-09-01, with or without json=1 and for a
+// game id that does not exist: the session is checked before anything else.
+//
+// The difference is not cosmetic. The mock used to answer 401 with a JSON body,
+// and encx decodes the engine's body without gating on the status (see
+// decodeGameModelJSON), so that body parsed into an empty GameModel and the
+// call reported success. A mock that hides a lost session is worse than no mock
+// at all; the redirect makes encx classify it as an expired session, which is
+// what a player sees against the real engine.
+func (s *server) requireSessionRedirect(w http.ResponseWriter, r *http.Request, loginPath string) (*sessionState, bool) {
+	st, err := s.sessionFromRequest(r)
+	if err != nil {
+		redirectToLoginPage(w, r, loginPath)
+		return nil, false
+	}
+	if s.dropIfSilent(r, sessionAuthKey(st)) {
+		return nil, false
+	}
+	setProtocolCookies(w)
+	return st, true
+}
+
+// redirectToLoginPage writes the engine's "Object moved" bounce.
+func redirectToLoginPage(w http.ResponseWriter, r *http.Request, loginPath string) {
+	target := loginPageURL(loginPath, r.URL.RequestURI())
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	w.Header().Set("Location", target)
+	w.WriteHeader(http.StatusFound)
+	fmt.Fprintf(w, "<html><head><title>Object moved</title></head><body>\n"+
+		"<h2>Object moved to <a href=%q>here</a>.</h2>\n</body></html>\n", target)
+}
+
+// loginPageURL builds the sign-in URL the engine redirects to, with the return
+// address escaped the way ASP.NET escapes it: lowercase hex digits, where Go
+// emits uppercase. The mock is compared against captures byte for byte, so the
+// difference is worth normalizing.
+func loginPageURL(loginPath, returnTo string) string {
+	return loginPath + "?return=" + lowerHexEscapes(url.QueryEscape(returnTo))
+}
+
+func lowerHexEscapes(escaped string) string {
+	out := []byte(escaped)
+	for i := 0; i+2 < len(out); i++ {
+		if out[i] != '%' {
+			continue
+		}
+		out[i+1] = asciiLower(out[i+1])
+		out[i+2] = asciiLower(out[i+2])
+	}
+	return string(out)
+}
+
+func asciiLower(c byte) byte {
+	if c >= 'A' && c <= 'Z' {
+		return c + ('a' - 'A')
+	}
+	return c
+}
+
+// writeSignInRequiredPage reproduces Encounter's members-only interstitial. The
+// wording is trimmed to the parts that carry meaning: the heading, and the
+// /Login.aspx link every client and every human uses to get out of it.
+func writeSignInRequiredPage(w http.ResponseWriter) {
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	w.WriteHeader(http.StatusForbidden)
+	_, _ = w.Write([]byte(`<!DOCTYPE html>
+<html lang="ru">
+<head><meta charset="utf-8"><meta name="robots" content="noindex,nofollow">
+<title>Требуется вход — Encounter</title></head>
+<body>
+<h1>Для просмотра этой страницы нужно войти</h1>
+<p>Профили игроков, команды и форум доступны участникам Encounter.</p>
+<a class="btn" href="` + makeFeeLoginPath + `">Войти</a>
+<p class="en">This page is available to signed-in members.<br>
+<a class="home" href="` + makeFeeLoginPath + `">Sign in</a> &middot; <a class="home" href="/">Encounter</a></p>
+</body>
+</html>
+`))
+}
+
+// handleLoginPage serves the page the redirect points at. The txtLogin and
+// txtPassword field names and the login.aspx form action are the markers encx
+// keys on (looksLikeLoginPage) to tell an expired session apart from the
+// anti-spam wall, so a stub page without them would change the diagnosis.
+func (s *server) handleLoginPage(w http.ResponseWriter, r *http.Request) {
+	// The form posts back to the spelling the caller arrived at, the way the
+	// engine's own page does.
+	action := r.URL.Path
+	if returnTo := r.URL.Query().Get("return"); returnTo != "" {
+		action = loginPageURL(r.URL.Path, returnTo)
+	}
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	fmt.Fprintf(w, `<html><head><title>Encounter</title></head><body>
+<form method="post" action=%q>
+<input type="text" name="txtLogin" />
+<input type="password" name="txtPassword" />
+<input type="submit" value="Sign in" />
+</form>
+</body></html>
+`, action)
+}
+
+// requireSessionHTML guards the member-only HTML pages. Encounter answers those
+// with 403 and a "sign in required" interstitial, not with 401:
+//
+//	GET /UserDetails.aspx?uid=1&json=1        403, text/html
+//	GET /Teams/TeamDetails.aspx?tid=1&json=1  403, text/html
+//
+// measured on svk.en.cx and confirmed on kharkov.en.cx (2026-09-01), so it is
+// the platform's behaviour and not one domain's own front-end. The page links
+// to /Login.aspx, which is what makes encx classify it as an expired session
+// rather than as an unreadable page.
 func (s *server) requireSessionHTML(w http.ResponseWriter, r *http.Request) (*sessionState, bool) {
 	st, err := s.sessionFromRequest(r)
 	if err != nil {
-		w.Header().Set("Content-Type", "text/html; charset=utf-8")
-		w.WriteHeader(http.StatusUnauthorized)
-		_, _ = w.Write([]byte("<html><body>Unauthorized</body></html>"))
+		writeSignInRequiredPage(w)
 		return nil, false
 	}
 	if s.dropIfSilent(r, sessionAuthKey(st)) {
@@ -856,8 +1041,11 @@ func credentialsKeyForLog(authKey string) string {
 
 // routes builds the legacy ASP.NET surface the mock emulates.
 func (s *server) routes() *http.ServeMux {
-	mux := http.NewServeMux()
+	root := http.NewServeMux()
+	mux := tolerantMux{root}
 	mux.HandleFunc("POST /login/signin", s.handleLogin)
+	mux.HandleFunc("GET /login.aspx", s.handleLoginPage)
+	mux.HandleFunc("GET /Login.aspx", s.handleLoginPage)
 	mux.HandleFunc("GET /UserDetails.aspx", s.handleUserDetails)
 	mux.HandleFunc("GET /home/", s.handleGameList)
 	mux.HandleFunc("GET /", s.handleDomainRoot)
@@ -869,5 +1057,5 @@ func (s *server) routes() *http.ServeMux {
 	mux.HandleFunc("GET /gameengines/encounter/play/", s.handleGamePlayGET)
 	mux.HandleFunc("POST /gameengines/encounter/play/", s.handleGamePlayPOST)
 	mux.HandleFunc("GET /NotHumanRequest.aspx", s.handleNotHuman)
-	return mux
+	return root
 }

@@ -43,6 +43,9 @@ func mockJSON(t *testing.T, srv *httptest.Server, path string) map[string]any {
 	if err != nil {
 		t.Fatalf("request %s: %v", path, err)
 	}
+	// The admin surface requires a session, as the live API does, so a raw
+	// read has to carry one too.
+	req.Header.Set("Authorization", "Bearer "+mockSessionToken(t, srv))
 	resp, err := srv.Client().Do(req)
 	if err != nil {
 		t.Fatalf("GET %s: %v", path, err)
@@ -56,6 +59,36 @@ func mockJSON(t *testing.T, srv *httptest.Server, path string) map[string]any {
 		t.Fatalf("decode %s: %v", path, err)
 	}
 	return doc
+}
+
+// mockSessionToken signs in over the new engine's own login route and returns
+// the bearer token, which is what a mobile client would hold.
+func mockSessionToken(t *testing.T, srv *httptest.Server) string {
+	t.Helper()
+	body := strings.NewReader(`{"login":"` + mockAdminLogin + `","password":"secret","no_cookie":true}`)
+	req, err := http.NewRequestWithContext(context.Background(), http.MethodPost, srv.URL+"/login", body)
+	if err != nil {
+		t.Fatalf("login request: %v", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := srv.Client().Do(req)
+	if err != nil {
+		t.Fatalf("POST /login: %v", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("POST /login: HTTP %d", resp.StatusCode)
+	}
+	var answer struct {
+		Token string `json:"token"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&answer); err != nil {
+		t.Fatalf("decode login answer: %v", err)
+	}
+	if answer.Token == "" {
+		t.Fatal("the login answer carries no token")
+	}
+	return answer.Token
 }
 
 // missingKeys reports reference keys the mock does not serve. The mock may carry
@@ -295,11 +328,15 @@ func TestMockAdminAutopassAwardIsSignedLikeTheEngine(t *testing.T) {
 		t.Fatalf("build request: %v", err)
 	}
 	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer "+mockSessionToken(t, srv))
 	resp, err := srv.Client().Do(req)
 	if err != nil {
 		t.Fatalf("PUT autopass: %v", err)
 	}
 	_ = resp.Body.Close()
+	if resp.StatusCode >= http.StatusMultipleChoices {
+		t.Fatalf("PUT autopass: HTTP %d", resp.StatusCode)
+	}
 
 	editor := mockJSON(t, srv, path+"/editor")
 	if got := editor["timeout_time_award_sec"].(float64); got != -900 {

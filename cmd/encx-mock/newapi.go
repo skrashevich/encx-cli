@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -18,7 +19,8 @@ import (
 // e2e against both.
 
 // registerNewAPIRoutes adds the Encounter Go Backend routes to mux.
-func (s *server) registerNewAPIRoutes(mux *http.ServeMux, legacy http.Handler) {
+func (s *server) registerNewAPIRoutes(root *http.ServeMux, legacy http.Handler) {
+	mux := tolerantMux{root}
 	mux.HandleFunc("GET /version", s.handleAPIVersion)
 	mux.HandleFunc("GET /sites/domain/{domain}", s.handleAPISiteByDomain)
 	mux.HandleFunc("POST /login", s.handleAPILogin(legacy))
@@ -76,6 +78,14 @@ func callLegacy(legacy http.Handler, r *http.Request, method, target string, for
 	req.Header = mergeRequestHeaders(req.Header, r.Header)
 	for _, cookie := range r.Cookies() {
 		req.AddCookie(cookie)
+	}
+	// A mobile session authenticates with the bearer token alone. The legacy
+	// half knows nothing about bearer tokens, so the token — which is the
+	// session cookie's value — is handed to it as that cookie.
+	if _, err := r.Cookie("SESSION_ID"); err != nil {
+		if token := bearerToken(r); token != "" {
+			req.AddCookie(&http.Cookie{Name: "SESSION_ID", Value: token})
+		}
 	}
 	rec := httptest.NewRecorder()
 	legacy.ServeHTTP(rec, req)
@@ -146,6 +156,60 @@ func (s *server) handleAPILogin(legacy http.Handler) http.HandlerFunc {
 	}
 }
 
+// apiSessionFromRequest resolves the caller's session for a new-engine route.
+// The new backend authenticates with a bearer token, and a mobile session
+// ("no_cookie") carries nothing else, so the cookie alone is not enough. The
+// mock's token is the session cookie's value, which keeps one session store
+// behind both engines.
+func (s *server) apiSessionFromRequest(r *http.Request) (*sessionState, error) {
+	if st, err := s.sessionFromRequest(r); err == nil {
+		return st, nil
+	}
+	token := bearerToken(r)
+	if token == "" {
+		return nil, errors.New("no session")
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	st := s.sessions[token]
+	if st == nil {
+		return nil, errors.New("unknown session")
+	}
+	return st, nil
+}
+
+func bearerToken(r *http.Request) string {
+	header := r.Header.Get("Authorization")
+	if len(header) < len("Bearer ") || !strings.EqualFold(header[:len("Bearer ")], "bearer ") {
+		return ""
+	}
+	return strings.TrimSpace(header[len("Bearer "):])
+}
+
+// requireAPISession is the guard the protected new-engine groups are registered
+// with. Anonymous callers get the backend's own envelope, not a legacy body.
+func (s *server) requireAPISession(next http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if _, err := s.apiSessionFromRequest(r); err != nil {
+			writeAPIUnauthorized(w, "Authorization required")
+			return
+		}
+		next(w, r)
+	}
+}
+
+// writeAPIUnauthorized writes the new backend's unauthorized envelope. The live
+// API keeps error and code fixed and varies only the message: /auth/session and
+// /admin/** say "Authorization required", the engine route says "unauthorized"
+// (measured against api.en.cx on 2026-09-01).
+func writeAPIUnauthorized(w http.ResponseWriter, message string) {
+	writeJSON(w, http.StatusUnauthorized, map[string]any{
+		"error":   "unauthorized",
+		"message": message,
+		"code":    http.StatusUnauthorized,
+	})
+}
+
 func sessionTokenFromCookies(cookies []*http.Cookie) string {
 	for _, cookie := range cookies {
 		if cookie.Value != "" {
@@ -159,11 +223,7 @@ func (s *server) handleAPISession(legacy http.Handler) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		rec, err := callLegacy(legacy, r, http.MethodGet, "/UserDetails.aspx", nil)
 		if err != nil || rec.Code != http.StatusOK {
-			writeJSON(w, http.StatusUnauthorized, map[string]any{
-				"error":   "unauthorized",
-				"message": "Authorization required",
-				"code":    http.StatusUnauthorized,
-			})
+			writeAPIUnauthorized(w, "Authorization required")
 			return
 		}
 		writeJSON(w, http.StatusOK, map[string]any{"user": mockAPIUser(s.sessionLogin(r))})
@@ -384,6 +444,15 @@ func (s *server) handleAPIStatistics(legacy http.Handler) http.HandlerFunc {
 
 func (s *server) handleAPIEngine(legacy http.Handler) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+		// The session is checked before json=1, not after: measured against
+		// api.en.cx (X-En-Domain: demo.en.cx) on 2026-09-01, an anonymous call
+		// answers 401 with the flag, without it, and for a game id that does
+		// not exist. The 404-without-json=1 rule below only ever shows up to a
+		// caller who is already signed in, so the order is not interchangeable.
+		if _, err := s.apiSessionFromRequest(r); err != nil {
+			writeAPIUnauthorized(w, "unauthorized")
+			return
+		}
 		if r.URL.Query().Get("json") != "1" {
 			// The real backend answers 404 without json=1.
 			writeJSON(w, http.StatusNotFound, map[string]any{"error": "not found"})
@@ -410,6 +479,13 @@ func (s *server) handleAPIEngine(legacy http.Handler) http.HandlerFunc {
 		rec, err := callLegacy(legacy, r, method, target, form)
 		if err != nil {
 			writeJSON(w, http.StatusInternalServerError, map[string]any{"error": err.Error()})
+			return
+		}
+		if rec.Code == http.StatusFound {
+			// The legacy half bounces an anonymous caller to its sign-in page.
+			// The new backend has no such page: it answers 401 JSON, so the
+			// redirect must not be forwarded to a new-engine client.
+			writeAPIUnauthorized(w, "unauthorized")
 			return
 		}
 		if rec.Code >= 400 {
