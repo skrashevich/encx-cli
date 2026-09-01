@@ -17,6 +17,7 @@ package main
 import "C"
 
 import (
+	"math"
 	"unsafe"
 
 	"github.com/skrashevich/encx-cli/bindings/php/internal/rt"
@@ -35,8 +36,12 @@ func cEnvelope(s string) *C.char {
 // cBytes copies n bytes from p into a Go slice. A null pointer or a
 // non-positive length yields a nil slice rather than an empty one, so an
 // absent argument stays distinguishable from a zero-length one.
+//
+// C.GoBytes takes an int, so a length past math.MaxInt32 would wrap to a
+// negative one and panic inside cgo. No caller has a payload near that size,
+// but the wrap has to be refused rather than converted.
 func cBytes(p *C.char, n C.longlong) []byte {
-	if p == nil || n <= 0 {
+	if p == nil || n <= 0 || int64(n) > math.MaxInt32 {
 		return nil
 	}
 	return C.GoBytes(unsafe.Pointer(p), C.int(n))
