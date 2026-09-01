@@ -261,6 +261,14 @@ func (c *Client) doRaw(ctx context.Context, req Request) (*rawResponse, error) {
 func (c *Client) setHeaders(req *http.Request) {
 	req.Header.Set("User-Agent", c.userAgent)
 	req.Header.Set("Accept", "application/json")
+	// Accept-Language is how the new engine picks the language of everything it
+	// renders server-side: rank names, correction durations, sentence keys. Only
+	// a handful of routes take a lang query parameter, so without this header the
+	// whole API answers in English while the legacy engine served the site
+	// language.
+	if c.lang != "" {
+		req.Header.Set("Accept-Language", c.lang)
+	}
 	if c.domain != "" {
 		req.Header.Set(DomainHeader, c.domain)
 	}

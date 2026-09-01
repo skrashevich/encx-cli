@@ -3,6 +3,7 @@ package encx
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/url"
 	"strings"
@@ -30,6 +31,12 @@ func (e *newEngine) GetMyTeamDetails(ctx context.Context) (string, error) {
 	return e.GetTeamDetails(ctx, teamID)
 }
 
+// errNotInATeam is the one reason currentTeamID can fail that is not a failure
+// to read: the account simply has no team. It is a distinct value so a caller
+// can tell that apart from a session request that 401'd or timed out, which
+// says nothing at all about the account's team.
+var errNotInATeam = errors.New("encx: the signed-in user is not in a team")
+
 // currentTeamID reads the signed-in user's team from the session.
 func (e *newEngine) currentTeamID(ctx context.Context) (int, error) {
 	var session enapi.Session
@@ -44,7 +51,7 @@ func (e *newEngine) currentTeamID(ctx context.Context) (int, error) {
 			return session.User.Team.ID, nil
 		}
 	}
-	return 0, fmt.Errorf("encx: the signed-in user is not in a team")
+	return 0, errNotInATeam
 }
 
 func (e *newEngine) GetTeamManagementInfo(ctx context.Context, teamID int) (*TeamManagementInfo, error) {
@@ -82,12 +89,74 @@ func (e *newEngine) RejectTeamInvitation(ctx context.Context, teamID int) error 
 }
 
 func (e *newEngine) respondToInvitation(ctx context.Context, teamID int, accept bool) error {
+	operation := invitationOperation(accept)
 	path := fmt.Sprintf("/teams/%d/invitations/respond", teamID)
 	body := enapi.InvitationResponseRequest{Accept: accept}
 	if err := e.c.api().PostJSON(ctx, path, body, nil); err != nil {
-		return teamActionErrorFrom(invitationOperation(accept), err)
+		return teamActionErrorFrom(operation, err)
+	}
+
+	// The legacy engine re-read the team page and only then called the action
+	// done. A 2xx here is not that: the deployed backend has already been seen
+	// answering 204 to a route that changed nothing, and a team action that
+	// silently did not happen is exactly the kind of failure a caller cannot
+	// notice on its own.
+	invitations, err := e.GetTeamInvitations(ctx)
+	if err != nil {
+		return fmt.Errorf("encx: team %s: verify state: %w", operation, err)
+	}
+	for _, invitation := range invitations {
+		if invitation.TeamID == teamID {
+			return &TeamActionError{Operation: operation, Message: "приглашение осталось в списке"}
+		}
+	}
+	if !accept {
+		return nil
+	}
+	// Membership is read from the team's own member list, not from
+	// /auth/session: the session may be reconstructed from the bearer token this
+	// client is still holding from before the change, in which case it would
+	// report the old team and turn every successful accept into a hard error.
+	member, err := e.isTeamMember(ctx, teamID)
+	if err != nil {
+		return fmt.Errorf("encx: team %s: verify state: %w", operation, err)
+	}
+	if !member {
+		return &TeamActionError{Operation: operation, Message: "команда не сменилась"}
 	}
 	return nil
+}
+
+// isTeamMember reports whether the signed-in account is listed in a team.
+func (e *newEngine) isTeamMember(ctx context.Context, teamID int) (bool, error) {
+	userID, err := e.currentUserID(ctx)
+	if err != nil {
+		return false, err
+	}
+	var members []enapi.TeamMember
+	if err := e.c.api().GetJSON(ctx, fmt.Sprintf("/teams/%d/members", teamID), nil, &members); err != nil {
+		return false, err
+	}
+	for _, member := range members {
+		if member.UserID == userID {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
+// currentUserID reads the signed-in account's id. Unlike the team, the identity
+// is exactly what a token legitimately carries, so the session is the right
+// place to ask.
+func (e *newEngine) currentUserID(ctx context.Context) (int, error) {
+	var session enapi.Session
+	if err := e.c.api().GetJSON(ctx, "/auth/session", nil, &session); err != nil {
+		return 0, err
+	}
+	if id := session.CurrentUserID(); id != 0 {
+		return id, nil
+	}
+	return 0, fmt.Errorf("encx: the session does not name a user")
 }
 
 func invitationOperation(accept bool) string {
@@ -157,34 +226,97 @@ func (e *newEngine) LeaveTeam(ctx context.Context, teamID int) error {
 	if err := e.c.api().PostJSON(ctx, fmt.Sprintf("/teams/%d/leave", teamID), nil, nil); err != nil {
 		return teamActionErrorFrom("leave", err)
 	}
+	// Verified the way legacy verified it: the account must no longer be listed
+	// in the team it just left. The member list is asked rather than the session
+	// for the same reason the accept path asks it — a token-derived session
+	// could still name the old team. A verification that cannot be performed is
+	// an error, not a success: a 401 here says nothing about whether the leave
+	// went through.
+	member, err := e.isTeamMember(ctx, teamID)
+	if err != nil {
+		return fmt.Errorf("encx: team leave: verify state: %w", err)
+	}
+	if member {
+		return &TeamActionError{Operation: "leave", Message: "команда не покинута"}
+	}
 	return nil
 }
 
 func (e *newEngine) RenameTeam(ctx context.Context, teamID int, name string) error {
-	return e.updateTeam(ctx, teamID, "rename", func(update *enapi.TeamUpdateRequest) {
-		update.Name = name
-	})
+	return e.updateTeam(ctx, teamID, "rename", name, exactMatch,
+		func(update *enapi.TeamUpdateRequest) { update.Name = name },
+		func(team *enapi.Team) string { return team.Name })
 }
 
 func (e *newEngine) SetTeamSite(ctx context.Context, teamID int, site string) error {
-	return e.updateTeam(ctx, teamID, "set site", func(update *enapi.TeamUpdateRequest) {
-		update.WebSite = site
-	})
+	return e.updateTeam(ctx, teamID, "set site", site, urlMatch,
+		func(update *enapi.TeamUpdateRequest) { update.WebSite = site },
+		func(team *enapi.Team) string { return team.WebSite })
 }
 
 func (e *newEngine) SetTeamForum(ctx context.Context, teamID int, forum string) error {
-	return e.updateTeam(ctx, teamID, "set forum", func(update *enapi.TeamUpdateRequest) {
-		update.ForumLink = forum
-	})
+	return e.updateTeam(ctx, teamID, "set forum", forum, urlMatch,
+		func(update *enapi.TeamUpdateRequest) { update.ForumLink = forum },
+		func(team *enapi.Team) string { return team.ForumLink })
+}
+
+// accepted decides whether a write landed, given what was asked for and what the
+// field held before and after.
+type accepted func(want, before, after string) bool
+
+func exactMatch(want, _, after string) bool {
+	return strings.EqualFold(strings.TrimSpace(after), strings.TrimSpace(want))
+}
+
+// urlMatch is the same check relaxed for the two URL fields: servers normalize
+// links — adding a scheme, dropping a trailing slash, lowercasing a host — so
+// demanding the exact string back would report a successful write as a failure.
+//
+// It compares normalized forms rather than merely asking whether the value
+// moved. "It changed" would accept a server that rejected the link and stored
+// something else entirely, and it would call a concurrent edit by somebody else
+// this write's success.
+func urlMatch(want, _, after string) bool {
+	wanted, stored := normalizeURL(want), normalizeURL(after)
+	if wanted == "" {
+		return stored == ""
+	}
+	if stored == "" {
+		// The link was asked for and nothing is stored: the server refused it.
+		return false
+	}
+	return stored == wanted || strings.HasSuffix(stored, wanted) || strings.HasPrefix(stored, wanted)
+}
+
+// normalizeURL reduces a link to what two spellings of the same address share:
+// case, the scheme and a trailing slash are what servers rewrite.
+func normalizeURL(value string) string {
+	trimmed := strings.ToLower(strings.TrimSpace(value))
+	trimmed = strings.TrimSuffix(trimmed, "/")
+	for _, scheme := range []string{"https://", "http://"} {
+		trimmed = strings.TrimPrefix(trimmed, scheme)
+	}
+	return trimmed
 }
 
 // updateTeam reads the team before writing it back: PUT /teams/{id} replaces all
 // three editable fields, so changing one without the others would blank them.
-func (e *newEngine) updateTeam(ctx context.Context, teamID int, operation string, apply func(*enapi.TeamUpdateRequest)) error {
-	var team enapi.Team
-	if err := e.c.api().GetJSON(ctx, fmt.Sprintf("/teams/%d", teamID), nil, &team); err != nil {
+//
+// It then reads the team once more and checks that the field actually changed,
+// which is what the legacy pages did before reporting success.
+func (e *newEngine) updateTeam(
+	ctx context.Context,
+	teamID int,
+	operation, want string,
+	landed accepted,
+	apply func(*enapi.TeamUpdateRequest),
+	read func(*enapi.Team) string,
+) error {
+	team, err := e.team(ctx, teamID)
+	if err != nil {
 		return err
 	}
+	before := read(team)
 	update := enapi.TeamUpdateRequest{
 		Name:      team.Name,
 		WebSite:   team.WebSite,
@@ -195,7 +327,26 @@ func (e *newEngine) updateTeam(ctx context.Context, teamID int, operation string
 	if err := e.c.api().PutJSON(ctx, fmt.Sprintf("/teams/%d", teamID), update, nil); err != nil {
 		return teamActionErrorFrom(operation, err)
 	}
-	return nil
+
+	after, err := e.team(ctx, teamID)
+	if err != nil {
+		return fmt.Errorf("encx: team %s: verify state: %w", operation, err)
+	}
+	if landed(want, before, read(after)) {
+		return nil
+	}
+	return &TeamActionError{
+		Operation: operation,
+		Message:   fmt.Sprintf("значение не изменилось: осталось %q", read(after)),
+	}
+}
+
+func (e *newEngine) team(ctx context.Context, teamID int) (*enapi.Team, error) {
+	var team enapi.Team
+	if err := e.c.api().GetJSON(ctx, fmt.Sprintf("/teams/%d", teamID), nil, &team); err != nil {
+		return nil, err
+	}
+	return &team, nil
 }
 
 // teamActionErrorFrom keeps team failures reported as TeamActionError on both

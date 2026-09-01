@@ -3,6 +3,7 @@ package encx
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"strings"
@@ -17,20 +18,101 @@ type adminCall struct {
 	body   string
 }
 
-const adminLevelsFixture = `{
-  "game_id": 82448, "game_num": 12, "title": "Игра", "started": false,
-  "can_manipulate_levels": true,
-  "levels": [
-    {"level_id": 811, "level_number": 1, "level_name": "Первый", "comment": "комментарий 1"},
-    {"level_id": 812, "level_number": 2, "level_name": "Второй", "comment": "комментарий 2"},
-    {"level_id": 813, "level_number": 3, "level_name": "Третий", "comment": ""}
-  ]
-}`
+// adminLevelBook is the level manager the fake backend serves. It is mutable so
+// that a reordering call can actually reorder: AdminSwapLevels and
+// AdminInsertLevel verify the result against a fresh read, and a fixture frozen
+// in place would make every reorder look like the engine ignored it.
+type adminLevelBook struct {
+	ids      []int
+	names    map[int]string
+	comments map[int]string
+	// frozen makes the reorder routes answer success while changing nothing,
+	// which is how the deployed backend behaves.
+	frozen bool
+}
+
+func newAdminLevelBook() *adminLevelBook {
+	return &adminLevelBook{
+		ids:      []int{811, 812, 813},
+		names:    map[int]string{811: "Первый", 812: "Второй", 813: "Третий"},
+		comments: map[int]string{811: "комментарий 1", 812: "комментарий 2", 813: ""},
+	}
+}
+
+func (b *adminLevelBook) render() string {
+	levels := make([]string, 0, len(b.ids))
+	for i, id := range b.ids {
+		levels = append(levels, fmt.Sprintf(
+			`{"level_id": %d, "level_number": %d, "level_name": %q, "comment": %q}`,
+			id, i+1, b.names[id], b.comments[id]))
+	}
+	return fmt.Sprintf(`{"game_id": 82448, "game_num": 12, "title": "Игра", "started": false,`+
+		`"can_manipulate_levels": true, "levels": [%s]}`, strings.Join(levels, ","))
+}
+
+func (b *adminLevelBook) indexOf(id int) int {
+	for i, existing := range b.ids {
+		if existing == id {
+			return i
+		}
+	}
+	return -1
+}
+
+func (b *adminLevelBook) exchange(first, second int) {
+	if b.frozen {
+		return
+	}
+	i, j := b.indexOf(first), b.indexOf(second)
+	if i < 0 || j < 0 {
+		return
+	}
+	b.ids[i], b.ids[j] = b.ids[j], b.ids[i]
+}
+
+// put moves a level by renumbering, the way the level manager describes the
+// operation, rather than by rebuilding the slice the way moveLevelAfter does.
+// Reusing the production algorithm here would make the happy-path assertions
+// compare an implementation against a copy of itself.
+func (b *adminLevelBook) put(levelID, afterID int) {
+	if b.frozen || b.indexOf(levelID) < 0 {
+		return
+	}
+	// Target position, 1-based: one past the level it must follow, or the front.
+	target := 1
+	if afterID != 0 {
+		target = b.indexOf(afterID) + 2
+		if b.indexOf(levelID) < b.indexOf(afterID) {
+			// Removing the moved level first shifts the destination down by one.
+			target--
+		}
+	}
+
+	numbered := make(map[int]int, len(b.ids))
+	next := 1
+	for _, id := range b.ids {
+		if id == levelID {
+			continue
+		}
+		if next == target {
+			next++
+		}
+		numbered[id] = next
+		next++
+	}
+	numbered[levelID] = target
+
+	reordered := make([]int, len(b.ids))
+	for id, number := range numbered {
+		reordered[number-1] = id
+	}
+	b.ids = reordered
+}
 
 const adminEditorFixture = `{
   "game_id": 82448,
   "level": {"level_id": 812, "level_number": 2, "level_name": "Второй", "comment": "комментарий 2"},
-  "timeout_sec": 3720, "timeout_time_award_sec": 300,
+  "timeout_sec": 3720, "timeout_time_award_sec": -300,
   "attempts_number": 5, "attempts_period_sec": 90, "block_type_id": 1,
   "passing_condition_id": 1, "required_sectors_count": 2,
   "tasks": [
@@ -72,12 +154,35 @@ const adminEditorFixture = `{
 
 func newAdminClient(t *testing.T, calls *[]adminCall) *Client {
 	t.Helper()
-	return newEngineClient(t, func(w http.ResponseWriter, r *http.Request) {
+	client, _ := newAdminClientWithBook(t, calls)
+	return client
+}
+
+func newAdminClientWithBook(t *testing.T, calls *[]adminCall) (*Client, *adminLevelBook) {
+	t.Helper()
+	book := newAdminLevelBook()
+	client := newEngineClient(t, func(w http.ResponseWriter, r *http.Request) {
 		body, _ := io.ReadAll(r.Body)
 		*calls = append(*calls, adminCall{method: r.Method, path: r.URL.Path, body: string(body)})
 		switch {
 		case r.URL.Path == "/admin/games/82448/levels" && r.Method == http.MethodGet:
-			_, _ = w.Write([]byte(adminLevelsFixture))
+			_, _ = w.Write([]byte(book.render()))
+		case r.URL.Path == "/admin/games/82448/levels/exchange":
+			var req struct {
+				Level1ID int `json:"level1_id"`
+				Level2ID int `json:"level2_id"`
+			}
+			_ = json.Unmarshal(body, &req)
+			book.exchange(req.Level1ID, req.Level2ID)
+			w.WriteHeader(http.StatusNoContent)
+		case r.URL.Path == "/admin/games/82448/levels/put":
+			var req struct {
+				LevelID      int `json:"level_id"`
+				AfterLevelID int `json:"after_level_id"`
+			}
+			_ = json.Unmarshal(body, &req)
+			book.put(req.LevelID, req.AfterLevelID)
+			w.WriteHeader(http.StatusNoContent)
 		case strings.HasSuffix(r.URL.Path, "/editor"):
 			_, _ = w.Write([]byte(adminEditorFixture))
 		case r.URL.Path == "/admin/games":
@@ -92,6 +197,7 @@ func newAdminClient(t *testing.T, calls *[]adminCall) *Client {
 			_, _ = w.Write([]byte(`{}`))
 		}
 	})
+	return client, book
 }
 
 func adminCallPaths(calls []adminCall) []string {
@@ -110,6 +216,40 @@ func lastCall(t *testing.T, calls []adminCall) adminCall {
 	return calls[len(calls)-1]
 }
 
+// newLevelEditorClient serves a level editor built from the given settings
+// fields, so a test can vary one rule without restating the whole document.
+func newLevelEditorClient(t *testing.T, settings string) *Client {
+	t.Helper()
+	book := newAdminLevelBook()
+	editor := fmt.Sprintf(`{"game_id": 82448,
+		"level": {"level_id": 812, "level_number": 2, "level_name": "Второй"},
+		"block_type_id": 1, %s}`, settings)
+	return newEngineClient(t, func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.URL.Path == "/admin/games/82448/levels" && r.Method == http.MethodGet:
+			_, _ = w.Write([]byte(book.render()))
+		case strings.HasSuffix(r.URL.Path, "/editor"):
+			_, _ = w.Write([]byte(editor))
+		default:
+			_, _ = w.Write([]byte(`{}`))
+		}
+	})
+}
+
+// callTo returns the last call made to a path. Reordering methods read the level
+// list again afterwards to verify the result, so the write is no longer the last
+// call the client made.
+func callTo(t *testing.T, calls []adminCall, path string) adminCall {
+	t.Helper()
+	for i := len(calls) - 1; i >= 0; i-- {
+		if calls[i].path == path {
+			return calls[i]
+		}
+	}
+	t.Fatalf("no call to %s in %v", path, adminCallPaths(calls))
+	return adminCall{}
+}
+
 func TestNewEngineAdminGetGames(t *testing.T) {
 	var calls []adminCall
 	c := newAdminClient(t, &calls)
@@ -123,6 +263,68 @@ func TestNewEngineAdminGetGames(t *testing.T) {
 	}
 	if len(games) != 1 || games[0].ID != 82448 || games[0].Number != 12 || games[0].Title != "Игра" {
 		t.Fatalf("games = %+v", games)
+	}
+}
+
+// The admin listing is paged. AdminGetGames takes no page argument, so a caller
+// cannot ask for the rest — stopping at the first page would hand back an
+// unmarked prefix of the author's games.
+func TestNewEngineAdminGetGamesReadsEveryPage(t *testing.T) {
+	var pages []string
+	c := newEngineClient(t, func(w http.ResponseWriter, r *http.Request) {
+		page := r.URL.Query().Get("page")
+		pages = append(pages, page)
+		switch page {
+		case "", "1":
+			_, _ = w.Write([]byte(`{"items":[{"game_id":1,"game_num":11,"title":"Первая"}],
+			  "total_count":3,"total_pages":3,"page":1}`))
+		case "2":
+			_, _ = w.Write([]byte(`{"items":[{"game_id":2,"game_num":12,"title":"Вторая"}],
+			  "total_count":3,"total_pages":3,"page":2}`))
+		default:
+			// The last page repeats a row the second one already carried, which
+			// a paging server does when the list shifts under the walk.
+			_, _ = w.Write([]byte(`{"items":[{"game_id":2,"game_num":12,"title":"Вторая"},
+			  {"game_id":3,"game_num":13,"title":"Третья"}],"total_count":3,"total_pages":3,"page":3}`))
+		}
+	})
+
+	games, err := c.AdminGetGames(context.Background())
+	if err != nil {
+		t.Fatalf("AdminGetGames: %v", err)
+	}
+	if len(pages) != 3 {
+		t.Errorf("requested pages %v, want all three", pages)
+	}
+	if len(games) != 3 {
+		t.Fatalf("games = %+v, want three", games)
+	}
+	for i, want := range []string{"Первая", "Вторая", "Третья"} {
+		if games[i].Title != want {
+			t.Errorf("games[%d].Title = %q, want %q", i, games[i].Title, want)
+		}
+	}
+}
+
+// A server that keeps claiming another page must not spin forever — and must
+// not be answered with a truncated list either, which is the very thing walking
+// the pages exists to avoid.
+func TestNewEngineAdminGetGamesStopsOnAnEndlessPager(t *testing.T) {
+	requests := 0
+	c := newEngineClient(t, func(w http.ResponseWriter, r *http.Request) {
+		requests++
+		_, _ = w.Write([]byte(`{"items":[{"game_id":1,"title":"Одна"}],
+		  "total_count":9999,"total_pages":9999,"page":1}`))
+	})
+	games, err := c.AdminGetGames(context.Background())
+	if err == nil {
+		t.Fatalf("AdminGetGames returned %d games without saying the list was cut short", len(games))
+	}
+	if games != nil {
+		t.Errorf("games = %+v, want nothing alongside the error", games)
+	}
+	if requests > adminGamesPageLimit {
+		t.Errorf("made %d requests, want at most %d", requests, adminGamesPageLimit)
 	}
 }
 
@@ -199,13 +401,58 @@ func TestNewEngineAdminCreateLevels(t *testing.T) {
 	if err := c.AdminCreateLevels(context.Background(), 82448, 3); err != nil {
 		t.Fatalf("AdminCreateLevels: %v", err)
 	}
-	if len(calls) != 3 {
-		t.Fatalf("calls = %v, want three creates", adminCallPaths(calls))
+	// The manager is read first to check that the game allows level changes at
+	// all, then one create per level.
+	if len(calls) != 4 {
+		t.Fatalf("calls = %v, want a read then three creates", adminCallPaths(calls))
 	}
-	for i, call := range calls {
+	if calls[0].method != http.MethodGet || calls[0].path != "/admin/games/82448/levels" {
+		t.Errorf("calls[0] = %s %s, want the manager read", calls[0].method, calls[0].path)
+	}
+	for i, call := range calls[1:] {
 		if call.method != http.MethodPost || call.path != "/admin/games/82448/levels" {
-			t.Errorf("calls[%d] = %s %s", i, call.method, call.path)
+			t.Errorf("calls[%d] = %s %s", i+1, call.method, call.path)
 		}
+	}
+}
+
+// A game that does not allow level changes must be refused before anything is
+// written, so the failure names its cause instead of looking like the engine
+// ignoring the request.
+func TestNewEngineLevelChangesRespectCanManipulate(t *testing.T) {
+	cases := []struct {
+		name string
+		call func(*Client) error
+	}{
+		{"create", func(c *Client) error { return c.AdminCreateLevels(context.Background(), 82448, 1) }},
+		{"delete", func(c *Client) error { return c.AdminDeleteLevel(context.Background(), 82448, 1) }},
+		{"clone", func(c *Client) error { return c.AdminCloneLevels(context.Background(), 82448, 1, 1) }},
+		{"swap", func(c *Client) error { return c.AdminSwapLevels(context.Background(), 82448, 1, 2) }},
+		{"insert", func(c *Client) error { return c.AdminInsertLevel(context.Background(), 82448, 1, 2) }},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			var calls []adminCall
+			c := newEngineClient(t, func(w http.ResponseWriter, r *http.Request) {
+				body, _ := io.ReadAll(r.Body)
+				calls = append(calls, adminCall{method: r.Method, path: r.URL.Path, body: string(body)})
+				_, _ = w.Write([]byte(`{"game_id":82448,"can_manipulate_levels":false,"levels":[
+				  {"level_id":811,"level_number":1},{"level_id":812,"level_number":2}]}`))
+			})
+
+			err := tc.call(c)
+			if err == nil {
+				t.Fatal("the call went ahead on a game that forbids level changes")
+			}
+			if !strings.Contains(err.Error(), "не разрешает менять состав и порядок уровней") {
+				t.Errorf("error = %v", err)
+			}
+			for _, call := range calls {
+				if call.method != http.MethodGet {
+					t.Errorf("wrote anyway: %s %s", call.method, call.path)
+				}
+			}
+		})
 	}
 }
 
@@ -248,10 +495,7 @@ func TestNewEngineAdminLevelOrderOperations(t *testing.T) {
 		if err := c.AdminSwapLevels(context.Background(), 82448, 1, 3); err != nil {
 			t.Fatalf("AdminSwapLevels: %v", err)
 		}
-		call := lastCall(t, calls)
-		if call.path != "/admin/games/82448/levels/exchange" {
-			t.Errorf("path = %q", call.path)
-		}
+		call := callTo(t, calls, "/admin/games/82448/levels/exchange")
 		var body struct {
 			Level1ID int `json:"level1_id"`
 			Level2ID int `json:"level2_id"`
@@ -270,10 +514,7 @@ func TestNewEngineAdminLevelOrderOperations(t *testing.T) {
 		if err := c.AdminInsertLevel(context.Background(), 82448, 3, 1); err != nil {
 			t.Fatalf("AdminInsertLevel: %v", err)
 		}
-		call := lastCall(t, calls)
-		if call.path != "/admin/games/82448/levels/put" {
-			t.Errorf("path = %q", call.path)
-		}
+		call := callTo(t, calls, "/admin/games/82448/levels/put")
 		var body struct {
 			LevelID      int `json:"level_id"`
 			AfterLevelID int `json:"after_level_id"`
@@ -293,7 +534,8 @@ func TestNewEngineAdminLevelOrderOperations(t *testing.T) {
 		var body struct {
 			AfterLevelID int `json:"after_level_id"`
 		}
-		_ = json.Unmarshal([]byte(lastCall(t, calls).body), &body)
+		putCall := callTo(t, calls, "/admin/games/82448/levels/put")
+		_ = json.Unmarshal([]byte(putCall.body), &body)
 		if body.AfterLevelID != 0 {
 			t.Errorf("after_level_id = %d, want 0 for the first position", body.AfterLevelID)
 		}
@@ -308,6 +550,58 @@ func TestNewEngineAdminLevelOrderOperations(t *testing.T) {
 		}
 		if !strings.Contains(err.Error(), "no level 99") {
 			t.Errorf("error = %v", err)
+		}
+	})
+
+	// Both reorder routes answer 204 on the deployed backend and leave the level
+	// order untouched. Reporting success then would tell an import or a level
+	// editor that a game is ordered the way it asked for when it is not, so the
+	// result is verified against a fresh read.
+	t.Run("swap the engine ignored", func(t *testing.T) {
+		var calls []adminCall
+		c, book := newAdminClientWithBook(t, &calls)
+		book.frozen = true
+		err := c.AdminSwapLevels(context.Background(), 82448, 1, 3)
+		if err == nil {
+			t.Fatal("AdminSwapLevels reported success although the order did not change")
+		}
+		if !strings.Contains(err.Error(), "порядок уровней не изменился") {
+			t.Errorf("error = %v", err)
+		}
+	})
+
+	t.Run("insert the engine ignored", func(t *testing.T) {
+		var calls []adminCall
+		c, book := newAdminClientWithBook(t, &calls)
+		book.frozen = true
+		err := c.AdminInsertLevel(context.Background(), 82448, 3, 1)
+		if err == nil {
+			t.Fatal("AdminInsertLevel reported success although the order did not change")
+		}
+		if !strings.Contains(err.Error(), "порядок уровней не изменился") {
+			t.Errorf("error = %v", err)
+		}
+	})
+
+	// A reorder that is already satisfied is not an error: moving level 3 behind
+	// level 2 when it is already there leaves the game exactly as asked.
+	t.Run("insert that changes nothing succeeds", func(t *testing.T) {
+		var calls []adminCall
+		c, book := newAdminClientWithBook(t, &calls)
+		book.frozen = true
+		if err := c.AdminInsertLevel(context.Background(), 82448, 3, 2); err != nil {
+			t.Errorf("AdminInsertLevel: %v", err)
+		}
+	})
+
+	// Asking a level to follow itself leaves the game alone on the legacy form,
+	// so it must not be read as a move that the engine failed to apply.
+	t.Run("insert a level after itself succeeds", func(t *testing.T) {
+		var calls []adminCall
+		c, book := newAdminClientWithBook(t, &calls)
+		book.frozen = true
+		if err := c.AdminInsertLevel(context.Background(), 82448, 2, 2); err != nil {
+			t.Errorf("AdminInsertLevel: %v", err)
 		}
 	})
 
@@ -582,7 +876,7 @@ func TestNewEngineAdminBonuses(t *testing.T) {
 			body, _ := io.ReadAll(r.Body)
 			calls = append(calls, adminCall{method: r.Method, path: r.URL.Path, body: string(body)})
 			if r.URL.Path == "/admin/games/82448/levels" {
-				_, _ = w.Write([]byte(adminLevelsFixture))
+				_, _ = w.Write([]byte(newAdminLevelBook().render()))
 				return
 			}
 			_, _ = w.Write([]byte(`{"level":{"level_id":812,"level_number":2},
@@ -766,6 +1060,9 @@ func TestNewEngineAdminLevelSettings(t *testing.T) {
 		if settings.AutopassHours != 1 || settings.AutopassMinutes != 2 || settings.AutopassSeconds != 0 {
 			t.Errorf("autopass = %+v", settings)
 		}
+		// The engine records the autopass award signed: -300 is a five-minute
+		// penalty, which the legacy pair (checkbox, unsigned duration) spells as
+		// TimeoutPenalty with PenaltyMinutes 5.
 		if !settings.TimeoutPenalty || settings.PenaltyMinutes != 5 {
 			t.Errorf("penalty = %+v", settings)
 		}
@@ -778,6 +1075,51 @@ func TestNewEngineAdminLevelSettings(t *testing.T) {
 		}
 		if settings.RequiredSectorsCount != 2 {
 			t.Errorf("RequiredSectorsCount = %d", settings.RequiredSectorsCount)
+		}
+	})
+
+	// A positive timeout_time_award_sec is a bonus, not a penalty: the level
+	// gives time back instead of taking it. Reading it as a penalty would show
+	// an author a rule that is the opposite of the one their game applies.
+	t.Run("a positive autopass award is not a penalty", func(t *testing.T) {
+		c := newLevelEditorClient(t, `"timeout_sec": 600, "timeout_time_award_sec": 300,
+			"passing_condition_id": 1, "required_sectors_count": 2`)
+		settings, err := c.AdminGetLevelSettings(ctx, 82448, 2)
+		if err != nil {
+			t.Fatalf("AdminGetLevelSettings: %v", err)
+		}
+		if settings.TimeoutPenalty {
+			t.Error("a positive award was reported as a penalty")
+		}
+		if settings.PenaltyMinutes != 5 {
+			t.Errorf("award = %dh %dm %ds, want 0h 5m 0s",
+				settings.PenaltyHours, settings.PenaltyMinutes, settings.PenaltySeconds)
+		}
+	})
+
+	// required_sectors_count keeps its last value when the level no longer
+	// closes on a sector count, so it only means something under condition 1.
+	t.Run("sector count is read only under the counting condition", func(t *testing.T) {
+		for _, tc := range []struct {
+			name      string
+			condition int
+			want      int
+		}{
+			{"every sector", 0, 0},
+			{"a given count", 1, 3},
+			{"a score", 2, 0},
+		} {
+			t.Run(tc.name, func(t *testing.T) {
+				c := newLevelEditorClient(t, fmt.Sprintf(
+					`"passing_condition_id": %d, "required_sectors_count": 3`, tc.condition))
+				settings, err := c.AdminGetLevelSettings(ctx, 82448, 2)
+				if err != nil {
+					t.Fatalf("AdminGetLevelSettings: %v", err)
+				}
+				if settings.RequiredSectorsCount != tc.want {
+					t.Errorf("RequiredSectorsCount = %d, want %d", settings.RequiredSectorsCount, tc.want)
+				}
+			})
 		}
 	})
 

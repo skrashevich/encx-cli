@@ -99,6 +99,9 @@ func IsUnauthorized(err error) bool { return IsStatus(err, http.StatusUnauthoriz
 // IsNotFound reports whether err is a 404 from the new engine.
 func IsNotFound(err error) bool { return IsStatus(err, http.StatusNotFound) }
 
+// IsForbidden reports whether err is a 403 from the new engine.
+func IsForbidden(err error) bool { return IsStatus(err, http.StatusForbidden) }
+
 func parseAPIError(method, path string, status int, body []byte) *APIError {
 	apiErr := &APIError{Method: method, Path: path, Status: status, Body: truncateBody(body)}
 

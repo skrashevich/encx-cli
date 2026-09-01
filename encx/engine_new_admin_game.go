@@ -46,9 +46,24 @@ func (e *newEngine) AdminGetGameInfo(ctx context.Context, gameId int) (*AdminGam
 		CertificateMode:          itoaOrEmpty(game.CertificateAccessMode),
 		FirstPlaces:              itoaOrEmpty(game.CertificatePlaces),
 		AcceptRateFrom:           game.AcceptRateFromDateTime,
-		AuthorComplexity:         formatFloatOrEmpty(game.AFC),
+		AuthorComplexity:         formatFloatOrEmpty(game.AFC * afcToLegacyScale),
 	}, nil
 }
+
+// afcToLegacyScale converts between the two spellings of the author complexity.
+//
+// Measured on a live domain: the route accepts afc in 0..1 inclusive and stores
+// it in steps of a tenth, truncating the rest (0.25 becomes 0.2, 0.99 becomes
+// 0.9). The field therefore has exactly eleven states — the same eleven the
+// legacy editor's ddlAuthorsCompexity offers as whole numbers 0..10, with 10 for
+// its default. The specification agrees, noting "SP stores *10". Passing the
+// value through unchanged would make a legacy-shaped 10 a validation error and a
+// REST-shaped 1 mean a tenth of what it does on the other engine.
+const afcToLegacyScale = 10
+
+// afcLegacyMax is the largest author complexity the legacy spelling can carry;
+// it is the scale only because the field happens to run from zero to one.
+const afcLegacyMax = 10
 
 // AdminUpdateGameInfo sends only the fields the caller filled in.
 //
@@ -73,12 +88,13 @@ func (e *newEngine) AdminUpdateGameInfo(ctx context.Context, gameId int, info Ad
 	setString("finish_date_time", info.FinishDateTime)
 	setString("request_last_date", info.RequestLastDate)
 	setString("accept_rate_from_date_time", info.AcceptRateFrom)
-	// models.Game.prize is in whole currency units, the update request takes
-	// cents (its field is named prize_cents and documented as Fee.Cents), so the
-	// value AdminGetGameInfo handed the caller has to be scaled back.
-	if prize, err := strconv.Atoi(strings.TrimSpace(info.Prize)); err == nil {
-		update["prize_cents"] = prize * 100
-	}
+	// prize_cents is named for the column it feeds, not for a different unit:
+	// writing prize_cents=1234 makes models.Game.prize read back as 1234. The
+	// value therefore travels exactly as AdminGetGameInfo handed it over, the way
+	// the legacy form passed its Prize field through. Scaling it here used to turn
+	// a plain read-modify-write into a hundredfold raise, and past the server's
+	// limit into an outright HTTP 400.
+	setInt("prize_cents", info.Prize)
 	setInt("stat_availability_type_id", info.GameStatAvailability)
 	setInt("scenario_availability", info.GameScenarioAvailability)
 	setInt("max_players", info.MaxPlayers)
@@ -87,7 +103,12 @@ func (e *newEngine) AdminUpdateGameInfo(ctx context.Context, gameId int, info Ad
 	setInt("certificate_access_mode", info.CertificateMode)
 	setInt("certificate_places", info.FirstPlaces)
 	if afc, err := strconv.ParseFloat(strings.TrimSpace(info.AuthorComplexity), 64); err == nil {
-		update["afc"] = afc
+		if afc < 0 || afc > afcLegacyMax {
+			return fmt.Errorf(
+				"encx: авторская сложность %q вне диапазона: новый движок принимает 0..%d",
+				info.AuthorComplexity, afcLegacyMax)
+		}
+		update["afc"] = afc / afcToLegacyScale
 	}
 	if authors := splitLogins(info.Authors); len(authors) > 0 {
 		update["authors"] = authors
@@ -203,10 +224,59 @@ func correctionLevelLabel(item enapi.GameCorrection) string {
 func (e *newEngine) corrections(ctx context.Context, gameID int) (*enapi.GameCorrectionsResponse, error) {
 	var resp enapi.GameCorrectionsResponse
 	path := fmt.Sprintf("/games/%d/corrections", gameID)
-	if err := e.c.api().GetJSON(ctx, path, nil, &resp); err != nil {
+	// value_text is rendered server-side ("3 minutes" / "3 минуты"); the route
+	// takes no lang parameter, so the language travels in Accept-Language, which
+	// enapi.Client sets from the configured lang.
+	err := e.c.api().GetJSON(ctx, path, nil, &resp)
+	if err == nil {
+		return &resp, nil
+	}
+	// The route answers 403 for a game that has not started — there are no
+	// results to correct yet — where the legacy Corrections.aspx rendered an
+	// empty table. Measured on demo.en.cx: corrections are readable for every
+	// started game, including games this account does not own, and refused only
+	// for an own game that has not begun.
+	//
+	// So the 403 is turned into an empty list only after the game editor
+	// confirms this session administers the game. That route, unlike the
+	// lifecycle one, really does refuse a game somebody else owns: lifecycle
+	// answers 200 for any game and would have waved through a stranger's 403.
+	// Both halves of the measured precondition are required: the game is ours
+	// AND it has not started. A started game whose corrections suddenly 403 —
+	// a withdrawn co-author role, a policy change, a bug — is a real refusal and
+	// must not be flattened into an empty list.
+	if !enapi.IsForbidden(err) {
 		return nil, err
 	}
-	return &resp, nil
+	administers, started := e.administersGame(ctx, gameID)
+	if !administers || started {
+		return nil, err
+	}
+	return &enapi.GameCorrectionsResponse{GameID: gameID}, nil
+}
+
+// administersGame reports whether this session may open the game's admin editor,
+// which is the API's own answer to "is this your game", and whether that game
+// has started. The lifecycle route cannot answer the first question: it replies
+// 200 for games the account does not own.
+func (e *newEngine) administersGame(ctx context.Context, gameID int) (administers, started bool) {
+	var editor enapi.AdminGameEditorResponse
+	if err := e.c.api().GetJSON(ctx, fmt.Sprintf("/admin/games/%d", gameID), nil, &editor); err != nil {
+		return false, false
+	}
+	if editor.Game == nil {
+		return false, false
+	}
+	return true, editor.Game.Started
+}
+
+func (e *newEngine) gameLifecycle(ctx context.Context, gameID int) (*enapi.AdminGameLifecycle, error) {
+	var lifecycle enapi.AdminGameLifecycle
+	path := fmt.Sprintf("/admin/games/%d/lifecycle", gameID)
+	if err := e.c.api().GetJSON(ctx, path, nil, &lifecycle); err != nil {
+		return nil, err
+	}
+	return &lifecycle, nil
 }
 
 func (e *newEngine) AdminAddCorrection(ctx context.Context, gameId int, corr AdminCorrectionAdd) error {
@@ -295,24 +365,57 @@ func (e *newEngine) AdminGetTeams(ctx context.Context, gameId, levelNum int) ([]
 	return teams, nil
 }
 
+// monitorPageLimit bounds the walk over the action monitor.
+const monitorPageLimit = 100
+
 func (e *newEngine) AdminGetActionMonitor(ctx context.Context, gameId int) ([]AdminActionMonitorEntry, error) {
-	var resp enapi.GameMonitoringResponse
-	q := url.Values{"tab": {"main"}}
-	if err := e.c.api().GetJSON(ctx, fmt.Sprintf("/games/%d/monitoring", gameId), q, &resp); err != nil {
-		return nil, err
+	path := fmt.Sprintf("/games/%d/monitoring", gameId)
+	entries := make([]AdminActionMonitorEntry, 0)
+	seen := make(map[int]bool)
+
+	// The monitor is paged at 50 rows by default and AdminGetActionMonitor takes
+	// no page argument, so every page is read: the legacy ActionMonitor page
+	// handed over every row it rendered, and a silent 50-row prefix of a busy
+	// game's log is a different answer, not a shorter one.
+	for page := 1; page <= monitorPageLimit; page++ {
+		var resp enapi.GameMonitoringResponse
+		// tab is documented as a number: 0 is the answer monitor the legacy
+		// ActionMonitor.aspx showed, 1 is the bonus tab.
+		q := url.Values{"tab": {"0"}}
+		if page > 1 {
+			q.Set("page", strconv.Itoa(page))
+		}
+		if err := e.c.api().GetJSON(ctx, path, q, &resp); err != nil {
+			return nil, err
+		}
+		if page == 1 && !resp.CanView && len(resp.Actions) == 0 {
+			return nil, fmt.Errorf("encx: action monitor %d: просмотр монитора недоступен", gameId)
+		}
+		for _, action := range resp.Actions {
+			// A shifting log can repeat a row across pages; the action id is
+			// what makes the walk stable.
+			if action.ActionID != 0 {
+				if seen[action.ActionID] {
+					continue
+				}
+				seen[action.ActionID] = true
+			}
+			entries = append(entries, AdminActionMonitorEntry{
+				Number:      strconv.Itoa(action.LevelNumber),
+				Participant: firstNonEmpty(action.TeamName, action.UserLogin),
+				Direction:   monitorDirection(action),
+				Answer:      action.Answer,
+				DateTime:    action.AnswerDateTime,
+				Sectors:     action.SectorsInfo,
+			})
+		}
+		if len(resp.Actions) == 0 || page >= resp.TotalPages {
+			return entries, nil
+		}
 	}
-	entries := make([]AdminActionMonitorEntry, 0, len(resp.Actions))
-	for _, action := range resp.Actions {
-		entries = append(entries, AdminActionMonitorEntry{
-			Number:      strconv.Itoa(action.LevelNumber),
-			Participant: firstNonEmpty(action.TeamName, action.UserLogin),
-			Direction:   monitorDirection(action),
-			Answer:      action.Answer,
-			DateTime:    action.AnswerDateTime,
-			Sectors:     action.SectorsInfo,
-		})
-	}
-	return entries, nil
+	return nil, fmt.Errorf(
+		"encx: action monitor %d: движок отдаёт больше %d страниц — результат был бы неполным",
+		gameId, monitorPageLimit)
 }
 
 // monitorDirection renders the verdict column the legacy monitor showed.

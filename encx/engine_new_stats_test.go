@@ -2,6 +2,7 @@ package encx
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 	"strings"
 	"testing"
@@ -12,7 +13,11 @@ const statisticsFixture = `{
   "game_type_id": 1, "zone_id": 0, "levels_sequence_id": 2, "total_levels": 2,
   "hide_levels_names": false, "can_view_stats": true, "is_game_author": true,
   "admin_warning": "статистика видна только автору",
-  "current_page": 1, "total_pages": 3, "rows_per_page": 20, "sort_field": "time",
+  "current_page": 1, "total_pages": 1, "rows_per_page": 20, "sort_field": "time",
+  "level_corrections": [
+    {"level_id": 811, "team_id": 77, "user_id": 501, "correction_value": -600},
+    {"level_id": 812, "team_id": 77, "user_id": 501, "correction_value": 300}
+  ],
   "levels": [
     {"level_id": 811, "level_number": 1, "level_name": "Первый", "dismissed": false},
     {"level_id": 812, "level_number": 2, "level_name": "Второй", "dismissed": true}
@@ -120,12 +125,228 @@ func TestNewEngineStatisticsMapsDocumentFlags(t *testing.T) {
 	if !stats.ShowAdminWarning {
 		t.Error("ShowAdminWarning = false, want true when the engine sent a warning")
 	}
-	if !stats.PagerVisible {
-		t.Error("PagerVisible = false, want true for a 3-page result")
+	if stats.PagerVisible {
+		t.Error("PagerVisible = true although the whole single-page table was read")
 	}
 	if stats.Game == nil || stats.Game.GameID != 82448 || stats.Game.GameNum != 12 ||
 		stats.Game.Title != "Тестовая игра" || stats.Game.LevelsSequence != SequenceRandom {
 		t.Errorf("Game = %+v", stats.Game)
+	}
+}
+
+// The statistics table is paged, and GetGameStatistics takes no page argument.
+// Stopping at page 1 would not merely shorten the answer: PassedPlayers and
+// LevelPlayers are counted from the rows themselves, so a partial read publishes
+// wrong totals as if they were the game's official numbers.
+func TestNewEngineStatisticsReadsEveryPage(t *testing.T) {
+	var pages []string
+	c := newEngineClient(t, func(w http.ResponseWriter, r *http.Request) {
+		page := r.URL.Query().Get("page")
+		pages = append(pages, page)
+		row := func(userID int) string {
+			return fmt.Sprintf(`{"level_id":811,"level_num":1,"user_id":%d,"user_login":"u%d",
+			  "team_id":%d,"spent_seconds":100}`, userID, userID, userID)
+		}
+		switch page {
+		case "", "1":
+			_, _ = w.Write([]byte(`{"game_id":82448,"current_page":1,"total_pages":3,
+			  "levels":[{"level_id":811,"level_number":1}],
+			  "level_stats":{"1":[` + row(1) + `]}}`))
+		case "2":
+			_, _ = w.Write([]byte(`{"game_id":82448,"current_page":2,"total_pages":3,
+			  "levels":[{"level_id":811,"level_number":1}],
+			  "level_stats":{"1":[` + row(2) + `]}}`))
+		default:
+			_, _ = w.Write([]byte(`{"game_id":82448,"current_page":3,"total_pages":3,
+			  "levels":[{"level_id":811,"level_number":1}],
+			  "level_stats":{"1":[` + row(3) + `]}}`))
+		}
+	})
+
+	stats, err := c.GetGameStatistics(context.Background(), 82448)
+	if err != nil {
+		t.Fatalf("GetGameStatistics: %v", err)
+	}
+	if len(pages) != 3 {
+		t.Errorf("requested pages %v, want all three", pages)
+	}
+	if len(stats.StatItems) != 1 || len(stats.StatItems[0]) != 3 {
+		t.Fatalf("StatItems = %+v, want one group of three rows", stats.StatItems)
+	}
+	if stats.Levels[0].PassedPlayers != 3 {
+		t.Errorf("PassedPlayers = %d, want 3 — the count is derived from the rows",
+			stats.Levels[0].PassedPlayers)
+	}
+	if stats.LevelPlayers[0].Count != 3 {
+		t.Errorf("LevelPlayers count = %d, want 3", stats.LevelPlayers[0].Count)
+	}
+}
+
+// level_corrections is a per-game aggregate the engine repeats on every page,
+// not paged row data. Accumulating it across pages would multiply every
+// correction by the number of pages read — a wrong number rather than a missing
+// one, and invisible unless a test pages AND corrects at the same time.
+func TestNewEngineStatisticsDoesNotMultiplyCorrectionsAcrossPages(t *testing.T) {
+	corrections := `"level_corrections":[{"level_id":811,"team_id":77,"user_id":501,"correction_value":-600}]`
+	c := newEngineClient(t, func(w http.ResponseWriter, r *http.Request) {
+		page := r.URL.Query().Get("page")
+		user := 1
+		if page == "2" {
+			user = 501
+		} else if page == "3" {
+			user = 3
+		}
+		_, _ = w.Write([]byte(fmt.Sprintf(`{"game_id":82448,"total_pages":3,%s,
+		  "levels":[{"level_id":811,"level_number":1}],
+		  "level_stats":{"1":[{"level_id":811,"level_num":1,"user_id":%d,"team_id":77,
+		    "spent_seconds":100}]}}`, corrections, user)))
+	})
+
+	stats, err := c.GetGameStatistics(context.Background(), 82448)
+	if err != nil {
+		t.Fatalf("GetGameStatistics: %v", err)
+	}
+	var corrected *StatItem
+	for i, item := range stats.StatItems[0] {
+		if item.UserId == 501 {
+			corrected = &stats.StatItems[0][i]
+		}
+	}
+	if corrected == nil || corrected.Corrections == nil {
+		t.Fatalf("the corrected row is missing its correction: %+v", stats.StatItems[0])
+	}
+	if corrected.Corrections.TotalSeconds != -600 {
+		t.Errorf("correction = %v seconds after reading three pages, want -600",
+			corrected.Corrections.TotalSeconds)
+	}
+}
+
+// A server that never says it is done must not yield a silently short table.
+func TestNewEngineStatisticsRefusesAnIncompleteRead(t *testing.T) {
+	c := newEngineClient(t, func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(`{"game_id":82448,"current_page":1,"total_pages":99,
+		  "levels":[{"level_id":811,"level_number":1}],
+		  "level_stats":{"1":[{"level_id":811,"level_num":1,"user_id":1,"spent_seconds":1}]}}`))
+	})
+	if _, err := c.GetGameStatistics(context.Background(), 82448); err == nil {
+		t.Fatal("GetGameStatistics returned a partial table without saying so")
+	}
+}
+
+// Corrections are what turn raw level time into standing time. The new engine
+// publishes them once in a separate list instead of inside every row, and
+// dropping them ranks teams differently from the official result.
+func TestNewEngineStatisticsFoldsInCorrections(t *testing.T) {
+	c := newEngineClient(t, func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(statisticsFixture))
+	})
+	stats, err := c.GetGameStatistics(context.Background(), 82448)
+	if err != nil {
+		t.Fatalf("GetGameStatistics: %v", err)
+	}
+
+	bonus := stats.StatItems[0][0]
+	if bonus.Corrections == nil {
+		t.Fatalf("level 1 row for the corrected team carries no correction: %+v", bonus)
+	}
+	if bonus.Corrections.TotalSeconds != -600 {
+		t.Errorf("correction = %v seconds, want -600 (a bonus takes time off)",
+			bonus.Corrections.TotalSeconds)
+	}
+
+	penalty := stats.StatItems[1][0]
+	if penalty.Corrections == nil || penalty.Corrections.TotalSeconds != 300 {
+		t.Errorf("level 2 correction = %+v, want +300", penalty.Corrections)
+	}
+
+	// A row nobody corrected keeps a nil correction rather than a zero one.
+	if other := stats.StatItems[0][1]; other.Corrections != nil {
+		t.Errorf("an uncorrected row got %+v", other.Corrections)
+	}
+}
+
+// needs_confirm means the author closed the statistics. The legacy endpoint
+// handed the table over, so the override is sent — but only in answer to that
+// flag: the server records the override in its audit log, and doing it on every
+// read would be a side effect the legacy call never had.
+func TestNewEngineStatisticsConfirmsOnlyWhenAsked(t *testing.T) {
+	t.Run("an open game is read without the override", func(t *testing.T) {
+		var queries []string
+		c := newEngineClient(t, func(w http.ResponseWriter, r *http.Request) {
+			queries = append(queries, r.URL.RawQuery)
+			_, _ = w.Write([]byte(`{"game_id":82448,"levels":[],"level_stats":{}}`))
+		})
+		if _, err := c.GetGameStatistics(context.Background(), 82448); err != nil {
+			t.Fatalf("GetGameStatistics: %v", err)
+		}
+		for _, query := range queries {
+			if strings.Contains(query, "confirm") {
+				t.Errorf("query %q carries the override on an open game", query)
+			}
+		}
+	})
+
+	t.Run("a closed game is retried with the override", func(t *testing.T) {
+		var queries []string
+		c := newEngineClient(t, func(w http.ResponseWriter, r *http.Request) {
+			queries = append(queries, r.URL.RawQuery)
+			if r.URL.Query().Get("confirm") == "1" {
+				_, _ = w.Write([]byte(`{"game_id":82448,"needs_confirm":false,
+				  "levels":[{"level_id":811,"level_number":1}],
+				  "level_stats":{"1":[{"level_id":811,"level_num":1,"user_id":1,"spent_seconds":10}]}}`))
+				return
+			}
+			_, _ = w.Write([]byte(`{"game_id":82448,"needs_confirm":true,
+			  "confirm_message":"автор закрыл статистику","levels":[],"level_stats":{}}`))
+		})
+
+		stats, err := c.GetGameStatistics(context.Background(), 82448)
+		if err != nil {
+			t.Fatalf("GetGameStatistics: %v", err)
+		}
+		if len(queries) != 2 || strings.Contains(queries[0], "confirm") ||
+			!strings.Contains(queries[1], "confirm=1") {
+			t.Errorf("queries = %v, want a plain read then one confirmed retry", queries)
+		}
+		if len(stats.StatItems) != 1 {
+			t.Errorf("StatItems = %+v, want the table the retry returned", stats.StatItems)
+		}
+	})
+
+	t.Run("a game that stays closed is reported, not emptied", func(t *testing.T) {
+		c := newEngineClient(t, func(w http.ResponseWriter, r *http.Request) {
+			_, _ = w.Write([]byte(`{"game_id":82448,"needs_confirm":true,
+			  "confirm_message":"автор закрыл статистику","levels":[],"level_stats":{}}`))
+		})
+		_, err := c.GetGameStatistics(context.Background(), 82448)
+		if err == nil {
+			t.Fatal("GetGameStatistics returned an empty table for closed statistics")
+		}
+		if !strings.Contains(err.Error(), "закрыл статистику") {
+			t.Errorf("error = %v", err)
+		}
+	})
+}
+
+// A backend that pages correctly but does not echo current_page must still be
+// read to the end rather than failing as if it never advanced.
+func TestNewEngineStatisticsPagesWithoutACurrentPageEcho(t *testing.T) {
+	c := newEngineClient(t, func(w http.ResponseWriter, r *http.Request) {
+		user := 1
+		if page := r.URL.Query().Get("page"); page != "" {
+			user = 2
+		}
+		_, _ = w.Write([]byte(fmt.Sprintf(`{"game_id":82448,"total_pages":2,
+		  "levels":[{"level_id":811,"level_number":1}],
+		  "level_stats":{"1":[{"level_id":811,"level_num":1,"user_id":%d,"spent_seconds":10}]}}`, user)))
+	})
+
+	stats, err := c.GetGameStatistics(context.Background(), 82448)
+	if err != nil {
+		t.Fatalf("GetGameStatistics: %v", err)
+	}
+	if len(stats.StatItems[0]) != 2 {
+		t.Errorf("rows = %d, want both pages", len(stats.StatItems[0]))
 	}
 }
 

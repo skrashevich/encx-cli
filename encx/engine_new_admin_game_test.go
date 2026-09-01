@@ -18,7 +18,7 @@ const gameEditorFixture = `{
     "is_moderated": true, "show_finish_place": true,
     "stat_availability_type_id": 2, "scenario_availability": 3,
     "max_players": 40, "max_team_members": 6, "show_fee": 1,
-    "certificate_access_mode": 1, "certificate_places": 3, "afc": 1.5
+    "certificate_access_mode": 1, "certificate_places": 3, "afc": 0.5
   },
   "authors": [{"user_id": 1, "login": "svk"}, {"user_id": 2, "login": "second"}]
 }`
@@ -64,7 +64,7 @@ func newGameAdminClient(t *testing.T, calls *[]adminCall) *Client {
 			   "answer":"мимо","answer_date_time":"31.08.2026 12:01:00","is_correct":false}
 			]}`))
 		case r.URL.Path == "/admin/games/82448/levels" && r.Method == http.MethodGet:
-			_, _ = w.Write([]byte(adminLevelsFixture))
+			_, _ = w.Write([]byte(newAdminLevelBook().render()))
 		case strings.HasSuffix(r.URL.Path, "/editor"):
 			_, _ = w.Write([]byte(`{"game_id":82448,
 			  "level":{"level_id":812,"level_number":2},
@@ -101,8 +101,62 @@ func TestNewEngineAdminGetGameInfo(t *testing.T) {
 	if info.GameStatAvailability != "2" || info.GameScenarioAvailability != "3" {
 		t.Errorf("availability = %q/%q", info.GameStatAvailability, info.GameScenarioAvailability)
 	}
-	if info.AuthorComplexity != "1.5" {
-		t.Errorf("AuthorComplexity = %q", info.AuthorComplexity)
+	// The legacy editor's ddlAuthorsCompexity is ten times the REST afc, so an
+	// afc of 0.5 is the 5 a legacy caller reads and writes.
+	if info.AuthorComplexity != "5" {
+		t.Errorf("AuthorComplexity = %q, want %q", info.AuthorComplexity, "5")
+	}
+}
+
+// TestNewEngineAdminGameInfoRoundTrip pins the property the two engines have to
+// share: reading a game and writing the same values back changes nothing. The
+// prize used to be multiplied by a hundred on the way out, which turned a
+// read-modify-write into a hundredfold raise and, past the server's limit, into
+// an outright rejection.
+func TestNewEngineAdminGameInfoRoundTrip(t *testing.T) {
+	var calls []adminCall
+	c := newGameAdminClient(t, &calls)
+	ctx := context.Background()
+
+	info, err := c.AdminGetGameInfo(ctx, 82448)
+	if err != nil {
+		t.Fatalf("AdminGetGameInfo: %v", err)
+	}
+	if err := c.AdminUpdateGameInfo(ctx, 82448, *info); err != nil {
+		t.Fatalf("AdminUpdateGameInfo: %v", err)
+	}
+
+	var body map[string]any
+	if err := json.Unmarshal([]byte(lastCall(t, calls).body), &body); err != nil {
+		t.Fatalf("body is not JSON: %q", lastCall(t, calls).body)
+	}
+	if body["prize_cents"] != float64(5000) {
+		t.Errorf("prize_cents = %v, want the 5000 that was read back", body["prize_cents"])
+	}
+	if body["afc"] != 0.5 {
+		t.Errorf("afc = %v, want the 0.5 that was read back", body["afc"])
+	}
+	if body["max_players"] != float64(40) || body["max_team_members"] != float64(6) {
+		t.Errorf("limits = %v/%v", body["max_players"], body["max_team_members"])
+	}
+}
+
+// The new engine accepts afc in 0..1, i.e. 0..10 in the legacy spelling. A
+// value outside that range is refused before the request goes out, so the
+// caller learns what is wrong instead of reading "Validation failed".
+func TestNewEngineAdminUpdateGameInfoRejectsOutOfRangeComplexity(t *testing.T) {
+	var calls []adminCall
+	c := newGameAdminClient(t, &calls)
+
+	err := c.AdminUpdateGameInfo(context.Background(), 82448, AdminGameInfo{AuthorComplexity: "15"})
+	if err == nil {
+		t.Fatal("AdminUpdateGameInfo accepted an author complexity of 15")
+	}
+	if !strings.Contains(err.Error(), "вне диапазона") {
+		t.Errorf("error = %v", err)
+	}
+	if len(calls) != 0 {
+		t.Errorf("the request was sent anyway: %v", adminCallPaths(calls))
 	}
 }
 

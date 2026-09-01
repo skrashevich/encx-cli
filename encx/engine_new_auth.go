@@ -71,6 +71,17 @@ func (e *newEngine) Login(ctx context.Context, login, password string, opts ...L
 		Header: http.Header{clientClassHeader: []string{automationClientClass}},
 	})
 	if err == nil {
+		// A 200 is not by itself a sign-in: the route's success body is
+		// free-form, and one without a token would otherwise be reported as a
+		// successful login while SetToken("") threw away a session that was
+		// working. The legacy engine decided this from the answer's own error
+		// field rather than from the status line, and so does this.
+		if strings.TrimSpace(payload.Token) == "" {
+			return &LoginResponse{
+				Error:   5,
+				Message: firstNonEmpty(payload.Message, payload.Error, "вход не выдал токен"),
+			}, nil
+		}
 		e.c.api().SetToken(payload.Token)
 		e.c.setCaptchaToken("")
 		return &LoginResponse{Error: 0, Message: payload.Message}, nil

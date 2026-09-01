@@ -86,10 +86,18 @@ func (e *newEngine) GetTimeoutToGame(ctx context.Context, gameId int) (*int, err
 	if err := e.c.api().GetJSON(ctx, path, nil, &box); err != nil {
 		return nil, err
 	}
-	if box.SecondsToStart <= 0 {
+	// nil means "this game shows no countdown", which is what the legacy engine
+	// reported when the page carried no StartCounter. show_timer is that same
+	// statement, so a game counting down to zero returns 0 rather than nil —
+	// collapsing the two would tell a caller polling for the start that the
+	// countdown had vanished at the moment it reached the start.
+	if !box.ShowTimer && box.SecondsToStart <= 0 {
 		return nil, nil
 	}
-	seconds := box.SecondsToStart
+	// The legacy counter was digits only, so it could never come back negative;
+	// a game that has just started reports 0 seconds left rather than a count
+	// running the wrong way.
+	seconds := max(box.SecondsToStart, 0)
 	return &seconds, nil
 }
 
@@ -207,7 +215,7 @@ func remainingUntil(start *DateTime) *Duration {
 	if start == nil {
 		return nil
 	}
-	remain := time.Until(time.Unix(start.Timestamp, 0))
+	remain := time.Unix(start.Timestamp, 0).Sub(timeNow())
 	if remain <= 0 {
 		return nil
 	}

@@ -221,8 +221,38 @@ func TestLiveNewEngineStatistics(t *testing.T) {
 			levelNums[item.LevelNum] = true
 		}
 	}
-	t.Logf("statistics: %d levels, %d groups, %d rows, level numbers %v",
-		len(stats.Levels), len(stats.StatItems), rows, sortedKeys(levelNums))
+	// Time corrections turn raw level time into standing time. The new engine
+	// publishes them in a list of their own instead of inside every row, so a
+	// mapping that ignores that list ranks teams differently from the game's
+	// official result.
+	corrected := 0
+	for _, group := range stats.StatItems {
+		for _, item := range group {
+			if item.Corrections != nil {
+				corrected++
+			}
+		}
+	}
+	t.Logf("statistics: %d levels, %d groups, %d rows, %d corrected rows, level numbers %v",
+		len(stats.Levels), len(stats.StatItems), rows, corrected, sortedKeys(levelNums))
+
+	// The counts published per level have to match the rows the same document
+	// carries: they are derived from them, so a partially read table would
+	// report totals that are wrong rather than merely short.
+	for _, level := range stats.Levels {
+		counted := 0
+		for _, group := range stats.StatItems {
+			for _, item := range group {
+				if item.LevelNum == level.LevelNumber {
+					counted++
+				}
+			}
+		}
+		if level.PassedPlayers != counted {
+			t.Errorf("level %d reports %d players but carries %d rows",
+				level.LevelNumber, level.PassedPlayers, counted)
+		}
+	}
 }
 
 func sortedKeys(set map[int]bool) []int {

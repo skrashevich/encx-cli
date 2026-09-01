@@ -213,7 +213,10 @@ func TestNewEngineTimeoutToGameUsesFeeBox(t *testing.T) {
 	seconds := 0
 	c := newEngineClient(t, func(w http.ResponseWriter, r *http.Request) {
 		path = r.URL.Path
-		_, _ = w.Write([]byte(`{"seconds_to_start":` + strconv.Itoa(seconds) + `,"show_timer":true}`))
+		// show_timer follows the countdown the way the fee box does: a game that
+		// has started stops showing one.
+		_, _ = w.Write([]byte(`{"seconds_to_start":` + strconv.Itoa(seconds) +
+			`,"show_timer":` + strconv.FormatBool(seconds > 0) + `}`))
 	})
 
 	seconds = 4200
@@ -235,6 +238,25 @@ func TestNewEngineTimeoutToGameUsesFeeBox(t *testing.T) {
 	}
 	if got != nil {
 		t.Errorf("timeout = %v, want nil once the game has started", *got)
+	}
+}
+
+// A countdown that has reached zero is still a countdown. Reporting nil there —
+// the value that means "this game shows none" — would tell a caller polling for
+// the start that the timer vanished at the very moment it mattered.
+func TestNewEngineTimeoutToGameKeepsAShownZero(t *testing.T) {
+	c := newEngineClient(t, func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(`{"seconds_to_start":0,"show_timer":true}`))
+	})
+	got, err := c.GetTimeoutToGame(context.Background(), 29364)
+	if err != nil {
+		t.Fatalf("GetTimeoutToGame: %v", err)
+	}
+	if got == nil {
+		t.Fatal("timeout = nil, want 0 while the countdown is still shown")
+	}
+	if *got != 0 {
+		t.Errorf("timeout = %d, want 0", *got)
 	}
 }
 

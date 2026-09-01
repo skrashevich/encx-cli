@@ -197,6 +197,20 @@ type InvitationResponseRequest struct {
 	Accept bool `json:"accept"`
 }
 
+// TeamMember is one row of GET /teams/{id}/members.
+//
+// It is a live record read, which is what makes it a usable oracle for "did the
+// membership change": unlike /auth/session it cannot be served from claims the
+// caller is still holding from before the change.
+type TeamMember struct {
+	UserID            int    `json:"user_id"`
+	TeamID            int    `json:"team_id"`
+	Login             string `json:"login"`
+	ApprovedByCaptain bool   `json:"approved_by_captain"`
+	ApprovedByUser    bool   `json:"approved_by_user"`
+	IsActive          bool   `json:"is_active"`
+}
+
 // TeamUpdateRequest is models.TeamUpdateRequest. PUT /teams/{id} replaces all
 // three fields, so callers must send the current values of the ones they keep.
 type TeamUpdateRequest struct {

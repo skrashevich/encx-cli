@@ -4,8 +4,10 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
+	"sort"
 	"strings"
 	"testing"
 )
@@ -27,6 +29,111 @@ func newTeamClient(t *testing.T, calls *[]teamCall, respond func(path string) st
 		})
 		_, _ = w.Write([]byte(respond(r.URL.Path)))
 	})
+}
+
+// teamWorld is the state the fake team backend keeps. The team methods verify
+// what they wrote — the legacy pages did the same before reporting success — so
+// a responder that always replays one fixture could not tell an applied change
+// from an ignored one.
+type teamWorld struct {
+	name, site, forum string
+	currentTeam       int
+	invitations       map[int]string
+	// frozen accepts every write and changes nothing, the way the deployed
+	// backend was seen answering 204 to a route that did nothing.
+	frozen bool
+}
+
+func newTeamWorld() *teamWorld {
+	return &teamWorld{
+		name:        "svk team",
+		site:        "https://team.example",
+		forum:       "https://forum.example",
+		currentTeam: 7324,
+		invitations: map[int]string{7328: "svk team 2"},
+	}
+}
+
+func (w *teamWorld) team() string {
+	return fmt.Sprintf(`{"id":7324,"name":%q,"captain_id":156988,"points":0,
+	  "web_site":%q,"forum_link":%q}`, w.name, w.site, w.forum)
+}
+
+func (w *teamWorld) session() string {
+	if w.currentTeam == 0 {
+		return `{"user":{"id":156988,"login":"svk"}}`
+	}
+	return fmt.Sprintf(`{"user":{"id":156988,"login":"svk","team_id":%d,
+	  "team":{"id":%d,"name":%q}}}`, w.currentTeam, w.currentTeam, w.name)
+}
+
+func (w *teamWorld) invitationList() string {
+	ids := make([]int, 0, len(w.invitations))
+	for id := range w.invitations {
+		ids = append(ids, id)
+	}
+	sort.Ints(ids)
+	items := make([]string, 0, len(ids))
+	for _, id := range ids {
+		items = append(items, fmt.Sprintf(`{"id":%d,"name":%q,"captain_id":159013}`, id, w.invitations[id]))
+	}
+	return "[" + strings.Join(items, ",") + "]"
+}
+
+func (w *teamWorld) handle(r *http.Request, body []byte) string {
+	if w.frozen {
+		return w.read(r.URL.Path)
+	}
+	switch {
+	case r.Method == http.MethodPut && r.URL.Path == "/teams/7324":
+		var update struct {
+			Name      string `json:"name"`
+			WebSite   string `json:"web_site"`
+			ForumLink string `json:"forum_link"`
+		}
+		_ = json.Unmarshal(body, &update)
+		w.name, w.site, w.forum = update.Name, update.WebSite, update.ForumLink
+	case r.Method == http.MethodPost && r.URL.Path == "/teams/7328/invitations/respond":
+		var respond struct {
+			Accept bool `json:"accept"`
+		}
+		_ = json.Unmarshal(body, &respond)
+		delete(w.invitations, 7328)
+		if respond.Accept {
+			w.currentTeam = 7328
+		}
+	case r.Method == http.MethodPost && r.URL.Path == "/teams/7324/leave":
+		w.currentTeam = 0
+	}
+	return w.read(r.URL.Path)
+}
+
+func (w *teamWorld) read(path string) string {
+	switch path {
+	case "/teams/7324", "/teams/7328":
+		return w.team()
+	case "/auth/session":
+		return w.session()
+	case "/users/me/team-invitations":
+		return w.invitationList()
+	case "/teams":
+		return `{"items":[{"id":7328,"name":"svk team 2"},{"id":7324,"name":"svk team"}],"total_count":2}`
+	default:
+		return `{}`
+	}
+}
+
+func newTeamWorldClient(t *testing.T, calls *[]teamCall) (*Client, *teamWorld) {
+	t.Helper()
+	world := newTeamWorld()
+	client := newEngineClient(t, func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		*calls = append(*calls, teamCall{
+			method: r.Method, path: r.URL.Path, query: r.URL.RawQuery, body: string(body),
+		})
+		_, _ = w.Write([]byte(world.handle(r, body)))
+	})
+	return client, world
 }
 
 const teamFixture = `{"id":7324,"name":"svk team","captain_id":156988,"points":0,
@@ -142,7 +249,7 @@ func TestNewEngineInvitationResponses(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			var calls []teamCall
-			c := newTeamClient(t, &calls, teamRoutes)
+			c, _ := newTeamWorldClient(t, &calls)
 			if err := tc.call(c); err != nil {
 				t.Fatalf("%s: %v", tc.name, err)
 			}
@@ -233,13 +340,76 @@ func TestNewEngineRequestMembershipReportsUnknownTeam(t *testing.T) {
 
 func TestNewEngineLeaveTeam(t *testing.T) {
 	var calls []teamCall
-	c := newTeamClient(t, &calls, teamRoutes)
+	c, _ := newTeamWorldClient(t, &calls)
 
 	if err := c.LeaveTeam(context.Background(), 7324); err != nil {
 		t.Fatalf("LeaveTeam: %v", err)
 	}
 	if calls[0].method != http.MethodPost || calls[0].path != "/teams/7324/leave" {
 		t.Errorf("request = %s %s", calls[0].method, calls[0].path)
+	}
+}
+
+// currentTeamID fails for three unrelated reasons and only one of them — the
+// account is in no team — means a leave worked. A session read that 401s says
+// nothing about whether the team was left, and must not pass for success.
+func TestNewEngineLeaveTeamDoesNotTrustAFailedVerification(t *testing.T) {
+	left := false
+	c := newEngineClient(t, func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.URL.Path == "/teams/7324/leave":
+			left = true
+			w.WriteHeader(http.StatusNoContent)
+		case r.URL.Path == "/auth/session" && left:
+			// The session read fails after the write, which is exactly when the
+			// caller most needs to be told the outcome is unknown.
+			w.WriteHeader(http.StatusUnauthorized)
+			_, _ = w.Write([]byte(`{"error":"Invalid token"}`))
+		default:
+			_, _ = w.Write([]byte(`{"user":{"id":156988,"login":"svk","team_id":7324}}`))
+		}
+	})
+
+	err := c.LeaveTeam(context.Background(), 7324)
+	if err == nil {
+		t.Fatal("LeaveTeam reported success although it could not read the session back")
+	}
+	if !strings.Contains(err.Error(), "verify state") {
+		t.Errorf("error = %v, want it to say the verification failed", err)
+	}
+}
+
+// Every team mutation is verified against the state afterwards, the way the
+// legacy pages were: a backend that accepts the call and changes nothing must
+// not be reported as success. The deployed engine has already been observed
+// doing exactly that on another route.
+func TestNewEngineTeamMutationsRejectSilentNoOps(t *testing.T) {
+	cases := []struct {
+		name string
+		call func(*Client) error
+	}{
+		{"accept invitation", func(c *Client) error { return c.AcceptTeamInvitation(context.Background(), 7328) }},
+		{"reject invitation", func(c *Client) error { return c.RejectTeamInvitation(context.Background(), 7328) }},
+		{"leave", func(c *Client) error { return c.LeaveTeam(context.Background(), 7324) }},
+		{"rename", func(c *Client) error { return c.RenameTeam(context.Background(), 7324, "другое имя") }},
+		{"set site", func(c *Client) error { return c.SetTeamSite(context.Background(), 7324, "https://other.example") }},
+		{"set forum", func(c *Client) error { return c.SetTeamForum(context.Background(), 7324, "https://other.forum") }},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			var calls []teamCall
+			c, world := newTeamWorldClient(t, &calls)
+			world.frozen = true
+
+			err := tc.call(c)
+			if err == nil {
+				t.Fatalf("%s reported success although nothing changed", tc.name)
+			}
+			var actionErr *TeamActionError
+			if !errors.As(err, &actionErr) {
+				t.Fatalf("error is not *TeamActionError: %v", err)
+			}
+		})
 	}
 }
 
@@ -273,15 +443,19 @@ func TestNewEngineTeamUpdatesPreserveOtherFields(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			var calls []teamCall
-			c := newTeamClient(t, &calls, teamRoutes)
+			c, _ := newTeamWorldClient(t, &calls)
 			if err := tc.call(c); err != nil {
 				t.Fatalf("%s: %v", tc.name, err)
 			}
-			if len(calls) != 2 {
-				t.Fatalf("calls = %v, want a read then a write", callPaths(calls))
+			// Read the team, write it back whole, then read it again to confirm
+			// the change landed.
+			if len(calls) != 3 {
+				t.Fatalf("calls = %v, want a read, a write and a verifying read", callPaths(calls))
 			}
-			if calls[0].method != http.MethodGet || calls[1].method != http.MethodPut {
-				t.Fatalf("methods = %s then %s, want GET then PUT", calls[0].method, calls[1].method)
+			if calls[0].method != http.MethodGet || calls[1].method != http.MethodPut ||
+				calls[2].method != http.MethodGet {
+				t.Fatalf("methods = %s, %s, %s; want GET, PUT, GET",
+					calls[0].method, calls[1].method, calls[2].method)
 			}
 			var update struct {
 				Name      string `json:"name"`

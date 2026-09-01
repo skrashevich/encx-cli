@@ -51,6 +51,35 @@ func TestClientSendsDomainAndBearerHeaders(t *testing.T) {
 	}
 }
 
+// The new engine renders rank names, correction durations and other sentences
+// server-side and picks the language from Accept-Language; only a handful of
+// routes take a lang query parameter. Without the header the whole API answers
+// in English where the legacy engine served the site language.
+func TestClientSendsAcceptLanguage(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		opts []Option
+		want string
+	}{
+		{"default", nil, "ru"},
+		{"configured", []Option{WithLang("en")}, "en"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var got string
+			c := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
+				got = r.Header.Get("Accept-Language")
+				_, _ = w.Write([]byte(`{}`))
+			}, tc.opts...)
+			if err := c.GetJSON(context.Background(), "/games/1/corrections", nil, nil); err != nil {
+				t.Fatalf("GetJSON: %v", err)
+			}
+			if got != tc.want {
+				t.Errorf("Accept-Language = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
 func TestClientOmitsAuthorizationWithoutToken(t *testing.T) {
 	var hasAuth bool
 	c := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
