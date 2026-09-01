@@ -330,6 +330,24 @@ let resultJSON = client.sendCode(12345, levelID: 67890, levelNumber: 1, code: "�
 | `ExportCookies` / `ImportCookies` | Сохранение сессии |
 | `LoginErrorText` / `EventText` | Тексты ошибок |
 
+## PHP
+
+Тот же пакет `mobile/encxmobile` доступен из PHP: он собирается в разделяемую библиотеку
+(`-buildmode=c-shared`), которую PHP вызывает через FFI. Клиент живёт на стороне Go, поэтому
+сессия и куки сохраняются между вызовами.
+
+```php
+require __DIR__ . '/bindings/php/autoload.php';
+
+$client = Encx\Client::newClient('demo.en.cx', false);
+$client->login('user', 'password');
+$model = json_decode($client->getGameModel(82448), true);
+```
+
+Обёртки не пишутся руками: cgo-экспорты, C-заголовок и PHP-классы генерируются из Go-исходника
+командой `go generate ./bindings/...`, а отставание ловят drift-тест, CI и pre-commit hook.
+Сборка, установка и полный список связанных методов — в [`bindings/php/README.md`](bindings/php/README.md).
+
 ## CLI: `encli`
 
 `encli` полезен, когда нужно быстро дернуть API руками и не городить под это отдельный код.

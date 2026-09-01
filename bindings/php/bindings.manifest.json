@@ -1,0 +1,775 @@
+{
+  "_generated": "encxphpgen; DO NOT EDIT",
+  "package": "encxmobile",
+  "importPath": "github.com/skrashevich/encx-cli/mobile/encxmobile",
+  "runtime": [
+    {
+      "cName": "encx_client_free",
+      "prototype": "char *encx_client_free(long long handle);"
+    },
+    {
+      "cName": "encx_string_free",
+      "prototype": "void encx_string_free(char *s);"
+    }
+  ],
+  "bindable": [
+    {
+      "goName": "AcceptTeamInvitation",
+      "cName": "encx_client_accept_team_invitation",
+      "kind": "error",
+      "valueType": "void",
+      "params": [
+        {
+          "name": "teamID",
+          "cName": "team_id",
+          "type": "int64"
+        }
+      ]
+    },
+    {
+      "goName": "APIBaseURL",
+      "cName": "encx_client_api_base_url",
+      "kind": "value",
+      "valueType": "string",
+      "params": []
+    },
+    {
+      "goName": "ClearHAR",
+      "cName": "encx_client_clear_har",
+      "kind": "void",
+      "valueType": "void",
+      "params": []
+    },
+    {
+      "goName": "ClearHARFirst",
+      "cName": "encx_client_clear_har_first",
+      "kind": "void",
+      "valueType": "void",
+      "params": [
+        {
+          "name": "n",
+          "cName": "n",
+          "type": "int64"
+        }
+      ]
+    },
+    {
+      "goName": "Domain",
+      "cName": "encx_client_domain",
+      "kind": "value",
+      "valueType": "string",
+      "params": []
+    },
+    {
+      "goName": "Engine",
+      "cName": "encx_client_engine",
+      "kind": "value",
+      "valueType": "string",
+      "params": []
+    },
+    {
+      "goName": "EnterGame",
+      "cName": "encx_client_enter_game",
+      "kind": "value_err",
+      "valueType": "string",
+      "params": [
+        {
+          "name": "gameID",
+          "cName": "game_id",
+          "type": "int64"
+        }
+      ]
+    },
+    {
+      "goName": "ExportCookies",
+      "cName": "encx_client_export_cookies",
+      "kind": "value_err",
+      "valueType": "[]byte",
+      "params": []
+    },
+    {
+      "goName": "ExportHAR",
+      "cName": "encx_client_export_har",
+      "kind": "value_err",
+      "valueType": "string",
+      "params": []
+    },
+    {
+      "goName": "ExportHARSnapshot",
+      "cName": "encx_client_export_har_snapshot",
+      "kind": "json_struct",
+      "valueType": "void",
+      "structRef": "HARSnapshot",
+      "params": []
+    },
+    {
+      "goName": "GetDomainGames",
+      "cName": "encx_client_get_domain_games",
+      "kind": "value_err",
+      "valueType": "string",
+      "params": []
+    },
+    {
+      "goName": "GetGameDetails",
+      "cName": "encx_client_get_game_details",
+      "kind": "value_err",
+      "valueType": "string",
+      "params": [
+        {
+          "name": "gameID",
+          "cName": "game_id",
+          "type": "int64"
+        }
+      ]
+    },
+    {
+      "goName": "GetGameList",
+      "cName": "encx_client_get_game_list",
+      "kind": "value_err",
+      "valueType": "string",
+      "params": [
+        {
+          "name": "page",
+          "cName": "page",
+          "type": "int64"
+        }
+      ]
+    },
+    {
+      "goName": "GetGameModel",
+      "cName": "encx_client_get_game_model",
+      "kind": "value_err",
+      "valueType": "string",
+      "params": [
+        {
+          "name": "gameID",
+          "cName": "game_id",
+          "type": "int64"
+        }
+      ]
+    },
+    {
+      "goName": "GetGameModelLevel",
+      "cName": "encx_client_get_game_model_level",
+      "kind": "value_err",
+      "valueType": "string",
+      "params": [
+        {
+          "name": "gameID",
+          "cName": "game_id",
+          "type": "int64"
+        },
+        {
+          "name": "levelNumber",
+          "cName": "level_number",
+          "type": "int64"
+        }
+      ]
+    },
+    {
+      "goName": "GetGameStatistics",
+      "cName": "encx_client_get_game_statistics",
+      "kind": "value_err",
+      "valueType": "string",
+      "params": [
+        {
+          "name": "gameID",
+          "cName": "game_id",
+          "type": "int64"
+        }
+      ]
+    },
+    {
+      "goName": "GetMyTeamDetails",
+      "cName": "encx_client_get_my_team_details",
+      "kind": "value_err",
+      "valueType": "string",
+      "params": []
+    },
+    {
+      "goName": "GetPenaltyHint",
+      "cName": "encx_client_get_penalty_hint",
+      "kind": "value_err",
+      "valueType": "string",
+      "params": [
+        {
+          "name": "gameID",
+          "cName": "game_id",
+          "type": "int64"
+        },
+        {
+          "name": "penaltyID",
+          "cName": "penalty_id",
+          "type": "int64"
+        }
+      ]
+    },
+    {
+      "goName": "GetProfile",
+      "cName": "encx_client_get_profile",
+      "kind": "value_err",
+      "valueType": "string",
+      "params": []
+    },
+    {
+      "goName": "GetTeamDetails",
+      "cName": "encx_client_get_team_details",
+      "kind": "value_err",
+      "valueType": "string",
+      "params": [
+        {
+          "name": "teamID",
+          "cName": "team_id",
+          "type": "int64"
+        }
+      ]
+    },
+    {
+      "goName": "GetTeamInvitations",
+      "cName": "encx_client_get_team_invitations",
+      "kind": "value_err",
+      "valueType": "string",
+      "params": []
+    },
+    {
+      "goName": "GetTeamManagementInfo",
+      "cName": "encx_client_get_team_management_info",
+      "kind": "value_err",
+      "valueType": "string",
+      "params": [
+        {
+          "name": "teamID",
+          "cName": "team_id",
+          "type": "int64"
+        }
+      ]
+    },
+    {
+      "goName": "GetTimeoutToGame",
+      "cName": "encx_client_get_timeout_to_game",
+      "kind": "value_err",
+      "valueType": "int64",
+      "params": [
+        {
+          "name": "gameID",
+          "cName": "game_id",
+          "type": "int64"
+        }
+      ]
+    },
+    {
+      "goName": "HAREntryCount",
+      "cName": "encx_client_har_entry_count",
+      "kind": "value",
+      "valueType": "int64",
+      "params": []
+    },
+    {
+      "goName": "ImportCookies",
+      "cName": "encx_client_import_cookies",
+      "kind": "error",
+      "valueType": "void",
+      "params": [
+        {
+          "name": "data",
+          "cName": "data",
+          "type": "[]byte"
+        }
+      ]
+    },
+    {
+      "goName": "InviteTeamMember",
+      "cName": "encx_client_invite_team_member",
+      "kind": "error",
+      "valueType": "void",
+      "params": [
+        {
+          "name": "teamID",
+          "cName": "team_id",
+          "type": "int64"
+        },
+        {
+          "name": "login",
+          "cName": "login",
+          "type": "string"
+        }
+      ]
+    },
+    {
+      "goName": "LeaveTeam",
+      "cName": "encx_client_leave_team",
+      "kind": "error",
+      "valueType": "void",
+      "params": [
+        {
+          "name": "teamID",
+          "cName": "team_id",
+          "type": "int64"
+        }
+      ]
+    },
+    {
+      "goName": "Login",
+      "cName": "encx_client_login",
+      "kind": "value_err",
+      "valueType": "string",
+      "params": [
+        {
+          "name": "login",
+          "cName": "login",
+          "type": "string"
+        },
+        {
+          "name": "password",
+          "cName": "password",
+          "type": "string"
+        }
+      ]
+    },
+    {
+      "goName": "LoginWithCaptcha",
+      "cName": "encx_client_login_with_captcha",
+      "kind": "value_err",
+      "valueType": "string",
+      "params": [
+        {
+          "name": "login",
+          "cName": "login",
+          "type": "string"
+        },
+        {
+          "name": "password",
+          "cName": "password",
+          "type": "string"
+        },
+        {
+          "name": "magicNumbers",
+          "cName": "magic_numbers",
+          "type": "string"
+        }
+      ]
+    },
+    {
+      "goName": "PingGame",
+      "cName": "encx_client_ping_game",
+      "kind": "value_err",
+      "valueType": "string",
+      "params": [
+        {
+          "name": "gameID",
+          "cName": "game_id",
+          "type": "int64"
+        }
+      ]
+    },
+    {
+      "goName": "RejectTeamInvitation",
+      "cName": "encx_client_reject_team_invitation",
+      "kind": "error",
+      "valueType": "void",
+      "params": [
+        {
+          "name": "teamID",
+          "cName": "team_id",
+          "type": "int64"
+        }
+      ]
+    },
+    {
+      "goName": "RemoveTeamInvitation",
+      "cName": "encx_client_remove_team_invitation",
+      "kind": "error",
+      "valueType": "void",
+      "params": [
+        {
+          "name": "teamID",
+          "cName": "team_id",
+          "type": "int64"
+        },
+        {
+          "name": "userID",
+          "cName": "user_id",
+          "type": "int64"
+        }
+      ]
+    },
+    {
+      "goName": "RenameTeam",
+      "cName": "encx_client_rename_team",
+      "kind": "error",
+      "valueType": "void",
+      "params": [
+        {
+          "name": "teamID",
+          "cName": "team_id",
+          "type": "int64"
+        },
+        {
+          "name": "name",
+          "cName": "name",
+          "type": "string"
+        }
+      ]
+    },
+    {
+      "goName": "RequestTeamMembership",
+      "cName": "encx_client_request_team_membership",
+      "kind": "error",
+      "valueType": "void",
+      "params": [
+        {
+          "name": "teamName",
+          "cName": "team_name",
+          "type": "string"
+        }
+      ]
+    },
+    {
+      "goName": "SendBonusCode",
+      "cName": "encx_client_send_bonus_code",
+      "kind": "value_err",
+      "valueType": "string",
+      "params": [
+        {
+          "name": "gameID",
+          "cName": "game_id",
+          "type": "int64"
+        },
+        {
+          "name": "levelID",
+          "cName": "level_id",
+          "type": "int64"
+        },
+        {
+          "name": "levelNumber",
+          "cName": "level_number",
+          "type": "int64"
+        },
+        {
+          "name": "code",
+          "cName": "code",
+          "type": "string"
+        }
+      ]
+    },
+    {
+      "goName": "SendCode",
+      "cName": "encx_client_send_code",
+      "kind": "value_err",
+      "valueType": "string",
+      "params": [
+        {
+          "name": "gameID",
+          "cName": "game_id",
+          "type": "int64"
+        },
+        {
+          "name": "levelID",
+          "cName": "level_id",
+          "type": "int64"
+        },
+        {
+          "name": "levelNumber",
+          "cName": "level_number",
+          "type": "int64"
+        },
+        {
+          "name": "code",
+          "cName": "code",
+          "type": "string"
+        }
+      ]
+    },
+    {
+      "goName": "SetCodeSendTimeoutSeconds",
+      "cName": "encx_client_set_code_send_timeout_seconds",
+      "kind": "void",
+      "valueType": "void",
+      "params": [
+        {
+          "name": "seconds",
+          "cName": "seconds",
+          "type": "int64"
+        }
+      ]
+    },
+    {
+      "goName": "SetEngine",
+      "cName": "encx_client_set_engine",
+      "kind": "void",
+      "valueType": "void",
+      "params": [
+        {
+          "name": "mode",
+          "cName": "mode",
+          "type": "string"
+        }
+      ]
+    },
+    {
+      "goName": "SetGameRequestMinIntervalMillis",
+      "cName": "encx_client_set_game_request_min_interval_millis",
+      "kind": "void",
+      "valueType": "void",
+      "params": [
+        {
+          "name": "milliseconds",
+          "cName": "milliseconds",
+          "type": "int64"
+        }
+      ]
+    },
+    {
+      "goName": "SetHARRecordingEnabled",
+      "cName": "encx_client_set_har_recording_enabled",
+      "kind": "void",
+      "valueType": "void",
+      "params": [
+        {
+          "name": "enabled",
+          "cName": "enabled",
+          "type": "bool"
+        }
+      ]
+    },
+    {
+      "goName": "SetTeamForum",
+      "cName": "encx_client_set_team_forum",
+      "kind": "error",
+      "valueType": "void",
+      "params": [
+        {
+          "name": "teamID",
+          "cName": "team_id",
+          "type": "int64"
+        },
+        {
+          "name": "forum",
+          "cName": "forum",
+          "type": "string"
+        }
+      ]
+    },
+    {
+      "goName": "SetTeamSite",
+      "cName": "encx_client_set_team_site",
+      "kind": "error",
+      "valueType": "void",
+      "params": [
+        {
+          "name": "teamID",
+          "cName": "team_id",
+          "type": "int64"
+        },
+        {
+          "name": "site",
+          "cName": "site",
+          "type": "string"
+        }
+      ]
+    },
+    {
+      "goName": "EventText",
+      "cName": "encx_event_text",
+      "kind": "value",
+      "valueType": "string",
+      "params": [
+        {
+          "name": "code",
+          "cName": "code",
+          "type": "int64"
+        }
+      ]
+    },
+    {
+      "goName": "LoginErrorText",
+      "cName": "encx_login_error_text",
+      "kind": "value",
+      "valueType": "string",
+      "params": [
+        {
+          "name": "code",
+          "cName": "code",
+          "type": "int64"
+        }
+      ]
+    },
+    {
+      "goName": "NewClient",
+      "cName": "encx_new_client",
+      "kind": "handle",
+      "valueType": "void",
+      "params": [
+        {
+          "name": "domain",
+          "cName": "domain",
+          "type": "string"
+        },
+        {
+          "name": "insecureTLS",
+          "cName": "insecure_tls",
+          "type": "bool"
+        }
+      ]
+    },
+    {
+      "goName": "NewClientWithOptions",
+      "cName": "encx_new_client_with_options",
+      "kind": "handle",
+      "valueType": "void",
+      "params": [
+        {
+          "name": "domain",
+          "cName": "domain",
+          "type": "string"
+        },
+        {
+          "name": "insecureTLS",
+          "cName": "insecure_tls",
+          "type": "bool"
+        },
+        {
+          "name": "useHTTP",
+          "cName": "use_http",
+          "type": "bool"
+        },
+        {
+          "name": "timeoutSeconds",
+          "cName": "timeout_seconds",
+          "type": "int64"
+        },
+        {
+          "name": "lang",
+          "cName": "lang",
+          "type": "string"
+        }
+      ]
+    },
+    {
+      "goName": "ParseTeamInvitations",
+      "cName": "encx_parse_team_invitations",
+      "kind": "value_err",
+      "valueType": "string",
+      "params": [
+        {
+          "name": "html",
+          "cName": "html",
+          "type": "string"
+        }
+      ]
+    },
+    {
+      "goName": "ParseTeamLinks",
+      "cName": "encx_parse_team_links",
+      "kind": "value_err",
+      "valueType": "string",
+      "params": [
+        {
+          "name": "html",
+          "cName": "html",
+          "type": "string"
+        }
+      ]
+    },
+    {
+      "goName": "ParseTeamManagementInfo",
+      "cName": "encx_parse_team_management_info",
+      "kind": "value_err",
+      "valueType": "string",
+      "params": [
+        {
+          "name": "html",
+          "cName": "html",
+          "type": "string"
+        },
+        {
+          "name": "teamID",
+          "cName": "team_id",
+          "type": "int64"
+        }
+      ]
+    }
+  ],
+  "skipped": [
+    {
+      "goName": "AgentSession.Cancel",
+      "reason": "method receiver is *AgentSession, not *EncClient; only the client handle is bound"
+    },
+    {
+      "goName": "AgentSession.CodexCredentialJSON",
+      "reason": "method receiver is *AgentSession, not *EncClient; only the client handle is bound"
+    },
+    {
+      "goName": "AgentSession.HistoryJSON",
+      "reason": "method receiver is *AgentSession, not *EncClient; only the client handle is bound"
+    },
+    {
+      "goName": "AgentSession.Policy",
+      "reason": "method receiver is *AgentSession, not *EncClient; only the client handle is bound"
+    },
+    {
+      "goName": "AgentSession.ResetHistory",
+      "reason": "method receiver is *AgentSession, not *EncClient; only the client handle is bound"
+    },
+    {
+      "goName": "AgentSession.ResolveConfirmation",
+      "reason": "method receiver is *AgentSession, not *EncClient; only the client handle is bound"
+    },
+    {
+      "goName": "AgentSession.SendMessage",
+      "reason": "method receiver is *AgentSession, not *EncClient; only the client handle is bound"
+    },
+    {
+      "goName": "AgentSession.SetDelegate",
+      "reason": "method receiver is *AgentSession, not *EncClient; only the client handle is bound"
+    },
+    {
+      "goName": "AgentSession.ToolCount",
+      "reason": "method receiver is *AgentSession, not *EncClient; only the client handle is bound"
+    },
+    {
+      "goName": "AntiSpamURLFromError",
+      "reason": "parameter \"err\" has type error, which cannot cross the C ABI: a Go error is an interface value with no C representation"
+    },
+    {
+      "goName": "CodexDeviceLogin.Cancel",
+      "reason": "method receiver is *CodexDeviceLogin, not *EncClient; only the client handle is bound"
+    },
+    {
+      "goName": "CodexDeviceLogin.IntervalSeconds",
+      "reason": "method receiver is *CodexDeviceLogin, not *EncClient; only the client handle is bound"
+    },
+    {
+      "goName": "CodexDeviceLogin.Poll",
+      "reason": "method receiver is *CodexDeviceLogin, not *EncClient; only the client handle is bound"
+    },
+    {
+      "goName": "CodexDeviceLogin.UserCode",
+      "reason": "method receiver is *CodexDeviceLogin, not *EncClient; only the client handle is bound"
+    },
+    {
+      "goName": "CodexDeviceLogin.VerifyURL",
+      "reason": "method receiver is *CodexDeviceLogin, not *EncClient; only the client handle is bound"
+    },
+    {
+      "goName": "CodexDeviceLogin.Wait",
+      "reason": "method receiver is *CodexDeviceLogin, not *EncClient; only the client handle is bound"
+    },
+    {
+      "goName": "EncClient.NewAgentSession",
+      "reason": "result struct AgentSession has unexported field \"provider\", which JSON cannot carry"
+    },
+    {
+      "goName": "IsAntiSpamError",
+      "reason": "parameter \"err\" has type error, which cannot cross the C ABI: a Go error is an interface value with no C representation"
+    },
+    {
+      "goName": "IsUndecodableAcceptedError",
+      "reason": "parameter \"err\" has type error, which cannot cross the C ABI: a Go error is an interface value with no C representation"
+    },
+    {
+      "goName": "StartCodexDeviceLogin",
+      "reason": "result struct CodexDeviceLogin has unexported field \"mu\", which JSON cannot carry"
+    }
+  ]
+}

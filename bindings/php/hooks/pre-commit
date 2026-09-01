@@ -1,0 +1,68 @@
+#!/bin/sh
+#
+# encx PHP bindings: refuse a commit that would leave the generated bindings
+# behind mobile/encxmobile.
+#
+# The hook never edits the index for you. Staging a regenerated file is a
+# decision about the commit's contents, and a hook that made it silently would
+# hide from you what you are about to publish.
+#
+# Install with: bash bindings/php/hooks/install.sh
+
+set -e
+
+root=$(git rev-parse --show-toplevel)
+cd "$root"
+
+# The artifacts encxphpgen owns, relative to the repository root.
+generated="bindings/php/cshared/exports_gen.go
+bindings/php/encx.h
+bindings/php/bindings.manifest.json
+bindings/php/src/Encx/Client.php
+bindings/php/src/Encx/Helpers.php"
+
+# Only the Go surface and the bindings themselves can make the artifacts stale;
+# every other commit skips the hook so that it costs nothing.
+staged=$(git diff --cached --name-only --diff-filter=ACMRD)
+case "$staged" in
+	*mobile/encxmobile/*) ;;
+	*bindings/php/*) ;;
+	*)
+		exit 0
+		;;
+esac
+
+if ! command -v go >/dev/null 2>&1; then
+	echo "pre-commit: go is not in PATH, so the PHP bindings cannot be checked." >&2
+	echo "            Install Go, or bypass this once with 'git commit --no-verify'." >&2
+	exit 1
+fi
+
+echo "pre-commit: regenerating the PHP bindings..."
+if ! go generate ./bindings/... >/dev/null; then
+	echo "pre-commit: 'go generate ./bindings/...' failed; fix that before committing." >&2
+	exit 1
+fi
+
+# Anything the generator just rewrote shows up as a working-tree change against
+# the index. If the regenerated content were already staged, this is empty.
+stale=$(git diff --name-only -- $generated)
+
+if [ -n "$stale" ]; then
+	echo "" >&2
+	echo "pre-commit: the generated PHP bindings are out of date." >&2
+	echo "" >&2
+	echo "  These files were just regenerated from mobile/encxmobile and differ" >&2
+	echo "  from what you staged:" >&2
+	echo "" >&2
+	printf '    %s\n' $stale >&2
+	echo "" >&2
+	echo "  Review them, then include them in this commit:" >&2
+	echo "" >&2
+	echo "    git add $(echo $stale)" >&2
+	echo "" >&2
+	exit 1
+fi
+
+echo "pre-commit: PHP bindings are up to date."
+exit 0

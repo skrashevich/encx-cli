@@ -1,0 +1,65 @@
+name: PHP bindings
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  bindings:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: "8.3"
+          extensions: ffi
+          # FFI ships disabled outside preloading, and the bindings call
+          # FFI::cdef at runtime.
+          ini-values: ffi.enable=1
+
+      - name: Regenerate bindings
+        run: go generate ./bindings/...
+
+      # Scoped to bindings/ because that is all the generator writes to; a
+      # go.sum touched by the toolchain must not be reported as binding drift.
+      - name: Fail if the generated bindings are stale
+        run: |
+          if [ -n "$(git status --porcelain -- bindings/)" ]; then
+            echo "::error::The committed bindings do not match mobile/encxmobile. Run 'go generate ./bindings/...' and commit the result."
+            git status --porcelain -- bindings/
+            git diff -- bindings/
+            exit 1
+          fi
+          echo "Generated bindings are up to date."
+
+      - name: Build
+        run: go build ./bindings/...
+
+      - name: Test
+        run: go test ./bindings/... -count=1
+
+      - name: Build the c-shared library
+        env:
+          CGO_ENABLED: "1"
+        run: go build -buildmode=c-shared -o /tmp/libencx.so ./bindings/php/cshared
+
+      - name: Lint the generated PHP
+        run: |
+          for f in bindings/php/src/Encx/*.php; do
+            php -l "$f"
+          done
+
+      # Self-contained: the script builds the shared library and the mock
+      # Encounter server itself and talks to it over loopback.
+      - name: PHP end-to-end tests
+        continue-on-error: false
+        run: bash bindings/php/tests/run-e2e.sh
