@@ -1,0 +1,39 @@
+{
+  "can_change_levels_sequence": true,
+  "can_manipulate_levels": true,
+  "game_id": 31961,
+  "game_num": 25802,
+  "game_type_id": 1,
+  "levels": [
+    {
+      "comment": "комментарий автора",
+      "dismissed": false,
+      "level_id": 316671,
+      "level_name": "Первый уровень",
+      "level_number": 1,
+      "owner_id": 156988
+    },
+    {
+      "comment": "",
+      "dismissed": false,
+      "level_id": 316672,
+      "level_name": "Второй уровень",
+      "level_number": 2,
+      "owner_id": 156988
+    },
+    {
+      "comment": "",
+      "dismissed": false,
+      "level_id": 316673,
+      "level_name": "Третий уровень",
+      "level_number": 3,
+      "owner_id": 156988
+    }
+  ],
+  "levels_sequence_id": 0,
+  "show_passing_sequence": true,
+  "started": false,
+  "status_id": 0,
+  "title": "encx parity 1788234006382762000",
+  "zone_id": 0
+}

@@ -46,6 +46,7 @@ type server struct {
 	silentUntil           map[string]time.Time
 	antiBotAnswerAttempts map[int]bool
 	nextSID               uint64
+	admin                 *adminState
 }
 
 type sessionState struct {
@@ -76,11 +77,13 @@ func main() {
 		}
 	}
 
-	var scenarioFlag, engineFlag string
+	var scenarioFlag, engineFlag, quirksFlag string
 	fs := flag.NewFlagSet("encx-mock", flag.ExitOnError)
 	fs.StringVar(&scenarioFlag, "scenario", "", "path to scenario file (overrides ENCX_MOCK_SCENARIO)")
 	fs.StringVar(&engineFlag, "engine", os.Getenv("ENCX_MOCK_ENGINE"),
 		"which engine to serve: legacy (default), new, or both (env: ENCX_MOCK_ENGINE)")
+	fs.StringVar(&quirksFlag, "quirks", os.Getenv("ENCX_MOCK_QUIRKS"),
+		"comma-separated deployed-backend quirks to reproduce, e.g. reorder-noop (env: ENCX_MOCK_QUIRKS)")
 	_ = fs.Parse(os.Args[1:])
 
 	fixtures, err := loadFixtures()
@@ -93,6 +96,8 @@ func main() {
 	if err != nil {
 		log.Fatal(err)
 	}
+
+	setQuirks(quirksFlag)
 
 	addr := strings.TrimSpace(os.Getenv("ENCX_MOCK_ADDR"))
 	if addr == "" {
@@ -107,6 +112,9 @@ func main() {
 		silentUntil:           make(map[string]time.Time),
 		antiBotAnswerAttempts: antiBotAnswerAttemptsFromEnv(),
 	}
+	// The admin state describes the same game the player-facing routes serve, so
+	// both halves of the mock tell one story.
+	s.admin = newAdminState(mockGameID, s.levelCount(), s.gameTitle(), s.scenario, mockQuirkEnabled("reorder-noop"))
 
 	mux := s.routes()
 	handler := http.Handler(mux)
@@ -116,6 +124,7 @@ func main() {
 		// answer from one game state and e2e can exercise either.
 		apiMux := http.NewServeMux()
 		s.registerNewAPIRoutes(apiMux, mux)
+		s.registerAdminAPIRoutes(apiMux)
 		if engineFlag == "new" {
 			handler = apiMux
 		} else {

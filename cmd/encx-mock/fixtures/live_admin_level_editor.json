@@ -1,0 +1,214 @@
+{
+  "answer_limit": -1,
+  "answer_penalty_type_id": 0,
+  "answer_result_display_type_id": 0,
+  "answer_score_penalty": 0,
+  "answer_time_penalty_sec": 0,
+  "answer_type_id": 0,
+  "answers": [
+    {
+      "answer_id": 626778,
+      "answer_text": "альфа",
+      "level_id": 316671,
+      "sector_id": 308236
+    },
+    {
+      "answer_id": 626779,
+      "answer_text": "бета",
+      "level_id": 316671,
+      "sector_id": 308236
+    },
+    {
+      "answer_id": 626780,
+      "answer_text": "гамма",
+      "level_id": 316671,
+      "sector_id": 308237
+    }
+  ],
+  "answers_can_assign_for_players": true,
+  "answers_can_has_award": false,
+  "answers_default_count": 10,
+  "attempts_number": 3,
+  "attempts_period_sec": 60,
+  "block_type_id": 1,
+  "bonuses": [
+    {
+      "all_levels": false,
+      "answers": [
+        "бонус1",
+        "бонус2"
+      ],
+      "bonus_help": "Он у входа",
+      "bonus_id": 243503,
+      "bonus_name": "Бонус уровня",
+      "bonus_time": 420,
+      "delay_sec": 180,
+      "game_id": 31961,
+      "has_absolute_limit": false,
+      "has_delay": true,
+      "has_relative_limit": true,
+      "level_ids": [
+        316671
+      ],
+      "life_time_sec": 540,
+      "negative": false,
+      "task": "Найдите знак",
+      "team_id": 0,
+      "user_id": 0
+    },
+    {
+      "all_levels": true,
+      "answers": [
+        "всюду"
+      ],
+      "bonus_help": "",
+      "bonus_id": 243504,
+      "bonus_name": "Бонус всей игры",
+      "bonus_time": 60,
+      "game_id": 31961,
+      "has_absolute_limit": false,
+      "has_delay": false,
+      "has_relative_limit": false,
+      "negative": true,
+      "task": "",
+      "team_id": 0,
+      "user_id": 0
+    }
+  ],
+  "bonuses_supported": true,
+  "buttons_answers_direction_id": 1,
+  "complete_type_id": 1,
+  "duration_sec": 0,
+  "game_finish_date_time": "03.09.2026 03:40:06",
+  "game_id": 31961,
+  "game_level_complete_type_id": 1,
+  "game_num": 25802,
+  "game_start_date_time": "02.09.2026 03:40:06",
+  "game_type_id": 1,
+  "helps": [
+    {
+      "for_team_id": 0,
+      "for_user_id": 0,
+      "help_id": 266986,
+      "help_number": 2,
+      "help_text": "Обычная подсказка",
+      "is_penalty": false,
+      "level_id": 316671,
+      "penalty_score": 0,
+      "penalty_time": 0,
+      "request_penalty_confirm": false,
+      "timeout": 3723
+    }
+  ],
+  "is_classic_game": true,
+  "level": {
+    "comment": "комментарий автора",
+    "dismissed": false,
+    "level_id": 316671,
+    "level_name": "Первый уровень",
+    "level_number": 1,
+    "owner_id": 156988
+  },
+  "levels": [
+    {
+      "comment": "комментарий автора",
+      "dismissed": false,
+      "level_id": 316671,
+      "level_name": "Первый уровень",
+      "level_number": 1,
+      "owner_id": 156988
+    },
+    {
+      "comment": "",
+      "dismissed": false,
+      "level_id": 316672,
+      "level_name": "Второй уровень",
+      "level_number": 2,
+      "owner_id": 156988
+    },
+    {
+      "comment": "",
+      "dismissed": false,
+      "level_id": 316673,
+      "level_name": "Третий уровень",
+      "level_number": 3,
+      "owner_id": 156988
+    }
+  ],
+  "levels_sequence_id": 0,
+  "measure_type_id": 0,
+  "messages": [
+    {
+      "all_levels": true,
+      "message_id": 4388,
+      "message_text": "Сообщение организаторов",
+      "replace_nl_to_br": true
+    }
+  ],
+  "pass_limit": 0,
+  "passing_condition_id": 1,
+  "penalty_helps": [
+    {
+      "for_team_id": 0,
+      "for_user_id": 0,
+      "help_id": 266987,
+      "help_number": 1,
+      "help_text": "Штрафная подсказка",
+      "is_penalty": true,
+      "level_id": 316671,
+      "penalty_comment": "минус десять минут",
+      "penalty_score": 0,
+      "penalty_time": 600,
+      "request_penalty_confirm": true,
+      "timeout": 300
+    }
+  ],
+  "penalty_helps_supported": true,
+  "players_started": false,
+  "required_answers_num": 1,
+  "required_points": 0,
+  "required_sectors_count": 1,
+  "sectors": [
+    {
+      "level_id": 316671,
+      "sector_id": 308236,
+      "sector_name": "Сектор А"
+    },
+    {
+      "level_id": 316671,
+      "sector_id": 308237,
+      "sector_name": "Сектор Б"
+    }
+  ],
+  "start_date_time": "",
+  "supports_answer_blocking": true,
+  "supports_answers": true,
+  "supports_auto_pass": true,
+  "supports_bonuses": true,
+  "supports_criterions": false,
+  "supports_duration": false,
+  "supports_helps": true,
+  "supports_in_game_preview": true,
+  "supports_messages": true,
+  "supports_penalty_helps": true,
+  "supports_quiz_settings": false,
+  "supports_sectors_requirement": true,
+  "supports_start_date_time": false,
+  "supports_tasks": true,
+  "tasks": [
+    {
+      "for_team_id": 0,
+      "for_user_id": 0,
+      "level_id": 316671,
+      "replace_nl_to_br": true,
+      "task_id": 133262,
+      "task_text": "Задание первого уровня <b>с разметкой</b>"
+    }
+  ],
+  "timeout_points_award": 0,
+  "timeout_sec": 5400,
+  "timeout_time_award_sec": -900,
+  "title": "encx parity 1788234006382762000",
+  "version": "10-5491781f",
+  "zone_id": 0
+}

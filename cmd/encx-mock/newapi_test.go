@@ -20,12 +20,26 @@ func newMockServers(t *testing.T) (legacy, api *httptest.Server) {
 	legacyMux := s.routes()
 	apiMux := http.NewServeMux()
 	s.registerNewAPIRoutes(apiMux, legacyMux)
+	s.registerAdminAPIRoutes(apiMux)
 
 	legacy = httptest.NewServer(withCommonHeaders(legacyMux))
 	api = httptest.NewServer(withCommonHeaders(newEngineFallbackMux(apiMux, legacyMux)))
 	t.Cleanup(legacy.Close)
 	t.Cleanup(api.Close)
 	return legacy, api
+}
+
+// adminClientFor serves an already-built server, so a test can set a quirk or a
+// game state before the client sees it.
+func adminClientFor(t *testing.T, s *server) *encx.Client {
+	t.Helper()
+	legacyMux := s.routes()
+	apiMux := http.NewServeMux()
+	s.registerNewAPIRoutes(apiMux, legacyMux)
+	s.registerAdminAPIRoutes(apiMux)
+	srv := httptest.NewServer(withCommonHeaders(newEngineFallbackMux(apiMux, legacyMux)))
+	t.Cleanup(srv.Close)
+	return mockClient(t, srv, encx.EngineNew)
 }
 
 func mockClient(t *testing.T, srv *httptest.Server, mode encx.EngineMode) *encx.Client {
@@ -223,11 +237,13 @@ func newMockServer(t *testing.T) *server {
 	if err != nil {
 		t.Fatalf("loadFixtures: %v", err)
 	}
-	return &server{
+	s := &server{
 		fixtures:              fixtures,
 		sessions:              make(map[string]*sessionState),
 		authStates:            make(map[string]*sessionState),
 		silentUntil:           make(map[string]time.Time),
 		antiBotAnswerAttempts: map[int]bool{},
 	}
+	s.admin = newAdminState(mockGameID, s.levelCount(), s.gameTitle(), s.scenario, false)
+	return s
 }

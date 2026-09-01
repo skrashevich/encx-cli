@@ -1,0 +1,51 @@
+{
+  "actions": [],
+  "bonus_tab_visible": true,
+  "can_view": true,
+  "filter": {
+    "correct_only": false,
+    "game_id": 31961,
+    "incorrect_only": false,
+    "level_id": 0,
+    "level_number": 0,
+    "page": 1,
+    "page_size": 50,
+    "search_string": "",
+    "tab": 0,
+    "team_id": 0,
+    "unique": false,
+    "user_id": 0
+  },
+  "finished": false,
+  "game_id": 31961,
+  "game_num": 25802,
+  "game_title": "encx parity 1788234006382762000",
+  "game_type_id": 1,
+  "levels": [
+    {
+      "level_id": 316671,
+      "level_number": 1,
+      "name": "Первый уровень"
+    },
+    {
+      "level_id": 316672,
+      "level_number": 2,
+      "name": "Второй уровень"
+    },
+    {
+      "level_id": 316673,
+      "level_number": 3,
+      "name": "Третий уровень"
+    }
+  ],
+  "live_refresh_sec": 0,
+  "mode": "main",
+  "page": 1,
+  "page_size": 50,
+  "players": [],
+  "show_scores": false,
+  "started": false,
+  "total_pages": 1,
+  "total_rows": 0,
+  "zone_id": 0
+}

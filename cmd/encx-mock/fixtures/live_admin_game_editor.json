@@ -1,0 +1,113 @@
+{
+  "authors": [
+    {
+      "login": "svk",
+      "user_id": 156988
+    }
+  ],
+  "fee_currencies": [
+    {
+      "currency_id": 1,
+      "currency_name": "en usd"
+    },
+    {
+      "currency_id": 101,
+      "currency_name": "руб."
+    },
+    {
+      "currency_id": 102,
+      "currency_name": "бел. руб."
+    },
+    {
+      "currency_id": 103,
+      "currency_name": "грн."
+    },
+    {
+      "currency_id": 104,
+      "currency_name": "usd"
+    },
+    {
+      "currency_id": 105,
+      "currency_name": "eur"
+    },
+    {
+      "currency_id": 106,
+      "currency_name": "тг."
+    },
+    {
+      "currency_id": 107,
+      "currency_name": "leu"
+    },
+    {
+      "currency_id": 108,
+      "currency_name": "zl"
+    },
+    {
+      "currency_id": 109,
+      "currency_name": "Ls"
+    }
+  ],
+  "game": {
+    "accept_rate_from_date_time": "2026-09-02T03:40:06Z",
+    "afc": 0.3,
+    "allow_make_stakes": true,
+    "author_index_calculated": false,
+    "certificate_access_mode": 0,
+    "certificate_places": 0,
+    "competition_id": -1,
+    "create_date_time": "2026-09-01T03:40:06.58Z",
+    "descr": "Описание тестовой игры",
+    "display_announcement": 0,
+    "display_monitoring": 0,
+    "earn_points_from": null,
+    "earn_points_to": null,
+    "fee": 0,
+    "fee_currency_id": 1,
+    "fee_name": "",
+    "fee_type": "Cash",
+    "fee_type_id": 1,
+    "finish_date_time": "2026-09-03T03:40:06Z",
+    "finished": false,
+    "for_user_id": null,
+    "game_num": 25802,
+    "game_type_id": 1,
+    "hide_game_descr": false,
+    "hide_levels_names": false,
+    "hide_players_list": false,
+    "id": 31961,
+    "incomplete_task_penalty": 0,
+    "is_available_after_finished": false,
+    "is_moderated": true,
+    "lang_id": 2,
+    "level_complete_type_id": null,
+    "level_number": 3,
+    "levels_sequence_id": 0,
+    "max_distance": 0,
+    "max_players": 42,
+    "max_team_members": 7,
+    "measure_type_id": null,
+    "owner_id": 156988,
+    "price": 0,
+    "prize": 0,
+    "prize_type": 1,
+    "public_access": false,
+    "quality_rate": null,
+    "quality_rate_calculated": false,
+    "rate_closed": false,
+    "referee_end": false,
+    "replace_nl_to_br": false,
+    "request_last_date": "2026-09-02T03:40:06Z",
+    "scenario_availability": 2,
+    "show_fee": 0,
+    "show_finish_place": true,
+    "show_in_calendar": false,
+    "site_id": 135,
+    "start_date_time": "2026-09-02T03:40:06Z",
+    "started": false,
+    "stat_availability_type_id": 0,
+    "status_id": 0,
+    "title": "encx parity 1788234006382762000",
+    "topic_id": 32925,
+    "zone_id": 0
+  }
+}
