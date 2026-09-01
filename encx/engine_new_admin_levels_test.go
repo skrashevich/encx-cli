@@ -3,6 +3,7 @@ package encx
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -413,6 +414,90 @@ func TestNewEngineAdminCreateLevels(t *testing.T) {
 		if call.method != http.MethodPost || call.path != "/admin/games/82448/levels" {
 			t.Errorf("calls[%d] = %s %s", i+1, call.method, call.path)
 		}
+	}
+}
+
+// ErrSectorStarted is an exported sentinel callers branch on. It has to mean
+// what it says: a sector participants have started. A 500 that the sector
+// happens to survive is a transient failure, and reporting it as unremovable
+// sends a caller away from a retry that would have worked.
+func TestNewEngineDeleteSectorClassifiesOnlyRefusals(t *testing.T) {
+	cases := []struct {
+		name       string
+		status     int
+		wantSentin bool
+	}{
+		{"refused as not allowed", http.StatusBadRequest, true},
+		{"refused as forbidden", http.StatusForbidden, true},
+		{"refused as a conflict", http.StatusConflict, true},
+		{"server error", http.StatusInternalServerError, false},
+		{"gateway timeout", http.StatusGatewayTimeout, false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			c := newEngineClient(t, func(w http.ResponseWriter, r *http.Request) {
+				switch {
+				case r.Method == http.MethodDelete:
+					w.WriteHeader(tc.status)
+					_, _ = w.Write([]byte(`{"error":"nope"}`))
+				case r.URL.Path == "/admin/games/82448/levels":
+					_, _ = w.Write([]byte(newAdminLevelBook().render()))
+				default:
+					// The level editor still lists the sector, so the delete
+					// clearly did not happen either way.
+					_, _ = w.Write([]byte(`{"level":{"level_id":812,"level_number":2},
+					  "sectors":[{"sector_id":5501,"level_id":812,"sector_name":"A"}]}`))
+				}
+			})
+
+			err := c.AdminDeleteSector(context.Background(), 82448, 2, 5501)
+			if err == nil {
+				t.Fatal("AdminDeleteSector reported success on a failed delete")
+			}
+			if got := errors.Is(err, ErrSectorStarted); got != tc.wantSentin {
+				t.Errorf("errors.Is(err, ErrSectorStarted) = %v, want %v (err = %v)",
+					got, tc.wantSentin, err)
+			}
+		})
+	}
+}
+
+// A sector that is already gone is the outcome the caller wanted. The id was
+// read one request earlier, so a 404 means somebody else removed it in between —
+// and letting that abort the clear would turn a harmless race into a failure.
+func TestNewEngineClearLevelSectorsSurvivesAConcurrentDelete(t *testing.T) {
+	remaining := map[int]bool{5501: true, 5502: true}
+	c := newEngineClient(t, func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodDelete && strings.HasSuffix(r.URL.Path, "/sectors/5501"):
+			// Somebody deleted this one between the read and the write.
+			delete(remaining, 5501)
+			w.WriteHeader(http.StatusNotFound)
+			_, _ = w.Write([]byte(`{"error":"sector not found"}`))
+		case r.Method == http.MethodDelete:
+			delete(remaining, 5502)
+			w.WriteHeader(http.StatusNoContent)
+		case r.URL.Path == "/admin/games/82448/levels":
+			_, _ = w.Write([]byte(newAdminLevelBook().render()))
+		default:
+			sectors := make([]string, 0, len(remaining))
+			for _, id := range []int{5501, 5502} {
+				if remaining[id] {
+					sectors = append(sectors, fmt.Sprintf(
+						`{"sector_id":%d,"level_id":812,"sector_name":"S%d"}`, id, id))
+				}
+			}
+			_, _ = w.Write([]byte(fmt.Sprintf(
+				`{"level":{"level_id":812,"level_number":2},"sectors":[%s]}`,
+				strings.Join(sectors, ","))))
+		}
+	})
+
+	if err := c.AdminClearLevelSectors(context.Background(), 82448, 2); err != nil {
+		t.Fatalf("AdminClearLevelSectors: %v", err)
+	}
+	if len(remaining) != 0 {
+		t.Errorf("sectors left after the clear: %v", remaining)
 	}
 }
 

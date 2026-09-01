@@ -1,8 +1,11 @@
 package encx
 
 import (
+	"fmt"
 	"strings"
 	"testing"
+
+	"github.com/skrashevich/encx-cli/encx/enapi"
 )
 
 // The write paths that are neither the admin editor nor a plain read: sending
@@ -112,8 +115,8 @@ func TestLiveActionsLifecycle(t *testing.T) {
 	ctx, cancel := liveAdminCtx(t)
 	defer cancel()
 
-	lifecycle, err := c.modern.gameLifecycle(ctx, gameID)
-	if err != nil {
+	var lifecycle enapi.AdminGameLifecycle
+	if err := c.api().GetJSON(ctx, fmt.Sprintf("/admin/games/%d/lifecycle", gameID), nil, &lifecycle); err != nil {
 		t.Fatalf("lifecycle: %v", err)
 	}
 	t.Logf("lifecycle: points=%v rate=%v qi=%v",

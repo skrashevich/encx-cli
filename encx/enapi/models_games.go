@@ -199,16 +199,34 @@ type InvitationResponseRequest struct {
 
 // TeamMember is one row of GET /teams/{id}/members.
 //
+// Measured against demo.en.cx: the row carries user_id, team_id, login and the
+// three membership flags, and no id at all.
+//
 // It is a live record read, which is what makes it a usable oracle for "did the
 // membership change": unlike /auth/session it cannot be served from claims the
 // caller is still holding from before the change.
+//
+// The shape is taken from the deployed API, which answers with
+// user_id/team_id/login/approved_by_*/is_active. The specification describes
+// this route as an array of models.User, whose key is id and which has none of
+// the membership flags — that does not match what the server sends, so id is
+// accepted as well rather than instead. MemberID reads whichever arrived.
 type TeamMember struct {
 	UserID            int    `json:"user_id"`
+	ID                int    `json:"id"`
 	TeamID            int    `json:"team_id"`
 	Login             string `json:"login"`
 	ApprovedByCaptain bool   `json:"approved_by_captain"`
 	ApprovedByUser    bool   `json:"approved_by_user"`
 	IsActive          bool   `json:"is_active"`
+}
+
+// MemberID returns the user this row describes under either spelling.
+func (m TeamMember) MemberID() int {
+	if m.UserID != 0 {
+		return m.UserID
+	}
+	return m.ID
 }
 
 // TeamUpdateRequest is models.TeamUpdateRequest. PUT /teams/{id} replaces all

@@ -3,7 +3,6 @@ package encx
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"net/url"
 	"strings"
@@ -31,13 +30,12 @@ func (e *newEngine) GetMyTeamDetails(ctx context.Context) (string, error) {
 	return e.GetTeamDetails(ctx, teamID)
 }
 
-// errNotInATeam is the one reason currentTeamID can fail that is not a failure
-// to read: the account simply has no team. It is a distinct value so a caller
-// can tell that apart from a session request that 401'd or timed out, which
-// says nothing at all about the account's team.
-var errNotInATeam = errors.New("encx: the signed-in user is not in a team")
-
 // currentTeamID reads the signed-in user's team from the session.
+//
+// It answers "which team does this account belong to", which is a property of
+// the account. "Did a team's membership just change" is a different question and
+// is asked of the team's member list instead: a session rebuilt from the bearer
+// token would still name the team the account had before the change.
 func (e *newEngine) currentTeamID(ctx context.Context) (int, error) {
 	var session enapi.Session
 	if err := e.c.api().GetJSON(ctx, "/auth/session", nil, &session); err != nil {
@@ -51,7 +49,7 @@ func (e *newEngine) currentTeamID(ctx context.Context) (int, error) {
 			return session.User.Team.ID, nil
 		}
 	}
-	return 0, errNotInATeam
+	return 0, fmt.Errorf("encx: the signed-in user is not in a team")
 }
 
 func (e *newEngine) GetTeamManagementInfo(ctx context.Context, teamID int) (*TeamManagementInfo, error) {
@@ -121,28 +119,54 @@ func (e *newEngine) respondToInvitation(ctx context.Context, teamID int, accept 
 	if err != nil {
 		return fmt.Errorf("encx: team %s: verify state: %w", operation, err)
 	}
-	if !member {
+	if member == nil {
 		return &TeamActionError{Operation: operation, Message: "команда не сменилась"}
 	}
 	return nil
 }
 
 // isTeamMember reports whether the signed-in account is listed in a team.
-func (e *newEngine) isTeamMember(ctx context.Context, teamID int) (bool, error) {
+//
+// A list that names nobody recognizably is reported as an error rather than as
+// "not a member". The difference matters because the two callers read a false
+// differently: an accept would fail loudly, but a leave would quietly succeed —
+// so a payload that stopped carrying an identity key would silently turn the
+// leave verification back into the no-op it used to be.
+func (e *newEngine) isTeamMember(ctx context.Context, teamID int) (*enapi.TeamMember, error) {
 	userID, err := e.currentUserID(ctx)
 	if err != nil {
-		return false, err
+		return nil, err
 	}
 	var members []enapi.TeamMember
 	if err := e.c.api().GetJSON(ctx, fmt.Sprintf("/teams/%d/members", teamID), nil, &members); err != nil {
-		return false, err
+		return nil, err
 	}
-	for _, member := range members {
-		if member.UserID == userID {
-			return true, nil
+
+	identified := false
+	for i, member := range members {
+		// A row naming another team is not this team's membership, whatever else
+		// it says.
+		if member.TeamID != 0 && member.TeamID != teamID {
+			continue
+		}
+		if member.MemberID() == 0 {
+			continue
+		}
+		identified = true
+		if member.MemberID() == userID {
+			return &members[i], nil
 		}
 	}
-	return false, nil
+	// Rows arrived but none of them could be read as this team's membership —
+	// either they name no user or they name another team. Either way the answer
+	// does not support the conclusion "the account is not in this team", and
+	// saying so is the whole point of asking.
+	if len(members) > 0 && !identified {
+		return nil, fmt.Errorf(
+			"encx: ответ со списком участников команды %d не читается как её состав (%d строк)",
+			teamID, len(members))
+	}
+	return nil, nil
 }
 
 // currentUserID reads the signed-in account's id. Unlike the team, the identity
@@ -236,8 +260,14 @@ func (e *newEngine) LeaveTeam(ctx context.Context, teamID int) error {
 	if err != nil {
 		return fmt.Errorf("encx: team leave: verify state: %w", err)
 	}
-	if member {
-		return &TeamActionError{Operation: "leave", Message: "команда не покинута"}
+	if member != nil {
+		// The surviving row's flags are the first thing worth knowing when a
+		// leave did not take.
+		return &TeamActionError{
+			Operation: "leave",
+			Message: fmt.Sprintf("команда не покинута: is_active=%v approved_by_captain=%v approved_by_user=%v",
+				member.IsActive, member.ApprovedByCaptain, member.ApprovedByUser),
+		}
 	}
 	return nil
 }
@@ -285,18 +315,26 @@ func urlMatch(want, _, after string) bool {
 		// The link was asked for and nothing is stored: the server refused it.
 		return false
 	}
-	return stored == wanted || strings.HasSuffix(stored, wanted) || strings.HasPrefix(stored, wanted)
+	if stored == wanted {
+		return true
+	}
+	// The two rewrites that add something rather than reshape it. Both are
+	// anchored on a separator: an unanchored suffix match would accept
+	// evil-team.example for team.example, which is the substitution this check
+	// exists to catch.
+	return strings.HasPrefix(stored, wanted+"/") || strings.HasSuffix(stored, "."+wanted)
 }
 
 // normalizeURL reduces a link to what two spellings of the same address share:
 // case, the scheme and a trailing slash are what servers rewrite.
 func normalizeURL(value string) string {
 	trimmed := strings.ToLower(strings.TrimSpace(value))
-	trimmed = strings.TrimSuffix(trimmed, "/")
+	// Scheme first: trimming the slash first would leave "https://" as "https:/"
+	// instead of the empty string it means.
 	for _, scheme := range []string{"https://", "http://"} {
 		trimmed = strings.TrimPrefix(trimmed, scheme)
 	}
-	return trimmed
+	return strings.TrimSuffix(trimmed, "/")
 }
 
 // updateTeam reads the team before writing it back: PUT /teams/{id} replaces all

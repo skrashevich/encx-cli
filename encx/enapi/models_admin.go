@@ -1,6 +1,9 @@
 package enapi
 
 // AdminGameLevelsResponse is models.AdminGameLevelsResponse — the level manager.
+//
+// Measured against demo.en.cx: can_manipulate_levels is true even for a started
+// game — can_change_levels_sequence is the one that goes false there.
 type AdminGameLevelsResponse struct {
 	GameID                  int              `json:"game_id"`
 	GameNum                 int              `json:"game_num"`
@@ -28,6 +31,10 @@ type AdminLevelItem struct {
 
 // AdminLevelEditorResponse is models.AdminLevelEditorResponse: the whole level
 // in one document, where the legacy engine needed a page per collection.
+//
+// Measured against demo.en.cx: timeout_time_award_sec is signed — negative for a
+// penalty, positive for a bonus — and required_sectors_count keeps its previous
+// value unless passing_condition_id is 1.
 type AdminLevelEditorResponse struct {
 	GameID               int                 `json:"game_id"`
 	GameNum              int                 `json:"game_num"`

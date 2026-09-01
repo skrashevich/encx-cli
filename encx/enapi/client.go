@@ -5,6 +5,20 @@
 // site context travels in the X-En-Domain header, so one client can serve any
 // domain. The package deliberately stops at transport and error decoding: the
 // mapping of REST payloads onto the public encx types lives in encx itself.
+//
+// # The specification is a hypothesis, not an oracle
+//
+// docs/newengine/swagger.json has been materially wrong about the deployed API
+// more than once. GET /teams/{id}/members is documented as an array of
+// models.User, keyed by id; it actually returns membership rows keyed by user_id
+// with three flags models.User does not have. models.AdminUpdateGameRequest
+// documents price_cents as "Fee.Cents" and says nothing about prize_cents, which
+// turns out to take the same units models.Game.prize reports.
+//
+// A model here is therefore worth only as much as its provenance. Models carrying
+// a "measured against …" note were checked against a live response; the rest were
+// transcribed from the specification and may be wrong in the same way. Before
+// building behaviour on an unmeasured field, read one real response.
 package enapi
 
 import (

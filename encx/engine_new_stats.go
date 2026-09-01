@@ -111,7 +111,11 @@ func gameStatisticsFromAPI(stats *enapi.GameStatisticsResponse) *GameStatisticsR
 	out := &GameStatisticsResponse{
 		IsLevelNamesVisible: !stats.HideLevelsNames,
 		ShowAdminWarning:    strings.TrimSpace(stats.AdminWarning) != "",
-		PagerVisible:        stats.TotalPages > 1,
+		// PagerVisible said "there is more of this table" on the legacy page.
+		// Every page has been read by the time this runs, so there is not: a
+		// caller that showed a pager on it would offer to fetch rows it already
+		// has.
+		PagerVisible: false,
 	}
 
 	out.Levels = make([]LevelStatInfo, 0, len(stats.Levels))

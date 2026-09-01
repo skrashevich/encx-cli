@@ -270,15 +270,6 @@ func (e *newEngine) administersGame(ctx context.Context, gameID int) (administer
 	return true, editor.Game.Started
 }
 
-func (e *newEngine) gameLifecycle(ctx context.Context, gameID int) (*enapi.AdminGameLifecycle, error) {
-	var lifecycle enapi.AdminGameLifecycle
-	path := fmt.Sprintf("/admin/games/%d/lifecycle", gameID)
-	if err := e.c.api().GetJSON(ctx, path, nil, &lifecycle); err != nil {
-		return nil, err
-	}
-	return &lifecycle, nil
-}
-
 func (e *newEngine) AdminAddCorrection(ctx context.Context, gameId int, corr AdminCorrectionAdd) error {
 	// The legacy form named the team and level; the REST route wants IDs, so
 	// the same dropdown options the page rendered are used to resolve them.

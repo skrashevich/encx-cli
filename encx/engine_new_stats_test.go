@@ -221,6 +221,54 @@ func TestNewEngineStatisticsDoesNotMultiplyCorrectionsAcrossPages(t *testing.T) 
 	}
 }
 
+// A last page that comes back empty is a complete read, not a truncated one:
+// rows shift between requests and the final page can legitimately hold nothing.
+// An empty page in the middle is still an error.
+func TestNewEngineStatisticsAcceptsAnEmptyFinalPage(t *testing.T) {
+	t.Run("empty last page completes the read", func(t *testing.T) {
+		c := newEngineClient(t, func(w http.ResponseWriter, r *http.Request) {
+			page := r.URL.Query().Get("page")
+			if page == "3" {
+				_, _ = w.Write([]byte(`{"game_id":82448,"total_pages":3,
+				  "levels":[{"level_id":811,"level_number":1}],"level_stats":{}}`))
+				return
+			}
+			user := 1
+			if page == "2" {
+				user = 2
+			}
+			_, _ = w.Write([]byte(fmt.Sprintf(`{"game_id":82448,"total_pages":3,
+			  "levels":[{"level_id":811,"level_number":1}],
+			  "level_stats":{"1":[{"level_id":811,"level_num":1,"user_id":%d,"spent_seconds":10}]}}`, user)))
+		})
+
+		stats, err := c.GetGameStatistics(context.Background(), 82448)
+		if err != nil {
+			t.Fatalf("GetGameStatistics: %v", err)
+		}
+		if len(stats.StatItems[0]) != 2 {
+			t.Errorf("rows = %d, want the two pages that had any", len(stats.StatItems[0]))
+		}
+	})
+
+	t.Run("empty middle page is still incomplete", func(t *testing.T) {
+		c := newEngineClient(t, func(w http.ResponseWriter, r *http.Request) {
+			if r.URL.Query().Get("page") == "2" {
+				_, _ = w.Write([]byte(`{"game_id":82448,"total_pages":5,
+				  "levels":[{"level_id":811,"level_number":1}],"level_stats":{}}`))
+				return
+			}
+			_, _ = w.Write([]byte(`{"game_id":82448,"total_pages":5,
+			  "levels":[{"level_id":811,"level_number":1}],
+			  "level_stats":{"1":[{"level_id":811,"level_num":1,"user_id":1,"spent_seconds":10}]}}`))
+		})
+
+		if _, err := c.GetGameStatistics(context.Background(), 82448); err == nil {
+			t.Fatal("GetGameStatistics accepted a table that stopped three pages early")
+		}
+	})
+}
+
 // A server that never says it is done must not yield a silently short table.
 func TestNewEngineStatisticsRefusesAnIncompleteRead(t *testing.T) {
 	c := newEngineClient(t, func(w http.ResponseWriter, r *http.Request) {

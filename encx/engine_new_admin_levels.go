@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -39,6 +40,11 @@ func (e *newEngine) resolveLevelID(ctx context.Context, gameID, levelNum int) (i
 	if err != nil {
 		return 0, err
 	}
+	return levelIDByNumber(list, gameID, levelNum)
+}
+
+// levelIDByNumber resolves a level number against an already-read manager list.
+func levelIDByNumber(list *enapi.AdminGameLevelsResponse, gameID, levelNum int) (int, error) {
 	for _, level := range list.Levels {
 		if level.LevelNumber == levelNum {
 			return level.LevelID, nil
@@ -168,16 +174,6 @@ func (e *newEngine) AdminDeleteLevel(ctx context.Context, gameId, levelNum int) 
 		return err
 	}
 	return e.c.api().Delete(ctx, adminLevelPath(gameId, levelID, ""), nil, nil)
-}
-
-// levelIDByNumber resolves a level number against an already-read manager list.
-func levelIDByNumber(list *enapi.AdminGameLevelsResponse, gameID, levelNum int) (int, error) {
-	for _, level := range list.Levels {
-		if level.LevelNumber == levelNum {
-			return level.LevelID, nil
-		}
-	}
-	return 0, fmt.Errorf("encx: game %d has no level %d", gameID, levelNum)
 }
 
 func (e *newEngine) AdminRenameLevels(ctx context.Context, gameId int, names map[int]string) error {
@@ -356,10 +352,10 @@ func (e *newEngine) confirmLevelOrder(ctx context.Context, gameID int, operation
 	if err != nil {
 		return fmt.Errorf("encx: %s: не удалось проверить результат: %w", operation, err)
 	}
-	if slicesEqualInt(got, want) {
+	if slices.Equal(got, want) {
 		return nil
 	}
-	if slicesEqualInt(got, before) {
+	if slices.Equal(got, before) {
 		return fmt.Errorf(
 			"encx: %s в игре %d не выполнена: движок ответил успехом, но порядок уровней не изменился "+
 				"(%v, ожидалось %v); на развёрнутом бэкенде маршруты %s/exchange и %s/put "+
@@ -379,18 +375,6 @@ func checkCanManipulateLevels(list *enapi.AdminGameLevelsResponse, gameID int, o
 		return nil
 	}
 	return fmt.Errorf("encx: %s: игра %d не разрешает менять состав и порядок уровней", operation, gameID)
-}
-
-func slicesEqualInt(a, b []int) bool {
-	if len(a) != len(b) {
-		return false
-	}
-	for i := range a {
-		if a[i] != b[i] {
-			return false
-		}
-	}
-	return true
 }
 
 func (e *newEngine) AdminCloneLevels(ctx context.Context, gameId, count, likeLevel int) error {
@@ -857,6 +841,14 @@ func (e *newEngine) deleteSector(ctx context.Context, gameID, levelID, levelNum,
 	path := adminLevelPath(gameID, levelID, fmt.Sprintf("/sectors/%d", sectorID))
 	err := e.c.api().Delete(ctx, path, nil, nil)
 	if err == nil {
+		return nil
+	}
+	// A sector that is already gone is the outcome this call wanted. The id came
+	// from a read one request earlier, so a 404 here means somebody removed it in
+	// between — and letting that abort a whole level clear would turn a harmless
+	// race into a failure. The legacy client never saw it: it re-read the list
+	// every round, so a vanished sector was simply not in it.
+	if enapi.IsNotFound(err) {
 		return nil
 	}
 	if !isSectorRefusal(err) {

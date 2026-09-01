@@ -25,7 +25,7 @@ func TestLivePlayerGameModelLevel(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GetGameModel(%d): %v", gameID, err)
 	}
-	if len(model.Levels) == 0 {
+	if len(model.Levels) == 0 || model.Level == nil {
 		t.Skip("the game publishes no level list")
 	}
 	number := model.Levels[0].LevelNumber
@@ -40,8 +40,16 @@ func TestLivePlayerGameModelLevel(t *testing.T) {
 	if level.Level == nil {
 		t.Fatalf("GetGameModelLevel(%d) returned no level", number)
 	}
-	if level.Level.Number != number {
-		t.Errorf("level number = %d, want %d", level.Level.Number, number)
+	// The level parameter selects a level only in an assault game, where the
+	// player picks which one to attack; the specification calls it "номер уровня
+	// (штурм)" and the legacy client says the same. Everywhere else both engines
+	// answer with the level the player is actually on, so the requested number is
+	// only binding when the game lets a player choose.
+	if level.LevelSequence == SequenceAssault && level.Level.Number != number {
+		t.Errorf("assault game returned level %d, want the requested %d", level.Level.Number, number)
+	}
+	if level.Level.Number != model.Level.Number && level.LevelSequence != SequenceAssault {
+		t.Errorf("level number = %d, want the current level %d", level.Level.Number, model.Level.Number)
 	}
 	// The engine reports timestamps as Unix seconds in both fields, so a level
 	// that has a start time must carry a consistent pair rather than a zero.
