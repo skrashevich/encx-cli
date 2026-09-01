@@ -1,0 +1,45 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<title>$title$</title>
+$for(header-includes)$
+$header-includes$
+$endfor$
+</head>
+<body>
+
+<section class="cover">
+  <div class="cover-rule"></div>
+  <div class="cover-kicker">Encounter · техническая документация</div>
+  <h1 class="cover-title">Новый движок<br>Encounter</h1>
+  <div class="cover-sub">Go Backend API: обзор, протокол WebSocket<br>и матрица паритета с ASP.NET-движком</div>
+
+  <div class="cover-facts">
+    <div class="fact"><span class="fact-k">Спецификация</span><span class="fact-v">$spec$</span></div>
+    <div class="fact"><span class="fact-k">Источник</span><span class="fact-v">api.en.cx/swagger/doc.json</span></div>
+    <div class="fact"><span class="fact-k">Снимок</span><span class="fact-v">$snapshot$</span></div>
+    <div class="fact"><span class="fact-k">Клиент</span><span class="fact-v">пакет <code>encx</code> — один публичный API поверх двух движков</span></div>
+  </div>
+
+  <div class="cover-foot">
+    <div class="cover-foot-line"></div>
+    <div>Документ собран из <code>docs/newengine/</code> репозитория <span class="nowrap">https://github.com/skrashevich/encx-cli</span></div>
+  </div>
+</section>
+
+<section class="toc-page">
+  <h2 class="toc-head">Содержание</h2>
+  $toc$
+</section>
+
+<main>
+$body$
+</main>
+
+<script>
+  window.PagedConfig = { auto: true, after: () => { window.__PAGED_DONE__ = true; } };
+</script>
+<script src="paged.polyfill.js"></script>
+</body>
+</html>
