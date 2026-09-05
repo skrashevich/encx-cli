@@ -89,19 +89,20 @@ func planSplit(img image.Image, requested splitAxis, parts int) (*splitPlan, err
 		return nil, fmt.Errorf("parts has to be between 2 and %d, got %d", maxSplitParts, parts)
 	}
 
-	along, detected := detectAlong(img, requested)
+	along, detected, apparent := detectAlong(img, requested)
 	if parts == 0 {
 		if len(detected) == 0 {
-			return nil, errors.New(
-				"no separators were found, so the parts of this picture cannot be guessed; " +
-					"pass parts to divide it evenly, or use enc_crop_image with an explicit box")
+			return nil, noUsableSeparators(apparent)
 		}
 		return &splitPlan{Axis: along, Method: "detected", Segments: detected}, nil
 	}
 	if len(detected) == parts {
 		return &splitPlan{Axis: along, Method: "detected", Segments: detected}, nil
 	}
-	span := spanAlong(img.Bounds(), along)
+	span := img.Bounds().Dx()
+	if along == axisVertical {
+		span = img.Bounds().Dy()
+	}
 	if span < parts {
 		// Dividing further than one pixel per part would attach empty images.
 		return nil, fmt.Errorf(
@@ -130,36 +131,55 @@ func (p *splitPlan) rects(bounds image.Rectangle) []image.Rectangle {
 	return rects
 }
 
+// noUsableSeparators explains why a picture cannot be cut on its own
+// structure. A file with more apparent panels than this tool returns is a
+// different situation from one with none, and calling it "no separators" would
+// send the model off to read a collage whole.
+func noUsableSeparators(apparent int) error {
+	if apparent > maxSplitParts {
+		return fmt.Errorf(
+			"this picture appears to fall into %d parts, more than the %d one call returns; "+
+				"it is more likely textured than assembled, so crop the region you need instead",
+			apparent, maxSplitParts)
+	}
+	return errors.New(
+		"no separators were found, so the parts of this picture cannot be guessed; " +
+			"pass parts to divide it evenly, or crop an explicit box")
+}
+
 // detectAlong resolves axisAuto by trying both layouts: the one that finds more
 // panels wins, and a tie goes to the longer side, which is the way a collage is
-// usually assembled.
-func detectAlong(img image.Image, requested splitAxis) (splitAxis, []segment) {
+// usually assembled. The third return is how many panels the winning axis
+// appeared to have before the count cap, which is what makes a refusal
+// explainable.
+func detectAlong(img image.Image, requested splitAxis) (splitAxis, []segment, int) {
 	if requested != axisAuto {
-		return requested, detectSegments(img, requested)
+		segments, apparent := detectSegments(img, requested)
+		return requested, segments, apparent
 	}
-	horizontal := detectSegments(img, axisHorizontal)
-	vertical := detectSegments(img, axisVertical)
+	horizontal, apparentX := detectSegments(img, axisHorizontal)
+	vertical, apparentY := detectSegments(img, axisVertical)
 	switch {
 	case len(horizontal) > len(vertical):
-		return axisHorizontal, horizontal
+		return axisHorizontal, horizontal, apparentX
 	case len(vertical) > len(horizontal):
-		return axisVertical, vertical
+		return axisVertical, vertical, apparentY
 	case img.Bounds().Dy() > img.Bounds().Dx():
-		return axisVertical, vertical
+		return axisVertical, vertical, apparentY
 	default:
-		return axisHorizontal, horizontal
+		return axisHorizontal, horizontal, apparentX
 	}
 }
 
-// detectSegments finds the panels of a collage along one axis. It reports
-// nothing when the picture has no separators, or so many that its "panels" are
-// really texture.
-func detectSegments(img image.Image, along splitAxis) []segment {
+// detectSegments finds the panels of a collage along one axis, and reports how
+// many it appeared to find. The panels are withheld when the picture has no
+// separators, or so many that its "panels" are really texture.
+func detectSegments(img image.Image, along splitAxis) ([]segment, int) {
 	segments := segmentsBetweenSeams(uniformLines(img, along))
 	if len(segments) < 2 || len(segments) > maxSplitParts {
-		return nil
+		return nil, len(segments)
 	}
-	return segments
+	return segments, len(segments)
 }
 
 // segmentsBetweenSeams turns the runs of plain background into panels.
@@ -242,10 +262,7 @@ func mergeThinSegments(segments []segment, min int) []segment {
 }
 
 func minPartSize(span int) int {
-	if size := span / minPartFraction; size > minPartPixels {
-		return size
-	}
-	return minPartPixels
+	return max(span/minPartFraction, minPartPixels)
 }
 
 // equalSegments divides a span into pieces of as near the same size as the span
@@ -259,13 +276,6 @@ func equalSegments(span, parts int) []segment {
 		})
 	}
 	return segments
-}
-
-func spanAlong(bounds image.Rectangle, along splitAxis) int {
-	if along == axisVertical {
-		return bounds.Dy()
-	}
-	return bounds.Dx()
 }
 
 // uniformLines marks every line across the picture that holds a single colour.

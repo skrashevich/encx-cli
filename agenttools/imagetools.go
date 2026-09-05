@@ -91,12 +91,15 @@ func describeImage(ctx context.Context, engine Engine, args arguments) (any, err
 		Bytes:  source.bytes,
 	}
 
-	// Without a requested part count the only thing planSplit can refuse over is
-	// a picture that has no separators, which is an answer rather than a failure.
+	// Without a requested part count planSplit can only refuse over a picture
+	// whose parts cannot be read off its own structure, which is an answer
+	// rather than a failure. Its reason is reported verbatim: "no separators at
+	// all" and "more apparent parts than one call returns" call for different
+	// next moves.
 	plan, err := planSplit(source.img, axisAuto, 0)
 	if err != nil {
-		view.Note = "This picture carries no separators, so it is one picture rather than a collage. " +
-			"Use " + toolViewImage + " to see it whole, or " + toolCropImage + " for a detail."
+		view.Note = err.Error() + ". Use " + toolViewImage + " to see the picture whole, or " +
+			toolCropImage + " for a detail of it."
 		return view, nil
 	}
 

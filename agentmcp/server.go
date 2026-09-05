@@ -68,10 +68,17 @@ func toolHandler(tool *agenttools.Tool) mcp.ToolHandler {
 			return errorResult(tool.Name() + " returned no result"), nil
 		}
 		content := []mcp.Content{&mcp.TextContent{Text: result.ContentForLLM()}}
-		return &mcp.CallToolResult{
-			IsError: result.IsError,
-			Content: append(content, imageContent(result.Media)...),
-		}, nil
+		images, skipped := imageContent(result.Media)
+		content = append(content, images...)
+		if skipped > 0 {
+			// A result that says a picture is attached, with no picture, is the
+			// failure these tools exist to remove. If it happens anyway, say so
+			// instead of letting the client wonder.
+			content = append(content, &mcp.TextContent{Text: fmt.Sprintf(
+				"%s attached %d item(s) that could not be carried as image content.",
+				tool.Name(), skipped)})
+		}
+		return &mcp.CallToolResult{IsError: result.IsError, Content: content}, nil
 	}
 }
 
@@ -82,22 +89,30 @@ func toolHandler(tool *agenttools.Tool) mcp.ToolHandler {
 // content block instead, and without this conversion it would receive a tool
 // result that talks about a picture it was never handed — which is exactly the
 // failure these tools exist to remove.
-func imageContent(media []string) []mcp.Content {
+// The second return is how many attachments could not be converted, so the
+// caller can admit to a picture that did not make it rather than dropping it
+// without a word.
+func imageContent(media []string) ([]mcp.Content, int) {
 	var content []mcp.Content
+	skipped := 0
 	for _, inline := range media {
 		mimeType, data, ok := decodeInlineImage(inline)
 		if !ok {
+			skipped++
 			continue
 		}
 		content = append(content, &mcp.ImageContent{MIMEType: mimeType, Data: data})
 	}
-	return content
+	return content, skipped
 }
 
 // decodeInlineImage splits a "data:image/png;base64,…" entry into its type and
 // its bytes. Anything else — an audio clip, a media:// reference, a truncated
-// string — is skipped rather than passed on as a content block the client
-// cannot render.
+// string — is reported as unusable rather than passed on as a content block the
+// client cannot render.
+//
+// The header is matched loosely: the base64 marker is the last parameter but
+// need not be the only one, and the casing is not fixed by the syntax.
 func decodeInlineImage(inline string) (string, []byte, bool) {
 	body, isDataURL := strings.CutPrefix(inline, "data:")
 	if !isDataURL {
@@ -107,8 +122,12 @@ func decodeInlineImage(inline string) (string, []byte, bool) {
 	if !found {
 		return "", nil, false
 	}
-	mimeType, encoding, found := strings.Cut(header, ";")
-	if !found || encoding != "base64" || !strings.HasPrefix(mimeType, "image/") {
+	header = strings.ToLower(strings.TrimSpace(header))
+	if !strings.HasSuffix(header, ";base64") {
+		return "", nil, false
+	}
+	mimeType, _, _ := strings.Cut(header, ";")
+	if !strings.HasPrefix(mimeType, "image/") {
 		return "", nil, false
 	}
 	data, err := base64.StdEncoding.DecodeString(encoded)

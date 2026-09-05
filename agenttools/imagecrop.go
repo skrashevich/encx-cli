@@ -22,12 +22,10 @@ import (
 	"github.com/skrashevich/encx-cli/encx"
 )
 
-// A task picture is regularly a collage: several unrelated panels pasted into
-// one file, one of them a screenshot whose text is the actual answer. A
-// provider downscales the file as a whole, so that text is gone before the
-// model ever sees it. Cropping is what hands a panel back at its own
-// resolution, which is why these helpers sit next to enc_view_image rather than
-// replacing it.
+// A provider downscales a picture as a whole before the model sees it, so the
+// small print inside it is gone by then. Cropping is what hands a region back
+// at its own resolution — which is why these helpers sit next to
+// enc_view_image rather than replacing it.
 
 const (
 	// defaultMaxDimension is the longer side a returned fragment is trimmed to.
@@ -43,6 +41,11 @@ const (
 	// fragment is a photograph rather than line art or a screenshot, and a
 	// handful of those would be megabytes of base64.
 	pngByteBudget = 1 << 20
+	// maxCoordinate bounds a crop coordinate. It sits far past the side of any
+	// picture that passes maxDecodedPixels, so it only catches nonsense — and it
+	// has to catch it, because rectangle arithmetic on an unbounded coordinate
+	// overflows into "the whole picture" rather than into an error.
+	maxCoordinate = 1 << 24
 	// maxDecodedPixels bounds what may be decoded at all. The fetch is capped in
 	// bytes, but bytes say nothing about pixels: a few kilobytes of PNG can
 	// declare a picture of forty thousand pixels a side, and decoding it would
@@ -88,10 +91,9 @@ func decodeResource(resource *encx.Resource) (*decodedImage, error) {
 	return &decodedImage{img: img, format: format, url: resource.URL, bytes: len(resource.Data)}, nil
 }
 
-// checkDecodedSize refuses a picture before it is decoded rather than after.
-//
-// A URL taken from game content is untrusted input, and the byte cap on the
-// fetch does not bound the allocation a decoder will ask for.
+// checkDecodedSize refuses a picture before it is decoded: a URL taken from
+// game content is untrusted input, and the byte cap on the fetch does not bound
+// the allocation a decoder will ask for.
 func checkDecodedSize(url string, width, height int) error {
 	if width <= 0 || height <= 0 {
 		return fmt.Errorf("%s reports a size of %dx%d, which is not a picture", url, width, height)
@@ -154,25 +156,20 @@ func cropImage(img image.Image, rect image.Rectangle) image.Image {
 	return out
 }
 
-// fitWithin shrinks a fragment so its longer side is at most max, averaging
+// fitWithin shrinks a fragment so its longer side is at most limit, averaging
 // each source block instead of picking one pixel out of it. Nearest-neighbour
 // sampling would drop exactly what a crop is taken for: hairline strokes and
 // small print.
-func fitWithin(img image.Image, max int) image.Image {
+func fitWithin(img image.Image, limit int) image.Image {
 	bounds := img.Bounds()
-	longer := bounds.Dx()
-	if bounds.Dy() > longer {
-		longer = bounds.Dy()
-	}
-	if max <= 0 || longer <= max {
+	longer := max(bounds.Dx(), bounds.Dy())
+	if limit <= 0 || longer <= limit {
 		return img
 	}
 
-	scale := float64(max) / float64(longer)
-	width := int(math.Round(float64(bounds.Dx()) * scale))
-	height := int(math.Round(float64(bounds.Dy()) * scale))
-	width = clampAtLeastOne(width)
-	height = clampAtLeastOne(height)
+	scale := float64(limit) / float64(longer)
+	width := max(int(math.Round(float64(bounds.Dx())*scale)), 1)
+	height := max(int(math.Round(float64(bounds.Dy())*scale)), 1)
 
 	out := image.NewRGBA(image.Rect(0, 0, width, height))
 	for y := range height {
@@ -191,13 +188,6 @@ func fitWithin(img image.Image, max int) image.Image {
 		}
 	}
 	return out
-}
-
-func clampAtLeastOne(v int) int {
-	if v < 1 {
-		return 1
-	}
-	return v
 }
 
 // averageBlock is the mean colour of one source block, in the premultiplied
@@ -222,12 +212,13 @@ func averageBlock(img image.Image, block image.Rectangle) color.RGBA {
 	}
 }
 
-// fragment is one cropped piece on its way to the model.
+// fragment is one cropped piece on its way to the model. The views in
+// imagetools.go are what reaches it as JSON; this only feeds them.
 type fragment struct {
-	Box         cropBox `json:"box"`
-	Width       int     `json:"returned_width"`
-	Height      int     `json:"returned_height"`
-	ContentType string  `json:"content_type"`
+	Box         cropBox
+	Width       int
+	Height      int
+	ContentType string
 	dataURL     string
 }
 
@@ -255,36 +246,20 @@ func renderFragment(source *decodedImage, rect image.Rectangle, maxDimension int
 // flat colour and small text stay exact — unless the result is too heavy to be
 // anything but a photograph, in which case JPEG wins on size.
 func encodeFragment(img image.Image, sourceFormat string) (string, string, error) {
+	var buf bytes.Buffer
 	if sourceFormat == "png" || sourceFormat == "gif" {
-		lossless, err := encodePNG(img)
-		if err != nil {
-			return "", "", err
+		if err := png.Encode(&buf, img); err != nil {
+			return "", "", fmt.Errorf("encode the fragment as PNG: %w", err)
 		}
-		if len(lossless) <= pngByteBudget {
-			return inlineImage("image/png", lossless), "image/png", nil
+		if buf.Len() <= pngByteBudget {
+			return inlineImage("image/png", buf.Bytes()), "image/png", nil
 		}
+		buf.Reset()
 	}
-	lossy, err := encodeJPEG(img)
-	if err != nil {
-		return "", "", err
-	}
-	return inlineImage("image/jpeg", lossy), "image/jpeg", nil
-}
-
-func encodePNG(img image.Image) ([]byte, error) {
-	var buf bytes.Buffer
-	if err := png.Encode(&buf, img); err != nil {
-		return nil, fmt.Errorf("encode the fragment as PNG: %w", err)
-	}
-	return buf.Bytes(), nil
-}
-
-func encodeJPEG(img image.Image) ([]byte, error) {
-	var buf bytes.Buffer
 	if err := jpeg.Encode(&buf, img, &jpeg.Options{Quality: jpegQuality}); err != nil {
-		return nil, fmt.Errorf("encode the fragment as JPEG: %w", err)
+		return "", "", fmt.Errorf("encode the fragment as JPEG: %w", err)
 	}
-	return buf.Bytes(), nil
+	return inlineImage("image/jpeg", buf.Bytes()), "image/jpeg", nil
 }
 
 func inlineImage(contentType string, data []byte) string {
@@ -293,30 +268,55 @@ func inlineImage(contentType string, data []byte) string {
 
 // optionalPixels reads one crop coordinate.
 //
-// Providers are inconsistent about number typing, and a model that has not
-// measured the picture yet can only reason in fractions, so a percentage of the
-// relevant side — "33%" — is accepted next to a pixel count.
+// The value stays a float64 until it has been range-checked, because
+// converting one that does not fit an int is undefined in Go — and because an
+// out-of-range coordinate has to be refused rather than converted: rectangle
+// arithmetic on it overflows, and an overflowed box canonicalises into "the
+// whole picture" instead of an error.
 func (a arguments) optionalPixels(key string, span int) (int, bool, error) {
 	raw, ok := a[key]
 	if !ok || raw == nil {
 		return 0, false, nil
 	}
+	value, err := a.pixelValue(key, span)
+	if err != nil {
+		return 0, false, err
+	}
+	if math.IsNaN(value) || math.IsInf(value, 0) ||
+		value < -maxCoordinate || value > maxCoordinate {
+		return 0, false, fmt.Errorf(
+			"argument %q is %v, outside the %d pixels a picture can measure", key, raw, maxCoordinate)
+	}
+	return int(value), true, nil
+}
+
+// pixelValue resolves one coordinate to pixels. Providers are inconsistent
+// about number typing, and a model that has not measured the picture yet can
+// only reason in fractions, so a percentage of the relevant side — "33%" — is
+// accepted next to a pixel count.
+func (a arguments) pixelValue(key string, span int) (float64, error) {
+	raw := a[key]
 	if text, isText := raw.(string); isText {
 		trimmed := strings.TrimSpace(text)
 		if percent, isPercent := strings.CutSuffix(trimmed, "%"); isPercent {
 			share, err := strconv.ParseFloat(strings.TrimSpace(percent), 64)
 			if err != nil {
-				return 0, false, fmt.Errorf("argument %q is not a percentage: %q", key, text)
+				return 0, fmt.Errorf("argument %q is not a percentage: %q", key, text)
 			}
-			return int(math.Round(share / 100 * float64(span))), true, nil
+			// ParseFloat accepts "Inf" and "NaN"; both survive this arithmetic and
+			// are caught by the range check.
+			return math.Round(share / 100 * float64(span)), nil
 		}
+	}
+	if number, isNumber := raw.(float64); isNumber {
+		return number, nil
 	}
 	value, ok := a.optionalInt(key)
 	if !ok {
-		return 0, false, fmt.Errorf(
+		return 0, fmt.Errorf(
 			"argument %q has to be a pixel count or a percentage of the picture like \"33%%\"", key)
 	}
-	return value, true, nil
+	return float64(value), nil
 }
 
 // maxDimensionArgument reads the cap on the longer side of a returned fragment.

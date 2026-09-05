@@ -9,6 +9,7 @@ import (
 	"hash/crc32"
 	"image"
 	"image/color"
+	"image/gif"
 	"image/jpeg"
 	"image/png"
 	"io"
@@ -107,7 +108,7 @@ func encodeJPEGBytes(t *testing.T, img image.Image, quality int) []byte {
 }
 
 func TestDetectSegmentsFindsThePanelsOfACollage(t *testing.T) {
-	segments := detectSegments(horizontalCollage(3, 0), axisHorizontal)
+	segments, _ := detectSegments(horizontalCollage(3, 0), axisHorizontal)
 	if len(segments) != 3 {
 		t.Fatalf("a three-panel collage should split into 3 parts, got %v", segments)
 	}
@@ -124,7 +125,7 @@ func TestDetectSegmentsFindsThePanelsOfACollage(t *testing.T) {
 
 func TestDetectSegmentsIgnoresTheMarginsAtTheEdges(t *testing.T) {
 	const margin = 25
-	segments := detectSegments(horizontalCollage(2, margin), axisHorizontal)
+	segments, _ := detectSegments(horizontalCollage(2, margin), axisHorizontal)
 	if len(segments) != 2 {
 		t.Fatalf("two panels inside a margin should split into 2 parts, got %v", segments)
 	}
@@ -148,7 +149,7 @@ func TestDetectSegmentsSurvivesJPEGNoise(t *testing.T) {
 		t.Fatalf("decode the JPEG fixture: %v", err)
 	}
 
-	segments := detectSegments(decoded, axisHorizontal)
+	segments, _ := detectSegments(decoded, axisHorizontal)
 	if len(segments) != 3 {
 		t.Fatalf("a JPEG collage should still split into 3 parts, got %v", segments)
 	}
@@ -219,6 +220,63 @@ func TestPlanSplitRejectsAnImpossiblePartCount(t *testing.T) {
 	}
 }
 
+func TestPlanSplitReportsTooManyPartsAsItsOwnAnswer(t *testing.T) {
+	// A striped background finds a separator between every stripe. Calling that
+	// "no separators" would send the model off to read the picture whole, when
+	// what it should do is crop the region it cares about.
+	striped := image.NewRGBA(image.Rect(0, 0, 400, 100))
+	fillWhite(striped)
+	for stripe := range 20 {
+		left := stripe * 20
+		for y := range 100 {
+			for x := range 10 {
+				striped.SetRGBA(left+x, y, panelPattern(x, y, stripe*7))
+			}
+		}
+	}
+
+	_, err := planSplit(striped, axisHorizontal, 0)
+	if err == nil {
+		t.Fatal("a picture that falls into more parts than one call returns should be refused")
+	}
+	if !strings.Contains(err.Error(), "textured") {
+		t.Fatalf("the refusal should say the picture is textured rather than assembled, got %v", err)
+	}
+}
+
+func TestDetectAlongBreaksATieOnTheLongerSide(t *testing.T) {
+	// With no separators on either axis the count is a tie at zero, and a
+	// collage is assembled along the side it has more room on.
+	plain := func(width, height int) image.Image {
+		canvas := image.NewRGBA(image.Rect(0, 0, width, height))
+		for y := range height {
+			for x := range width {
+				canvas.SetRGBA(x, y, panelPattern(x, y, 0))
+			}
+		}
+		return canvas
+	}
+
+	if axis, _, _ := detectAlong(plain(400, 100), axisAuto); axis != axisHorizontal {
+		t.Fatalf("a wide picture should be cut along its width, got %q", axis)
+	}
+	if axis, _, _ := detectAlong(plain(100, 400), axisAuto); axis != axisVertical {
+		t.Fatalf("a tall picture should be cut along its height, got %q", axis)
+	}
+}
+
+func TestMinPartSizeKeepsNoiseFromBecomingAPart(t *testing.T) {
+	for _, testCase := range []struct{ span, want int }{
+		{span: 100, want: minPartPixels}, // 2% of 100 is below the floor
+		{span: 400, want: 8},             // exactly at the floor
+		{span: 1200, want: 24},           // 2% wins over the floor
+	} {
+		if got := minPartSize(testCase.span); got != testCase.want {
+			t.Fatalf("minPartSize(%d) = %d, want %d", testCase.span, got, testCase.want)
+		}
+	}
+}
+
 func TestMergeThinSegmentsKeepsFullCoverage(t *testing.T) {
 	// Noise in the separator detection can carve off a sliver. Folding it into a
 	// neighbour is the only fix that leaves no gap between the parts.
@@ -283,6 +341,33 @@ func TestOptionalPixelsReadsBothPixelsAndPercentages(t *testing.T) {
 	}
 	if _, ok, err := args.optionalPixels("missing", 400); ok || err != nil {
 		t.Fatalf("an absent argument is not an error, got ok=%v err=%v", ok, err)
+	}
+}
+
+func TestOptionalPixelsRefusesValuesThatWouldOverflow(t *testing.T) {
+	// Rectangle arithmetic on an unbounded coordinate overflows, and an
+	// overflowed box canonicalises into the whole picture — a wrong answer with
+	// no error, which is worse than a refusal. "Inf%" and "NaN%" get here too,
+	// because Go's float parser accepts both.
+	args := arguments{
+		"huge":     float64(9.2e18),
+		"negative": float64(-9.2e18),
+		"infinite": "Inf%",
+		"nan":      "NaN%",
+		"text":     "99999999999999999999",
+		"far":      float64(maxCoordinate + 1),
+	}
+	for key := range args {
+		if _, _, err := args.optionalPixels(key, 400); err == nil {
+			t.Fatalf("%q is not a coordinate any picture can have and should be refused", key)
+		}
+	}
+
+	// The guard has to leave a real coordinate and a real percentage alone.
+	for key, value := range map[string]any{"ok": float64(maxCoordinate), "share": "100%"} {
+		if _, ok, err := (arguments{key: value}).optionalPixels(key, 400); !ok || err != nil {
+			t.Fatalf("%q should still resolve, got ok=%v err=%v", key, ok, err)
+		}
 	}
 }
 
@@ -620,6 +705,32 @@ func TestCropImageAcceptsPercentagesAndAnOpenEnd(t *testing.T) {
 	}
 }
 
+func TestSplitImageHandlesAGIFCollage(t *testing.T) {
+	// A GIF task picture is not rare, and its first frame is the one carrying
+	// the task. A fragment of one is encoded as PNG: a palette holds line art
+	// and screenshot text, which JPEG would smear.
+	var buf bytes.Buffer
+	if err := gif.Encode(&buf, horizontalCollage(3, 0), nil); err != nil {
+		t.Fatalf("encode the GIF fixture: %v", err)
+	}
+	engine := collageEngine(t, buf.Bytes(), "image/gif")
+	catalog := newTestCatalog(t, engine, Options{Policy: PolicyReadonly})
+	tool, _ := catalog.Lookup(toolSplitImage)
+
+	result := tool.Execute(context.Background(), map[string]any{"url": "/upload/collage.gif"})
+	if result.IsError {
+		t.Fatalf("a GIF collage should split, got %q", result.ForLLM)
+	}
+	if len(result.Media) != 3 {
+		t.Fatalf("the three panels should survive the palette, got %d", len(result.Media))
+	}
+	for index, inline := range result.Media {
+		if !strings.HasPrefix(inline, "data:image/png;base64,") {
+			t.Fatalf("part %d of a GIF should be returned as PNG, got %.40q", index+1, inline)
+		}
+	}
+}
+
 func TestCropImageRefusesWhatItCannotDecode(t *testing.T) {
 	engine := collageEngine(t, []byte("<html>not a picture</html>"), "text/html")
 	catalog := newTestCatalog(t, engine, Options{Policy: PolicyReadonly})
@@ -636,7 +747,7 @@ func TestCropImageRefusesWhatItCannotDecode(t *testing.T) {
 	}
 }
 
-func TestPictureToolsAreAvailableUnderEveryPolicy(t *testing.T) {
+func TestPictureToolsSurviveAReadOnlyPolicy(t *testing.T) {
 	// Looking at a picture changes nothing in the game, so a read-only session
 	// has to keep the tools that make a picture readable at all.
 	catalog := newTestCatalog(t, playableEngine(), Options{Policy: PolicyReadonly})
@@ -713,6 +824,27 @@ func TestLiveCollageSplit(t *testing.T) {
 	if plan.Method != "detected" || len(plan.Segments) < 2 {
 		t.Fatalf("a collage should be split on its own separators, got %q with %d parts",
 			plan.Method, len(plan.Segments))
+	}
+
+	// The picture this detector was built against is a 1200×500 collage of
+	// three panels. While the host still serves that file, assert its geometry
+	// exactly: "some parts were found" would pass through a regression that
+	// halved or doubled them, which would leave no real-data guard at all. A
+	// different size means the author replaced the file, and then only the
+	// generic check above can be held to.
+	if source.width() != 1200 || source.height() != 500 {
+		t.Logf("this is not the 1200x500 reference collage, so its geometry is not asserted")
+		return
+	}
+	if len(plan.Segments) != 3 || plan.Axis != axisHorizontal {
+		t.Fatalf("the reference collage has 3 panels side by side, got %d along %s",
+			len(plan.Segments), plan.Axis)
+	}
+	for index, seam := range [][2]int{{397, 405}, {833, 841}} {
+		if cut := plan.Segments[index].to; cut < seam[0] || cut >= seam[1] {
+			t.Fatalf("cut %d should fall inside the separator [%d,%d), got %d",
+				index+1, seam[0], seam[1], cut)
+		}
 	}
 }
 

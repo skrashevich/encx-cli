@@ -320,10 +320,32 @@ func TestDecodeInlineImageSkipsWhatIsNotAnImage(t *testing.T) {
 		}
 	}
 
-	mimeType, data, ok := decodeInlineImage(
-		"data:image/jpeg;base64," + base64.StdEncoding.EncodeToString([]byte("jpeg-bytes")))
-	if !ok || mimeType != "image/jpeg" || string(data) != "jpeg-bytes" {
-		t.Fatalf("a JPEG data URL should decode, got %q / %q / %v", mimeType, data, ok)
+	// The base64 marker is the last parameter of the header, not the only one,
+	// and nothing in the syntax fixes its casing.
+	for _, header := range []string{
+		"image/jpeg;base64",
+		"image/jpeg;charset=utf-8;base64",
+		"IMAGE/JPEG;BASE64",
+	} {
+		mimeType, data, ok := decodeInlineImage(
+			"data:" + header + "," + base64.StdEncoding.EncodeToString([]byte("jpeg-bytes")))
+		if !ok || mimeType != "image/jpeg" || string(data) != "jpeg-bytes" {
+			t.Fatalf("%q should decode, got %q / %q / %v", header, mimeType, data, ok)
+		}
+	}
+}
+
+func TestSkippedMediaIsAdmittedRatherThanDropped(t *testing.T) {
+	// A result that says a picture is attached, with no picture, is the failure
+	// the picture tools exist to remove. Silence about it would be the same
+	// failure with less to go on.
+	images, skipped := imageContent([]string{
+		"data:image/png;base64," + base64.StdEncoding.EncodeToString([]byte("png-bytes")),
+		"media://not-an-inline-image",
+	})
+	if len(images) != 1 || skipped != 1 {
+		t.Fatalf("one image and one skip were expected, got %d images and %d skips",
+			len(images), skipped)
 	}
 }
 
