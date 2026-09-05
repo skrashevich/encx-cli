@@ -159,7 +159,7 @@ func renderMethod(f surface.Func, static, handle bool) (string, error) {
 
 	var tags []string
 	if f.Result.Kind == surface.KindJSONStruct {
-		tags = append(tags, "@return array<string, mixed>")
+		tags = append(tags, "@return "+arrayShape(f.Result.Fields))
 	}
 	// Every bound call travels through Ffi::call, which turns a failed
 	// envelope into an exception, so every method can throw.
@@ -288,6 +288,9 @@ func returnType(r surface.Result) (string, error) {
 // parameter stays a single PHP string; it is the C call that splits into a
 // pointer and a length.
 func paramList(params []surface.Param) ([]string, error) {
+	if err := checkParamNames(params); err != nil {
+		return nil, err
+	}
 	out := make([]string, 0, len(params))
 	for _, p := range params {
 		var php string
@@ -358,9 +361,11 @@ const clientScaffold = indent + `/** The live handle into the Go client registry
     /**
      * Frees the Go client for an instance that was never closed explicitly.
      *
-     * A destructor must not let an exception escape, since PHP turns that into
-     * a fatal error during shutdown; a failure here is therefore swallowed.
-     * Call close() instead when the outcome matters.
+     * A destructor must not let anything escape, since PHP turns that into a
+     * fatal error during shutdown; every failure here is therefore swallowed.
+     * \Throwable and not EncxException, because FFI reports a broken binding
+     * as \FFI\Exception, which extends \Error and so is not an exception at
+     * all. Call close() instead when the outcome matters.
      *
      * PHP forbids a return type on __destruct, so this signature has none.
      */
@@ -368,7 +373,7 @@ const clientScaffold = indent + `/** The live handle into the Go client registry
     {
         try {
             $this->close();
-        } catch (EncxException) {
+        } catch (\Throwable) {
             // Nothing left to report once the object is being destroyed.
         }
     }

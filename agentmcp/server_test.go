@@ -2,6 +2,7 @@ package agentmcp
 
 import (
 	"context"
+	"encoding/base64"
 	"net/url"
 	"strings"
 	"sync"
@@ -171,6 +172,16 @@ func contains(list []string, want string) bool {
 	return false
 }
 
+func resultImages(result *mcp.CallToolResult) []*mcp.ImageContent {
+	var images []*mcp.ImageContent
+	for _, content := range result.Content {
+		if image, ok := content.(*mcp.ImageContent); ok {
+			images = append(images, image)
+		}
+	}
+	return images
+}
+
 func resultText(result *mcp.CallToolResult) string {
 	var b strings.Builder
 	for _, content := range result.Content {
@@ -260,6 +271,59 @@ func TestCallReadToolReturnsEngineJSON(t *testing.T) {
 	}
 	if !strings.Contains(resultText(result), `"game_id":42`) {
 		t.Fatalf("the engine payload should be returned, got %q", resultText(result))
+	}
+}
+
+func TestCallPictureToolReturnsTheImageToTheClient(t *testing.T) {
+	engine := newStubEngine()
+	session := connect(t, newCatalog(t, engine, agenttools.Options{Policy: agenttools.PolicyReadonly}), nil)
+
+	result, err := session.CallTool(context.Background(), &mcp.CallToolParams{
+		Name:      "enc_view_image",
+		Arguments: map[string]any{"url": "/upload/task.png"},
+	})
+	if err != nil {
+		t.Fatalf("CallTool: %v", err)
+	}
+	if result.IsError {
+		t.Fatalf("viewing a picture should succeed, got %q", resultText(result))
+	}
+	// A tool result that talks about a picture the client was never handed is
+	// the failure the picture tools exist to remove.
+	images := resultImages(result)
+	if len(images) != 1 {
+		t.Fatalf("the picture should travel as image content, got %d images in %d blocks",
+			len(images), len(result.Content))
+	}
+	if images[0].MIMEType != "image/png" {
+		t.Fatalf("the image content type should survive, got %q", images[0].MIMEType)
+	}
+	if string(images[0].Data) != "png-bytes" {
+		t.Fatalf("the image bytes should be decoded, got %q", images[0].Data)
+	}
+	if !strings.Contains(resultText(result), `"content_type":"image/png"`) {
+		t.Fatalf("the JSON description should still be there, got %q", resultText(result))
+	}
+}
+
+func TestDecodeInlineImageSkipsWhatIsNotAnImage(t *testing.T) {
+	for _, inline := range []string{
+		"",
+		"media://abc123",
+		"data:image/png;base64",
+		"data:image/png;base64,***",
+		"data:audio/wav;base64," + base64.StdEncoding.EncodeToString([]byte("riff")),
+		"data:image/png,plain",
+	} {
+		if _, _, ok := decodeInlineImage(inline); ok {
+			t.Fatalf("%.40q is not an inline image and must not become image content", inline)
+		}
+	}
+
+	mimeType, data, ok := decodeInlineImage(
+		"data:image/jpeg;base64," + base64.StdEncoding.EncodeToString([]byte("jpeg-bytes")))
+	if !ok || mimeType != "image/jpeg" || string(data) != "jpeg-bytes" {
+		t.Fatalf("a JPEG data URL should decode, got %q / %q / %v", mimeType, data, ok)
 	}
 }
 

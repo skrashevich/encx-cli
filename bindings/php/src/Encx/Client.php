@@ -27,9 +27,11 @@ final class Client
     /**
      * Frees the Go client for an instance that was never closed explicitly.
      *
-     * A destructor must not let an exception escape, since PHP turns that into
-     * a fatal error during shutdown; a failure here is therefore swallowed.
-     * Call close() instead when the outcome matters.
+     * A destructor must not let anything escape, since PHP turns that into a
+     * fatal error during shutdown; every failure here is therefore swallowed.
+     * \Throwable and not EncxException, because FFI reports a broken binding
+     * as \FFI\Exception, which extends \Error and so is not an exception at
+     * all. Call close() instead when the outcome matters.
      *
      * PHP forbids a return type on __destruct, so this signature has none.
      */
@@ -37,7 +39,7 @@ final class Client
     {
         try {
             $this->close();
-        } catch (EncxException) {
+        } catch (\Throwable) {
             // Nothing left to report once the object is being destroyed.
         }
     }
@@ -203,7 +205,7 @@ final class Client
      * entry count; pass the count to ClearHARFirst after a successful upload so
      * entries captured during the upload are preserved.
      *
-     * @return array<string, mixed>
+     * @return array{JSON: string, EntryCount: int}
      * @throws EncxException
      */
     public function exportHARSnapshot(): array

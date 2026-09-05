@@ -32,6 +32,9 @@ Read tools — always available:
 | `enc_level` | one level: tasks, sectors, bonuses, hints, messages |
 | `enc_action_log` | codes submitted on a level, with correctness and penalties |
 | `enc_view_image` | fetches a picture from level content and returns it to the model |
+| `enc_image_info` | pixel size and format of a picture, plus the parts it splits into |
+| `enc_crop_image` | returns one rectangle of a picture at its own resolution |
+| `enc_split_image` | cuts a collage apart and returns every part as its own image |
 | `enc_game_statistics` | level breakdown, team rankings, per-level timings |
 
 `enc_level` and `enc_game_state` list every image referenced by the level's HTML
@@ -47,6 +50,52 @@ Fetches are bounded at 8 MB per file, and addresses on the local network
 untrusted input and the device may sit inside a private network. Set
 `ResourceOptions.RestrictToDomain` to limit fetches to the game's own domain.
 Image results are never memoized — a picture is megabytes of base64.
+
+## Cutting a task picture up
+
+A task picture is regularly a collage: several unrelated pictures pasted into
+one file, each one a separate clue, and one of them often a screenshot whose
+text is the answer. Handing that file to a model whole loses the answer, because
+a provider shrinks a picture to roughly 1568 pixels on its longer side before
+the model sees it — a 1200×500 collage arrives with its screenshot text below
+the resolution it can be read at.
+
+```
+enc_image_info  → 1200×500 jpeg, 3 parts detected along the horizontal axis
+enc_split_image → part 1 (401×500), part 2 (436×500), part 3 (363×500),
+                  each attached as its own image
+enc_crop_image  → one rectangle, for a detail inside a part
+```
+
+The parts are found in the picture itself rather than guessed: a line of pixels
+that holds one colour along its whole length is a separator, not content, and
+the cut goes through the middle of it. Runs of plain background at the ends of
+the picture are margins and are never cut on. The detector tolerates a spread of
+16 per channel, because a collage is saved as JPEG and JPEG rings around the
+hard edge between a panel and its separator.
+
+`parts` is a request rather than a promise: when the picture's own separators
+produce exactly that many panels they are used, and otherwise the side is
+divided evenly and the result says `"method": "equal"` so the model knows a cut
+may run through content. Without `parts`, a picture that shows no separators is
+reported as such instead of being cut at invented positions.
+
+Limits, all of them there to keep one tool call affordable:
+
+| Limit | Value | Why |
+| --- | --- | --- |
+| `max_dimension` | 1568 by default, 4096 at most | the resolution a model reads at; larger fragments are shrunk by block averaging, not by dropping pixels |
+| `parts` | 2 to 8 | more images than a model can hold in one turn, and a file that looks like it has more parts is textured rather than assembled |
+| minimum part | 2% of the side, at least 8 px | detection noise should not become a "part"; a sliver is folded into its neighbour so the parts still cover the picture |
+| caching | `enc_image_info` is memoized, the two picture tools are not | the measurement is a few numbers, a fragment is base64 in the megabytes |
+| decoded size | 25 megapixels | the 8 MB fetch cap bounds bytes, not pixels: a few kilobytes of PNG header can declare a picture that would need gigabytes to decode, and a URL from game content is untrusted input. The size is read from the header and refused before anything is allocated |
+
+Decoding accepts JPEG, PNG, GIF, WebP, BMP and TIFF, and the decoder rather than
+the server's `Content-Type` has the last word: a JPEG served as
+`application/octet-stream` is common enough that trusting the header would
+refuse pictures that decode perfectly well. A fragment of a JPEG is re-encoded
+as JPEG; line art and screenshots stay PNG unless the result is heavy enough to
+be a photograph.
 
 ## Request pacing
 
@@ -124,6 +173,12 @@ other `encli` command: run `encli login` first, or pass `-login`/`-password`
 Under `-security approve` the server asks the client to confirm each mutating
 call through MCP elicitation. Clients that do not implement elicitation get a
 refusal, never a silent mutation.
+
+Pictures reach an MCP client as image content blocks next to the tool's JSON:
+the inline `data:image/…` entries a picture tool produces are decoded into
+`ImageContent`, because a client that only received the JSON would be told about
+a picture it was never handed. Media that is not a decodable inline image is
+skipped rather than passed on as a block the client cannot render.
 
 ### Pointing PicoClaw at it
 

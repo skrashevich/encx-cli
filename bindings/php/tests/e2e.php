@@ -195,8 +195,32 @@ $checks->run('cookies round-trip through []byte', static function () use ($clien
     $recipient = $newClient();
     try {
         $recipient->importCookies($cookies);
+
+        // Not throwing only proves the payload parsed. A truncated one would do
+        // that too, so the session it carries has to actually work: this client
+        // never logged in, and only the imported cookies can authenticate it.
+        $profile = json_decode($recipient->getProfile(), true, 512, JSON_THROW_ON_ERROR);
+        assertSame(MOCK_LOGIN, $profile['login'] ?? null, 'login seen by the client that imported the cookies');
     } catch (EncxException $e) {
-        fail(sprintf('importCookies() rejected the exported payload: %s', $e->getMessage()));
+        fail(sprintf('the imported cookies did not carry a working session: %s', $e->getMessage()));
+    } finally {
+        $recipient->close();
+    }
+});
+
+// A payload with an interior NUL proves the length travels alongside the
+// pointer: were the length dropped, C would stop at the NUL and the Go side
+// would see valid JSON instead of rejecting the trailing bytes.
+$checks->run('[]byte length survives an interior NUL', static function () use ($newClient): void {
+    $recipient = $newClient();
+    try {
+        $recipient->importCookies("{}\x00{}");
+        fail('importCookies() accepted a payload with an interior NUL and trailing bytes');
+    } catch (EncxException $e) {
+        assertTrue(
+            str_contains($e->getMessage(), 'after top-level value'),
+            sprintf('Go rejected the payload with "%s", want a complaint about the bytes after the NUL', $e->getMessage())
+        );
     } finally {
         $recipient->close();
     }

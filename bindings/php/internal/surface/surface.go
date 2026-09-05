@@ -22,12 +22,18 @@ import (
 	"os"
 	"path"
 	"path/filepath"
+	"reflect"
 	"sort"
+	"strconv"
 	"strings"
 )
 
 // handleTypeName is the Go struct projected onto an opaque C handle.
 const handleTypeName = "EncClient"
+
+// HandleTypeName lets the emitters name the receiver of a bound method the way
+// the Go source spells it.
+const HandleTypeName = handleTypeName
 
 // Type is a parameter or result value type that can cross the C ABI.
 type Type int
@@ -100,6 +106,23 @@ type Param struct {
 	Type Type
 }
 
+// Field is one field of a KindJSONStruct result, as the PHP side will see it.
+//
+// The three values together are the shape of the JSON object a consumer
+// receives, so a rename, a retype or an edited json tag all change this struct
+// and therefore every artifact derived from it.
+type Field struct {
+	// Name is the Go field name.
+	Name string
+	// JSONName is the object key the field marshals to. It is empty when the
+	// field carries `json:"-"` and therefore never appears in the JSON.
+	JSONName string
+	// OmitEmpty reports the `omitempty` option, which makes the key optional.
+	OmitEmpty bool
+	// Type is the Go spelling of the field type.
+	Type string
+}
+
 // Result describes what a bindable function returns.
 type Result struct {
 	Kind ResultKind
@@ -107,6 +130,11 @@ type Result struct {
 	Type Type
 	// StructRef names the struct for KindJSONStruct and is empty otherwise.
 	StructRef string
+	// Fields is the shape of that struct in declaration order, and is empty
+	// for every other kind. Declaration order is part of the shape: it is
+	// what the emitters render, so it must not depend on the map iteration
+	// order of anything.
+	Fields []Field
 }
 
 // Func is one bindable symbol.
@@ -459,10 +487,11 @@ func (l *loader) result(fn *ast.FuncDecl) (Result, error) {
 		if !declared {
 			return Result{}, fmt.Errorf("result *%s is not a struct declared in this package, so it cannot be marshalled to JSON", name)
 		}
-		if err := jsonBindableStruct(name, st); err != nil {
+		fields, err := jsonBindableStruct(name, st)
+		if err != nil {
 			return Result{}, err
 		}
-		return Result{Kind: KindJSONStruct, Type: TypeVoid, StructRef: name}, nil
+		return Result{Kind: KindJSONStruct, Type: TypeVoid, StructRef: name, Fields: fields}, nil
 	default:
 		return Result{}, unsupportedResult(results)
 	}
@@ -497,6 +526,10 @@ func flattenResults(list *ast.FieldList) []ast.Expr {
 
 // fieldNames returns one name per declared value, synthesising names for
 // unnamed parameters so a reason string can always point at a position.
+//
+// A parameter written as the blank identifier is treated the same way. It is
+// legal Go and says only that the body ignores the value, but the C wrapper
+// still has to name the argument to pass it on, and `_` cannot be read back.
 func fieldNames(field *ast.Field, prefix string, index *int) []string {
 	if len(field.Names) == 0 {
 		name := fmt.Sprintf("%s%d", prefix, *index)
@@ -505,7 +538,11 @@ func fieldNames(field *ast.Field, prefix string, index *int) []string {
 	}
 	names := make([]string, 0, len(field.Names))
 	for _, n := range field.Names {
-		names = append(names, n.Name)
+		name := n.Name
+		if name == "_" {
+			name = fmt.Sprintf("%s%d", prefix, *index)
+		}
+		names = append(names, name)
 		*index++
 	}
 	return names
@@ -558,26 +595,76 @@ func pointerToLocalStruct(expr ast.Expr) (string, bool) {
 }
 
 // jsonBindableStruct checks that every field of st survives a JSON round trip
-// through the C ABI: exported, and of a scalar type or a slice/map of them.
-func jsonBindableStruct(name string, st *ast.StructType) error {
+// through the C ABI: exported, and of a scalar type or a slice/map of them. It
+// returns the shape of the struct in declaration order, which is what makes a
+// field rename, a retype or an edited json tag visible to every emitter.
+func jsonBindableStruct(name string, st *ast.StructType) ([]Field, error) {
 	if st.Fields == nil || len(st.Fields.List) == 0 {
-		return fmt.Errorf("result struct %s has no fields to marshal", name)
+		return nil, fmt.Errorf("result struct %s has no fields to marshal", name)
 	}
+	var out []Field
 	for _, field := range st.Fields.List {
 		if len(field.Names) == 0 {
-			return fmt.Errorf("result struct %s embeds %s; embedded fields are not bound", name, types.ExprString(field.Type))
+			return nil, fmt.Errorf("result struct %s embeds %s; embedded fields are not bound", name, types.ExprString(field.Type))
 		}
 		for _, fieldName := range field.Names {
 			if !fieldName.IsExported() {
-				return fmt.Errorf("result struct %s has unexported field %q, which JSON cannot carry", name, fieldName.Name)
+				return nil, fmt.Errorf("result struct %s has unexported field %q, which JSON cannot carry", name, fieldName.Name)
 			}
 		}
 		if !jsonBasicType(field.Type) {
-			return fmt.Errorf("result struct %s field %q has type %s, which is not a basic JSON type",
+			return nil, fmt.Errorf("result struct %s field %q has type %s, which is not a basic JSON type",
 				name, field.Names[0].Name, types.ExprString(field.Type))
 		}
+		spelled := types.ExprString(field.Type)
+		// A grouped declaration such as `A, B string` shares one tag, and
+		// encoding/json applies that tag to every name in the group.
+		for _, fieldName := range field.Names {
+			jsonName, omitEmpty := jsonTagShape(fieldName.Name, field.Tag)
+			out = append(out, Field{
+				Name:      fieldName.Name,
+				JSONName:  jsonName,
+				OmitEmpty: omitEmpty,
+				Type:      spelled,
+			})
+		}
 	}
-	return nil
+	return out, nil
+}
+
+// jsonTagShape resolves the object key a field marshals to, following the
+// rules of encoding/json: no tag means the Go name, `json:"-"` means the field
+// is dropped, and options after the first comma may make the key optional.
+// An empty name in the tag, as in `json:",omitempty"`, keeps the Go name.
+func jsonTagShape(goName string, tag *ast.BasicLit) (jsonName string, omitEmpty bool) {
+	if tag == nil {
+		return goName, false
+	}
+	value, err := strconv.Unquote(tag.Value)
+	if err != nil {
+		// An unparsable tag is not a tag as far as the compiler is
+		// concerned, so the field keeps its Go name.
+		return goName, false
+	}
+	spec, ok := reflect.StructTag(value).Lookup("json")
+	if !ok {
+		return goName, false
+	}
+	if spec == "-" {
+		// The bare dash drops the field. `json:"-,"` instead names the key
+		// "-", which is why the comparison is against the whole spec.
+		return "", false
+	}
+	name, opts, _ := strings.Cut(spec, ",")
+	if name == "" {
+		name = goName
+	}
+	for opt := range strings.SplitSeq(opts, ",") {
+		if opt == "omitempty" {
+			omitEmpty = true
+		}
+	}
+	return name, omitEmpty
 }
 
 func jsonBasicType(expr ast.Expr) bool {

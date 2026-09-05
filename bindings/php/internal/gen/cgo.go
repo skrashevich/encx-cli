@@ -31,6 +31,8 @@ const (
 	// handleParam is the C parameter carrying the opaque client handle that
 	// every method takes in first position.
 	handleParam = "handle"
+	// handleGoType is the Go receiver those methods are declared on.
+	handleGoType = surface.HandleTypeName
 )
 
 // group orders the sections of the generated header.
@@ -50,6 +52,99 @@ type bound struct {
 }
 
 func (b bound) isMethod() bool { return b.group == groupMethod }
+
+// goName spells the bound symbol the way it is declared in the Go source, so
+// an error message points at something the reader can grep for.
+func (b bound) goName() string {
+	if b.isMethod() {
+		return handleGoType + "." + b.fn.Name
+	}
+	return b.fn.Name
+}
+
+// cParamRole tells the emitters what a C parameter carries. The roles are
+// derived once, in cParamsOf, so the header and the cgo wrapper can never
+// disagree about how many arguments a symbol takes or what they are called.
+type cParamRole int
+
+const (
+	// roleHandle is the opaque client handle every method takes first.
+	roleHandle cParamRole = iota
+	roleString
+	roleInt64
+	roleBool
+	// roleBytes is the pointer half of a []byte parameter, roleBytesLen the
+	// length half that C needs because it cannot carry a slice.
+	roleBytes
+	roleBytesLen
+)
+
+// cParam is one argument of a generated C prototype.
+type cParam struct {
+	// Name is the C identifier, which also becomes a Go identifier in the
+	// cgo wrapper.
+	Name string
+	Role cParamRole
+	// Origin describes where the name came from, for collision messages.
+	Origin string
+}
+
+// cParamsOf renders the C argument list of one bound symbol and rejects any
+// name collision.
+//
+// Three sources feed the same namespace: the fixed handle argument of a
+// method, the snake_cased Go parameters, and the "_len" companion synthesised
+// for every []byte parameter. A Go signature can make two of them land on the
+// same C identifier, which is a Go compile error in the generated wrapper and
+// a silently discarded duplicate in FFI::cdef. Neither is something the
+// generator may emit, so it fails here instead.
+func cParamsOf(bd bound) ([]cParam, error) {
+	var out []cParam
+	taken := map[string]string{}
+
+	declare := func(name, origin string, role cParamRole) error {
+		if prev, dup := taken[name]; dup {
+			return fmt.Errorf("gen: %s (C symbol %s): %s lowers to the C argument %q, which is already taken by %s; rename the Go parameter",
+				bd.goName(), bd.fn.CName, origin, name, prev)
+		}
+		taken[name] = origin
+		out = append(out, cParam{Name: name, Role: role, Origin: origin})
+		return nil
+	}
+
+	if bd.isMethod() {
+		if err := declare(handleParam, "the client handle every method receives", roleHandle); err != nil {
+			return nil, err
+		}
+	}
+	for _, p := range bd.fn.Params {
+		cn := surface.SnakeCase(p.Name)
+		origin := fmt.Sprintf("Go parameter %q", p.Name)
+		var role cParamRole
+		switch p.Type {
+		case surface.TypeString:
+			role = roleString
+		case surface.TypeInt64:
+			role = roleInt64
+		case surface.TypeBool:
+			role = roleBool
+		case surface.TypeBytes:
+			role = roleBytes
+		default:
+			return nil, fmt.Errorf("gen: %s: parameter %q has type %s, which has no C representation", bd.fn.CName, p.Name, p.Type)
+		}
+		if err := declare(cn, origin, role); err != nil {
+			return nil, err
+		}
+		if p.Type == surface.TypeBytes {
+			lenOrigin := fmt.Sprintf("the length of []byte parameter %q", p.Name)
+			if err := declare(cn+"_len", lenOrigin, roleBytesLen); err != nil {
+				return nil, err
+			}
+		}
+	}
+	return out, nil
+}
 
 // bindings returns every bindable symbol of m sorted by C symbol name.
 func bindings(m *surface.Model) []bound {
@@ -123,30 +218,18 @@ func packageAlias(m *surface.Model) string {
 func writeWrapper(b *strings.Builder, m *surface.Model, bd bound) error {
 	fn := bd.fn
 
+	cps, err := cParamsOf(bd)
+	if err != nil {
+		return err
+	}
+
 	// The C parameter names become Go identifiers in the wrapper, so the
 	// locals the body needs are picked around them.
 	sc := newScope()
-	var params []string
-	if bd.isMethod() {
-		sc.reserve(handleParam)
-		params = append(params, handleParam+" C.longlong")
-	}
-	for _, p := range fn.Params {
-		cn := surface.SnakeCase(p.Name)
-		sc.reserve(cn)
-		switch p.Type {
-		case surface.TypeString:
-			params = append(params, cn+" *C.char")
-		case surface.TypeInt64:
-			params = append(params, cn+" C.longlong")
-		case surface.TypeBool:
-			params = append(params, cn+" C.int")
-		case surface.TypeBytes:
-			sc.reserve(cn + "_len")
-			params = append(params, cn+" *C.char", cn+"_len C.longlong")
-		default:
-			return fmt.Errorf("gen: %s: parameter %q has type %s, which has no C representation", fn.CName, p.Name, p.Type)
-		}
+	params := make([]string, 0, len(cps))
+	for _, cp := range cps {
+		sc.reserve(cp.Name)
+		params = append(params, cp.Name+" "+cgoType(cp.Role))
 	}
 
 	handleVar := sc.take("handle")
@@ -165,7 +248,7 @@ func writeWrapper(b *strings.Builder, m *surface.Model, bd bound) error {
 		writeFail(b, errVar)
 	}
 
-	call := callee + "(" + strings.Join(callArgs(fn), ", ") + ")"
+	call := callee + "(" + strings.Join(callArgs(cps), ", ") + ")"
 
 	switch fn.Result.Kind {
 	case surface.KindVoid:
@@ -205,21 +288,36 @@ func writeFail(b *strings.Builder, errVar string) {
 	b.WriteString("\t}\n")
 }
 
+// cgoType is the Go type a C argument takes in the wrapper signature.
+func cgoType(role cParamRole) string {
+	switch role {
+	case roleString, roleBytes:
+		return "*C.char"
+	case roleBool:
+		return "C.int"
+	default:
+		// roleHandle, roleInt64 and roleBytesLen all cross as long long.
+		return "C.longlong"
+	}
+}
+
 // callArgs converts each C parameter back to the Go value the bound function
-// expects.
-func callArgs(fn surface.Func) []string {
-	args := make([]string, 0, len(fn.Params))
-	for _, p := range fn.Params {
-		cn := surface.SnakeCase(p.Name)
-		switch p.Type {
-		case surface.TypeString:
-			args = append(args, "C.GoString("+cn+")")
-		case surface.TypeInt64:
-			args = append(args, "int64("+cn+")")
-		case surface.TypeBool:
-			args = append(args, cn+" != 0")
-		case surface.TypeBytes:
-			args = append(args, "cBytes("+cn+", "+cn+"_len)")
+// expects. The handle is consumed by the registry lookup rather than passed
+// on, and a []byte contributes one argument built from its two halves.
+func callArgs(cps []cParam) []string {
+	args := make([]string, 0, len(cps))
+	for i, cp := range cps {
+		switch cp.Role {
+		case roleHandle, roleBytesLen:
+			// Carried by the preceding pointer, or by the lookup above.
+		case roleString:
+			args = append(args, "C.GoString("+cp.Name+")")
+		case roleInt64:
+			args = append(args, "int64("+cp.Name+")")
+		case roleBool:
+			args = append(args, cp.Name+" != 0")
+		case roleBytes:
+			args = append(args, "cBytes("+cp.Name+", "+cps[i+1].Name+")")
 		}
 	}
 	return args

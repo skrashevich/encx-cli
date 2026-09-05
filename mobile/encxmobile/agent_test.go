@@ -305,10 +305,10 @@ func TestParseAgentConfigAppliesDefaults(t *testing.T) {
 
 func TestHTTPProviderResolvesEndpointsWithoutTheFullFactory(t *testing.T) {
 	for provider, wantBase := range map[string]string{
-		"openai":     "https://api.openai.com/v1",
-		"anthropic":  "https://api.anthropic.com/v1",
-		"openrouter": "https://openrouter.ai/api/v1",
-		"":           "https://api.openai.com/v1",
+		"openai":    "https://api.openai.com/v1",
+		"anthropic": "https://api.anthropic.com/v1",
+		"polza":     "https://polza.ai/api/v1",
+		"":          "https://api.openai.com/v1",
 	} {
 		cfg := agentConfig{Provider: provider, Model: "m", APIKey: "k"}
 		if _, err := newHTTPProvider(cfg); err != nil {
@@ -335,6 +335,21 @@ func TestHTTPProviderRejectsUnreachableProviders(t *testing.T) {
 	}
 	if _, err := newHTTPProvider(agentConfig{Provider: "openai", Model: "m"}); err == nil {
 		t.Fatal("a missing API key should be reported")
+	}
+}
+
+func TestAggregatorModelsKeepTheirVendorPrefix(t *testing.T) {
+	// PicoClaw would strip "google/" as a provider prefix and ask Polza for a
+	// model it does not have; extra_body puts the full name back.
+	override := aggregatorModelOverride("google/gemini-3-flash-preview")
+	if got := override["model"]; got != "google/gemini-3-flash-preview" {
+		t.Fatalf("override model = %v, want the full name", got)
+	}
+	if aggregatorModelOverride("gpt-5.4") != nil {
+		t.Fatal("a model without a prefix has nothing to restore")
+	}
+	if aggregatorModelOverride("  ") != nil {
+		t.Fatal("a blank model should not pin anything")
 	}
 }
 

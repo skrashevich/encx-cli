@@ -115,6 +115,12 @@ func (c *Catalog) SystemPromptAddendum() string {
 	b.WriteString("Level content often carries the task in a picture. When a level reports images, " +
 		"call enc_view_image on them — you can see the picture itself, so never tell the user you " +
 		"are unable to open a link from the engine.\n")
+	b.WriteString("A task picture is regularly a collage: several unrelated pictures pasted into one file, " +
+		"each one a separate clue, and one of them often a screenshot whose text is the answer. That text " +
+		"is unreadable in the whole file, because a picture is shrunk before it reaches you. Split such a " +
+		"picture with enc_split_image and read every part on its own, or crop a detail with enc_crop_image; " +
+		"enc_image_info reports the size and the parts without sending the picture. Never conclude a " +
+		"picture is illegible before you have looked at its parts.\n")
 	switch c.policy {
 	case PolicyReadonly:
 		b.WriteString("Access policy: READ-ONLY. You cannot submit codes, take penalty hints or join games. " +
@@ -140,6 +146,9 @@ const (
 	toolLevel         = "enc_level"
 	toolActionLog     = "enc_action_log"
 	toolViewImage     = "enc_view_image"
+	toolImageInfo     = "enc_image_info"
+	toolCropImage     = "enc_crop_image"
+	toolSplitImage    = "enc_split_image"
 	toolStatistics    = "enc_game_statistics"
 	toolSendCode      = "enc_send_code"
 	toolSendBonusCode = "enc_send_bonus_code"
@@ -327,6 +336,70 @@ func readTools(engine Engine, g *gate) []*Tool {
 					},
 					media: []string{encoded},
 				}, nil
+			},
+		},
+		{
+			name: toolImageInfo,
+			description: "Measure a picture from game content: format, pixel size and the parts it obviously " +
+				"splits into. Call this when a picture looks like several pictures pasted together — it is " +
+				"cheap, because it returns numbers rather than the picture.",
+			parameters: schema(map[string]any{
+				"url": stringProp("Image URL from the level's images list."),
+			}, "url"),
+			gate: g,
+			run: func(ctx context.Context, args arguments) (any, error) {
+				return describeImage(ctx, engine, args)
+			},
+		},
+		{
+			name: toolCropImage,
+			description: "Look at one rectangle of a picture from game content at its own resolution. " +
+				"A whole picture is shrunk before it reaches you, so small print in a screenshot or a detail " +
+				"in a corner is only readable through a crop.",
+			parameters: schema(map[string]any{
+				"url": stringProp("Image URL from the level's images list."),
+				"x": pixelProp("Left edge of the crop, in pixels from the left of the picture. " +
+					"A percentage of the width such as \"25%\" is also accepted. Defaults to 0."),
+				"y": pixelProp("Top edge of the crop, in pixels from the top of the picture. " +
+					"A percentage of the height such as \"25%\" is also accepted. Defaults to 0."),
+				"width": pixelProp("Width of the crop in pixels, or a percentage of the width. " +
+					"Defaults to the rest of the picture."),
+				"height": pixelProp("Height of the crop in pixels, or a percentage of the height. " +
+					"Defaults to the rest of the picture."),
+				"max_dimension": intProp(fmt.Sprintf(
+					"Longer side of the returned fragment in pixels; a larger crop is shrunk to it. "+
+						"Defaults to %d, which is the resolution a model reads at.", defaultMaxDimension)),
+			}, "url"),
+			// A fragment is base64 in the megabytes; memoizing it would pin the
+			// whole picture for the rest of the turn.
+			noCache: true,
+			gate:    g,
+			run: func(ctx context.Context, args arguments) (any, error) {
+				return cropImageForModel(ctx, engine, args)
+			},
+		},
+		{
+			name: toolSplitImage,
+			description: "Split a picture from game content into its parts and look at each part separately. " +
+				"Task pictures are often several unrelated pictures pasted into one file, each one a clue of " +
+				"its own; every part comes back as its own image. The separators are found in the picture, so " +
+				"pass only the url first and add parts if that finds nothing.",
+			parameters: schema(map[string]any{
+				"url": stringProp("Image URL from the level's images list."),
+				"parts": intProp(fmt.Sprintf(
+					"How many parts to cut the picture into, 2 to %d. Omit to use the separators found "+
+						"in the picture itself, which is what a collage should be split on.", maxSplitParts)),
+				"axis": stringProp("\"horizontal\" when the parts sit side by side, \"vertical\" when they " +
+					"are stacked, \"auto\" to decide from the picture. Defaults to auto."),
+				"part": intProp("Return only this part, counted from 1 in reading order. " +
+					"Omit to receive every part."),
+				"max_dimension": intProp(fmt.Sprintf(
+					"Longer side of each returned part in pixels. Defaults to %d.", defaultMaxDimension)),
+			}, "url"),
+			noCache: true,
+			gate:    g,
+			run: func(ctx context.Context, args arguments) (any, error) {
+				return splitImageForModel(ctx, engine, args)
 			},
 		},
 		{
@@ -521,5 +594,14 @@ func intProp(description string) map[string]any {
 }
 
 func stringProp(description string) map[string]any {
+	return map[string]any{"type": "string", "description": description}
+}
+
+// pixelProp is one coordinate of a crop box. It is declared as a string because
+// the value may be a pixel count or a percentage of the picture, and a model
+// that has not measured the picture yet can only give the latter. A plain
+// number is accepted at run time all the same — providers pass through whatever
+// the model emits, schema or not.
+func pixelProp(description string) map[string]any {
 	return map[string]any{"type": "string", "description": description}
 }

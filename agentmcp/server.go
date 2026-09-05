@@ -5,9 +5,11 @@ package agentmcp
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/skrashevich/encx-cli/agenttools"
@@ -65,11 +67,55 @@ func toolHandler(tool *agenttools.Tool) mcp.ToolHandler {
 		if result == nil {
 			return errorResult(tool.Name() + " returned no result"), nil
 		}
+		content := []mcp.Content{&mcp.TextContent{Text: result.ContentForLLM()}}
 		return &mcp.CallToolResult{
 			IsError: result.IsError,
-			Content: []mcp.Content{&mcp.TextContent{Text: result.ContentForLLM()}},
+			Content: append(content, imageContent(result.Media)...),
 		}, nil
 	}
+}
+
+// imageContent carries the pictures a tool attached into the MCP reply.
+//
+// The picture tools answer with an inline data URL, which is the form
+// PicoClaw's providers turn into an image part. An MCP client expects an image
+// content block instead, and without this conversion it would receive a tool
+// result that talks about a picture it was never handed — which is exactly the
+// failure these tools exist to remove.
+func imageContent(media []string) []mcp.Content {
+	var content []mcp.Content
+	for _, inline := range media {
+		mimeType, data, ok := decodeInlineImage(inline)
+		if !ok {
+			continue
+		}
+		content = append(content, &mcp.ImageContent{MIMEType: mimeType, Data: data})
+	}
+	return content
+}
+
+// decodeInlineImage splits a "data:image/png;base64,…" entry into its type and
+// its bytes. Anything else — an audio clip, a media:// reference, a truncated
+// string — is skipped rather than passed on as a content block the client
+// cannot render.
+func decodeInlineImage(inline string) (string, []byte, bool) {
+	body, isDataURL := strings.CutPrefix(inline, "data:")
+	if !isDataURL {
+		return "", nil, false
+	}
+	header, encoded, found := strings.Cut(body, ",")
+	if !found {
+		return "", nil, false
+	}
+	mimeType, encoding, found := strings.Cut(header, ";")
+	if !found || encoding != "base64" || !strings.HasPrefix(mimeType, "image/") {
+		return "", nil, false
+	}
+	data, err := base64.StdEncoding.DecodeString(encoded)
+	if err != nil || len(data) == 0 {
+		return "", nil, false
+	}
+	return mimeType, data, true
 }
 
 func errorResult(message string) *mcp.CallToolResult {

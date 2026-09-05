@@ -32,12 +32,27 @@ type manifestRuntime struct {
 
 // manifestFunc is one generated export.
 type manifestFunc struct {
-	GoName    string          `json:"goName"`
-	CName     string          `json:"cName"`
-	Kind      string          `json:"kind"`
-	ValueType string          `json:"valueType"`
-	StructRef string          `json:"structRef,omitempty"`
-	Params    []manifestParam `json:"params"`
+	GoName    string `json:"goName"`
+	CName     string `json:"cName"`
+	Kind      string `json:"kind"`
+	ValueType string `json:"valueType"`
+	StructRef string `json:"structRef,omitempty"`
+	// StructFields is the shape of the struct named by StructRef, in
+	// declaration order. Recording the shape and not just the name is what
+	// makes a renamed field, a retyped field or an edited json tag show up
+	// as a stale manifest instead of as a runtime surprise in PHP.
+	StructFields []manifestField `json:"structFields,omitempty"`
+	Params       []manifestParam `json:"params"`
+}
+
+// manifestField is one field of a JSON result struct as PHP will see it. A
+// field dropped by `json:"-"` is listed with an empty jsonName, because its
+// absence from the JSON is part of the shape too.
+type manifestField struct {
+	Name      string `json:"name"`
+	JSONName  string `json:"jsonName"`
+	OmitEmpty bool   `json:"omitEmpty"`
+	Type      string `json:"type"`
 }
 
 // manifestParam is one Go parameter and the C parameter it maps to. A []byte
@@ -82,6 +97,14 @@ func ManifestFile(m *surface.Model) ([]byte, error) {
 			ValueType: bd.fn.Result.Type.String(),
 			StructRef: bd.fn.Result.StructRef,
 			Params:    []manifestParam{},
+		}
+		for _, f := range bd.fn.Result.Fields {
+			entry.StructFields = append(entry.StructFields, manifestField{
+				Name:      f.Name,
+				JSONName:  f.JSONName,
+				OmitEmpty: f.OmitEmpty,
+				Type:      f.Type,
+			})
 		}
 		for _, p := range bd.fn.Params {
 			entry.Params = append(entry.Params, manifestParam{

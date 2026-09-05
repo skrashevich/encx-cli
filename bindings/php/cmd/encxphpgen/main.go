@@ -2,9 +2,15 @@
 // mobile/encxmobile.
 //
 // It writes the cgo export file, the FFI-parsable C header, the surface
-// manifest and the PHP classes. Every one of those files is derived from the Go
-// package, so the bindings cannot drift from it: regenerating is the only way to
-// change them.
+// manifest and the PHP classes. Every one of those files is a pure function of
+// the parsed Go package, so regenerating is the only way to change them.
+//
+// The model behind them records which symbols are bound and why the rest are
+// not, their signatures, their doc comments, and the shape of every returned
+// struct including field names, field types and json tags. Change any of those
+// in mobile/encxmobile and the committed files stop matching. Method bodies are
+// not modelled, so rewriting the implementation of a bound method changes
+// nothing here, which is correct: the surface a PHP caller sees is the same.
 //
 // With -check the command writes nothing and instead reports which files are
 // out of date, which is what CI and the pre-commit hook use.

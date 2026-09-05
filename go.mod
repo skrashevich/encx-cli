@@ -5,6 +5,7 @@ go 1.27.0
 require (
 	github.com/modelcontextprotocol/go-sdk v1.6.1
 	github.com/sipeed/picoclaw v0.3.1
+	golang.org/x/image v0.45.0
 	golang.org/x/mobile v0.0.0-20260821190718-4776eadac327
 	golang.org/x/term v0.45.0
 )

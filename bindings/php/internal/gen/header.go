@@ -134,27 +134,32 @@ func prototype(bd bound) (string, error) {
 	return "char *" + bd.fn.CName + "(" + strings.Join(params, ", ") + ");", nil
 }
 
-// cParams renders the C parameter list, expanding []byte into a pointer and a
-// length and prepending the client handle for methods.
+// cParams renders the C parameter list from the same walk the cgo wrapper
+// uses, so the header cannot declare a different argument list than the
+// library exports. FFI::cdef accepts a prototype with a repeated parameter
+// name and silently keeps one of them, so the collision check in cParamsOf is
+// the only thing standing between a Go rename and a wrong call from PHP.
 func cParams(bd bound) ([]string, error) {
-	var params []string
-	if bd.isMethod() {
-		params = append(params, "long long "+handleParam)
+	cps, err := cParamsOf(bd)
+	if err != nil {
+		return nil, err
 	}
-	for _, p := range bd.fn.Params {
-		cn := surface.SnakeCase(p.Name)
-		switch p.Type {
-		case surface.TypeString:
-			params = append(params, "char *"+cn)
-		case surface.TypeInt64:
-			params = append(params, "long long "+cn)
-		case surface.TypeBool:
-			params = append(params, "int "+cn)
-		case surface.TypeBytes:
-			params = append(params, "char *"+cn, "long long "+cn+"_len")
-		default:
-			return nil, fmt.Errorf("gen: %s: parameter %q has type %s, which has no C representation", bd.fn.CName, p.Name, p.Type)
-		}
+	params := make([]string, 0, len(cps))
+	for _, cp := range cps {
+		params = append(params, cType(cp.Role)+cp.Name)
 	}
 	return params, nil
+}
+
+// cType is the C type of one argument, with the spacing a declaration needs:
+// a pointer binds to the name, the others are separated by a space.
+func cType(role cParamRole) string {
+	switch role {
+	case roleString, roleBytes:
+		return "char *"
+	case roleBool:
+		return "int "
+	default:
+		return "long long "
+	}
 }
