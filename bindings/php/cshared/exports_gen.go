@@ -26,6 +26,23 @@ func encx_client_accept_team_invitation(handle C.longlong, team_id C.longlong) *
 	return cEnvelope(rt.OKVoid())
 }
 
+// AdminCreateGame creates a game and returns its id. paramsJSON must decode
+// into encx.AdminCreateGameParams (title, description, game_type,
+// start_datetime, finish_datetime, ...).
+//
+//export encx_client_admin_create_game
+func encx_client_admin_create_game(handle C.longlong, params_json *C.char) *C.char {
+	client, err := rt.Default.Get(int64(handle))
+	if err != nil {
+		return cEnvelope(rt.Fail(err))
+	}
+	value, err := client.AdminCreateGame(C.GoString(params_json))
+	if err != nil {
+		return cEnvelope(rt.Fail(err))
+	}
+	return cEnvelope(rt.OK(value))
+}
+
 // APIBaseURL returns the host the new engine is reached at.
 //
 //export encx_client_api_base_url

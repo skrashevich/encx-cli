@@ -29,23 +29,9 @@ func scratchGame(t *testing.T, c *Client) int {
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
 
-	start := time.Now().Add(24 * time.Hour).UTC().Format(time.RFC3339)
-	finish := time.Now().Add(48 * time.Hour).UTC().Format(time.RFC3339)
-	body := map[string]any{
-		"title":            fmt.Sprintf("encx parity %d", time.Now().UnixNano()),
-		"game_type_id":     1,
-		"start_date_time":  start,
-		"finish_date_time": finish,
-		"descr":            "temporary game created by the encx parity test",
-	}
-	var created map[string]any
-	if err := c.api().PostJSON(ctx, "/admin/games", body, &created); err != nil {
+	id, err := c.AdminCreateGame(ctx, scratchGameParams())
+	if err != nil {
 		t.Fatalf("create scratch game: %v", err)
-	}
-	id := gameIDFromCreation(created)
-	if id == 0 {
-		raw, _ := json.Marshal(created)
-		t.Fatalf("create scratch game: no id in %s", raw)
 	}
 	t.Logf("scratch game %d created", id)
 
@@ -61,33 +47,14 @@ func scratchGame(t *testing.T, c *Client) int {
 	return id
 }
 
-// gameIDFromCreation digs the new game's id out of the untyped creation answer.
-func gameIDFromCreation(payload map[string]any) int {
-	for _, key := range []string{"id", "game_id", "gameId"} {
-		if value, ok := payload[key]; ok {
-			if id := asInt(value); id != 0 {
-				return id
-			}
-		}
+func scratchGameParams() AdminCreateGameParams {
+	return AdminCreateGameParams{
+		Title:          fmt.Sprintf("encx parity %d", time.Now().UnixNano()),
+		Description:    "temporary game created by the encx parity test",
+		GameType:       1,
+		StartDateTime:  time.Now().Add(24 * time.Hour).UTC().Format(time.RFC3339),
+		FinishDateTime: time.Now().Add(48 * time.Hour).UTC().Format(time.RFC3339),
 	}
-	for _, nested := range []string{"game", "data"} {
-		if inner, ok := payload[nested].(map[string]any); ok {
-			if id := gameIDFromCreation(inner); id != 0 {
-				return id
-			}
-		}
-	}
-	return 0
-}
-
-func asInt(value any) int {
-	switch typed := value.(type) {
-	case float64:
-		return int(typed)
-	case int:
-		return typed
-	}
-	return 0
 }
 
 // scratchLevels creates a game with the requested number of levels.
@@ -112,6 +79,62 @@ func scratchLevels(t *testing.T, c *Client, count int) (gameID int) {
 func liveAdminCtx(t *testing.T) (context.Context, context.CancelFunc) {
 	t.Helper()
 	return context.WithTimeout(context.Background(), 60*time.Second)
+}
+
+// TestLiveAdminCreateGame checks that a game created through AdminCreateGame
+// really exists: the returned id must open in the editor with the title and
+// description that were sent, and it must appear in the admin game list.
+func TestLiveAdminCreateGame(t *testing.T) {
+	c := liveClient(t)
+	ctx, cancel := liveAdminCtx(t)
+	defer cancel()
+
+	params := scratchGameParams()
+	params.IsModerated = true
+	gameID, err := c.AdminCreateGame(ctx, params)
+	if err != nil {
+		t.Fatalf("AdminCreateGame: %v", err)
+	}
+	if gameID <= 0 {
+		t.Fatalf("AdminCreateGame returned id %d", gameID)
+	}
+	t.Logf("created game %d", gameID)
+	t.Cleanup(func() {
+		ctx, cancel := liveAdminCtx(t)
+		defer cancel()
+		if err := c.api().Delete(ctx, fmt.Sprintf("/admin/games/%d", gameID), nil, nil); err != nil {
+			t.Errorf("delete game %d: %v", gameID, err)
+		}
+	})
+
+	info, err := c.AdminGetGameInfo(ctx, gameID)
+	if err != nil {
+		t.Fatalf("AdminGetGameInfo(%d): %v", gameID, err)
+	}
+	if info.Title != params.Title {
+		t.Errorf("title = %q, want %q", info.Title, params.Title)
+	}
+	if info.Description != params.Description {
+		t.Errorf("description = %q, want %q", info.Description, params.Description)
+	}
+	if !info.IsModerated {
+		t.Error("is_moderated did not survive creation")
+	}
+
+	games, err := c.AdminGetGames(ctx)
+	if err != nil {
+		t.Fatalf("AdminGetGames: %v", err)
+	}
+	found := false
+	for _, game := range games {
+		if game.ID == gameID {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Errorf("game %d is missing from AdminGetGames", gameID)
+	}
 }
 
 // TestLiveAdminScratchGameShape reports what the new engine actually stores for

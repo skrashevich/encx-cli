@@ -27,6 +27,19 @@
       ]
     },
     {
+      "goName": "AdminCreateGame",
+      "cName": "encx_client_admin_create_game",
+      "kind": "value_err",
+      "valueType": "int64",
+      "params": [
+        {
+          "name": "paramsJSON",
+          "cName": "params_json",
+          "type": "string"
+        }
+      ]
+    },
+    {
       "goName": "APIBaseURL",
       "cName": "encx_client_api_base_url",
       "kind": "value",

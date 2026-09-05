@@ -294,6 +294,10 @@ func (c *Client) AdminUpdateComment(ctx context.Context, gameId, levelNum int, n
 	return c.engine(ctx).AdminUpdateComment(ctx, gameId, levelNum, name, comment)
 }
 
+func (c *Client) AdminCreateGame(ctx context.Context, params AdminCreateGameParams) (int, error) {
+	return c.engine(ctx).AdminCreateGame(ctx, params)
+}
+
 func (c *Client) AdminGetGameInfo(ctx context.Context, gameId int) (*AdminGameInfo, error) {
 	return c.engine(ctx).AdminGetGameInfo(ctx, gameId)
 }

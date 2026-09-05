@@ -98,6 +98,7 @@ type backend interface {
 	AdminUpdateComment(ctx context.Context, gameId, levelNum int, name, comment string) error
 
 	// Admin game management
+	AdminCreateGame(ctx context.Context, params AdminCreateGameParams) (int, error)
 	AdminGetGameInfo(ctx context.Context, gameId int) (*AdminGameInfo, error)
 	AdminUpdateGameInfo(ctx context.Context, gameId int, info AdminGameInfo) error
 	AdminDeliverGame(ctx context.Context, gameId int) error
@@ -374,6 +375,10 @@ func (e *legacyEngine) AdminGetComment(ctx context.Context, gameId, levelNum int
 }
 func (e *legacyEngine) AdminUpdateComment(ctx context.Context, gameId, levelNum int, name, comment string) error {
 	return e.c.legacyAdminUpdateComment(ctx, gameId, levelNum, name, comment)
+}
+
+func (e *legacyEngine) AdminCreateGame(ctx context.Context, params AdminCreateGameParams) (int, error) {
+	return e.c.legacyAdminCreateGame(ctx, params)
 }
 
 func (e *legacyEngine) AdminGetGameInfo(ctx context.Context, gameId int) (*AdminGameInfo, error) {

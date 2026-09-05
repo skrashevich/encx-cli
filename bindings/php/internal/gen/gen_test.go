@@ -24,7 +24,7 @@ const exportsGenPath = "../../cshared/exports_gen.go"
 // wantExports is the number of //export directives exports_gen.go must carry:
 // one per bindable symbol and not one more, because the two runtime exports
 // (encx_string_free, encx_client_free) are hand-written in runtime.go.
-const wantExports = 49
+const wantExports = 50
 
 // generatedMarker is the marker Go tooling recognises on generated files.
 var generatedMarker = regexp.MustCompile(`(?m)^// Code generated .* DO NOT EDIT\.$`)

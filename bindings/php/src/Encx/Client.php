@@ -121,6 +121,18 @@ final class Client
     }
 
     /**
+     * AdminCreateGame creates a game and returns its id. paramsJSON must decode
+     * into encx.AdminCreateGameParams (title, description, game_type,
+     * start_datetime, finish_datetime, ...).
+     *
+     * @throws EncxException
+     */
+    public function adminCreateGame(string $paramsJSON): int
+    {
+        return (int) Ffi::call('encx_client_admin_create_game', [$this->handle(), $paramsJSON]);
+    }
+
+    /**
      * APIBaseURL returns the host the new engine is reached at.
      *
      * @throws EncxException

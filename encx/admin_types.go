@@ -143,6 +143,37 @@ type AdminGameInfo struct {
 	AuthorComplexity string `json:"author_complexity,omitempty"`
 }
 
+// AdminCreateGameParams holds the data needed to create a game.
+//
+// It carries the fields creation alone can set — the game type, the zone and the
+// start — plus the game's identity. Everything else the editor offers (prize,
+// limits, statistics, certificates, author complexity) is writable afterwards
+// through AdminUpdateGameInfo, so it is not duplicated here.
+// Both engines require Title, StartDateTime and FinishDateTime and refuse a
+// start in the past or a finish before the start; Title and StartDateTime are
+// checked before the request is sent, FinishDateTime only by the server.
+type AdminCreateGameParams struct {
+	Title       string `json:"title"`
+	Description string `json:"description,omitempty"`
+	GameType    int    `json:"game_type"` // 0=single, 1=team, 2=personal
+	// Dates are written in RFC3339; the legacy engine converts them to the
+	// ru-locale spelling its form expects.
+	StartDateTime  string `json:"start_datetime"`
+	FinishDateTime string `json:"finish_datetime"`
+
+	RequestLastDate string `json:"request_last_date,omitempty"`
+	// ZoneID selects the game zone the legacy engine offers (0 Схватка,
+	// 1 Мозговой штурм, 2 Фотоэкстрим, 3 Мокрые войны, 4 Кэшинг, 5 Фотоохота,
+	// 7 Точки, 8 Конкурс, 9 Викторина). Zero is a zone, not "unset". The new
+	// engine takes the zone from the domain instead: demo.en.cx refuses every
+	// non-zero value with a validation error.
+	ZoneID int `json:"zone_id,omitempty"`
+	// Authors lists logins separated by commas or semicolons. Empty means the
+	// account creating the game.
+	Authors     string `json:"authors,omitempty"`
+	IsModerated bool   `json:"is_moderated,omitempty"`
+}
+
 // AdminCorrectionAdd holds the data for adding a new time correction.
 type AdminCorrectionAdd struct {
 	TeamName       string `json:"team_name"`

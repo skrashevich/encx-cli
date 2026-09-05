@@ -8,6 +8,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"time"
 	"unicode"
 )
 
@@ -861,6 +862,132 @@ func (c *Client) legacyAdminDeleteCorrection(ctx context.Context, gameId int, co
 		return fmt.Errorf("encx: admin delete correction: %w", err)
 	}
 	return nil
+}
+
+// legacyCreateDateLayout is the date format the ASP.NET admin forms render and accept.
+const legacyCreateDateLayout = "02.01.2006 15:04:05"
+
+// legacyGidRe pulls a game id out of the redirect the create form answers with.
+var legacyGidRe = regexp.MustCompile(`(?i)[?&]gid=(\d+)`)
+
+// legacyFormErrorRe matches the label the admin forms render a rejection into.
+var legacyFormErrorRe = regexp.MustCompile(`(?is)<span[^>]*id="[^"]*lblErrMsg"[^>]*>(.*?)</span>`)
+
+// legacyDateTime renders an ISO timestamp the way the admin forms expect. The
+// new engine takes RFC3339, so the same params struct has to survive both
+// engines; anything the layouts do not recognise is passed through untouched.
+func legacyDateTime(value string) string {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return ""
+	}
+	for _, layout := range []string{time.RFC3339, "2006-01-02T15:04:05", "2006-01-02 15:04:05"} {
+		if parsed, err := time.Parse(layout, value); err == nil {
+			return parsed.Format(legacyCreateDateLayout)
+		}
+	}
+	return value
+}
+
+// AdminCreateGame creates a game through the GameCreate.aspx form and returns its id.
+func (c *Client) legacyAdminCreateGame(ctx context.Context, params AdminCreateGameParams) (int, error) {
+	if strings.TrimSpace(params.Title) == "" {
+		return 0, fmt.Errorf("encx: admin create game: title is required")
+	}
+	start := legacyDateTime(params.StartDateTime)
+	if start == "" {
+		return 0, fmt.Errorf("encx: admin create game: start date is required")
+	}
+
+	u := fmt.Sprintf("%s/Administration/Games/GameCreate.aspx", c.baseURL())
+	formURL := fmt.Sprintf("%s?gamezonelist=%d&gametypeid=%d", u, params.ZoneID, params.GameType)
+
+	// The page refuses a game without authors, and the client does not keep the
+	// login around, so an unset Authors is filled from the value the pristine
+	// form is pre-populated with: the creator.
+	authors := params.Authors
+	if strings.TrimSpace(authors) == "" {
+		body, err := c.doGet(ctx, formURL)
+		if err != nil {
+			return 0, fmt.Errorf("encx: admin create game form: %w", err)
+		}
+		authors = parseEnabledInputs(body)["GameAuthors"]
+		if authors == "" {
+			return 0, fmt.Errorf("encx: admin create game: authors are required")
+		}
+	}
+
+	form := url.Values{}
+	form.Set("action", "create")
+	form.Set("GameZoneList", strconv.Itoa(params.ZoneID))
+	form.Set("GameTypeID", strconv.Itoa(params.GameType))
+	form.Set("GameTitle", params.Title)
+	form.Set("GameAuthors", authors)
+	form.Set("Descr", params.Description)
+	form.Set("StartDateTime", start)
+	form.Set("FinishDateTime", legacyDateTime(params.FinishDateTime))
+	form.Set("RequestLastDate", legacyDateTime(params.RequestLastDate))
+	if params.IsModerated {
+		form.Set("IsModerated", "true")
+	} else {
+		form.Set("IsModerated", "false")
+	}
+
+	// Defaults copied from the pristine form: the page rejects the post when a
+	// numeric or date field arrives empty, and every one of them is editable
+	// afterwards through AdminUpdateGameInfo.
+	form.Set("Tabs1_tabsContent_baseSettings_vp0", "Tabs1_tabsContent_baseSettings_vp0")
+	form.Set("Fee", "0,00")
+	form.Set("FeeCurrency", "1")
+	form.Set("Prize", "0")
+	form.Set("GameStatAvailabilityList", "1")
+	form.Set("GameScenarioAvailabilityList", "2")
+	form.Set("ShowFeeList", "1")
+	form.Set("MaxPlayers", "0")
+	form.Set("MaxTeamPlayers", "0")
+	form.Set("CertificateMode", "1")
+	form.Set("FirstPlaces", "3")
+	form.Set("NotFirstPlaces", "3")
+	form.Set("radioAcceptRateMode", "1")
+	form.Set("txtAcceptRateFrom", start)
+	form.Set("ddlAuthorsCompexity", "10")
+	form.Set("btnCreate.x", "1")
+	form.Set("btnCreate.y", "1")
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, u, strings.NewReader(form.Encode()))
+	if err != nil {
+		return 0, fmt.Errorf("encx: admin create game: %w", err)
+	}
+	c.setHeaders(req)
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req.Header.Set("Referer", formURL)
+
+	status, headers, respBody, err := c.doRequestAndRead(req)
+	if err != nil {
+		return 0, fmt.Errorf("encx: admin create game: %w", err)
+	}
+	if !isRedirectStatus(status) {
+		// A rejected form is re-rendered in place, with the reason in a label.
+		if m := legacyFormErrorRe.FindSubmatch(respBody); m != nil {
+			if reason := strings.TrimSpace(stripTags(string(m[1]))); reason != "" {
+				return 0, fmt.Errorf("encx: admin create game: %s", reason)
+			}
+		}
+		return 0, fmt.Errorf("encx: admin create game: form rejected (HTTP %d)", status)
+	}
+	location := headers.Get("Location")
+	if isLoginRedirect(location) {
+		return 0, fmt.Errorf("encx: admin create game: session expired or access denied")
+	}
+	m := legacyGidRe.FindStringSubmatch(location)
+	if m == nil {
+		return 0, fmt.Errorf("encx: admin create game: no game id in redirect %q", location)
+	}
+	id, err := strconv.Atoi(m[1])
+	if err != nil {
+		return 0, fmt.Errorf("encx: admin create game: bad game id in redirect %q", location)
+	}
+	return id, nil
 }
 
 // AdminGetGameInfo reads the game editor page and returns current game settings.

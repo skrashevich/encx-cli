@@ -31,6 +31,11 @@ char *encx_new_client_with_options(char *domain, int insecure_tls, int use_http,
 // AcceptTeamInvitation accepts a team invitation.
 char *encx_client_accept_team_invitation(long long handle, long long team_id);
 
+// AdminCreateGame creates a game and returns its id. paramsJSON must decode
+// into encx.AdminCreateGameParams (title, description, game_type,
+// start_datetime, finish_datetime, ...).
+char *encx_client_admin_create_game(long long handle, char *params_json);
+
 // APIBaseURL returns the host the new engine is reached at.
 char *encx_client_api_base_url(long long handle);
 

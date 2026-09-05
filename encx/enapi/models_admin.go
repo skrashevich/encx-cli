@@ -380,6 +380,41 @@ type AdminGameLifecycle struct {
 	CanCorrectResults     bool   `json:"can_correct_results"`
 }
 
+// AdminCreateGameAuthor is models.AdminCreateGameAuthor — an author is named
+// either by login or by id.
+type AdminCreateGameAuthor struct {
+	Login  string `json:"login,omitempty"`
+	UserID int    `json:"user_id,omitempty"`
+}
+
+// AdminCreateGameRequest is models.AdminCreateGameRequest, the body of
+// POST /admin/games.
+type AdminCreateGameRequest struct {
+	Title          string `json:"title"`
+	Descr          string `json:"descr,omitempty"`
+	GameTypeID     int    `json:"game_type_id"`
+	StartDateTime  string `json:"start_date_time"`
+	FinishDateTime string `json:"finish_date_time"`
+
+	RequestLastDate        string                  `json:"request_last_date,omitempty"`
+	AcceptRateFromDateTime string                  `json:"accept_rate_from_date_time,omitempty"`
+	ZoneID                 int                     `json:"zone_id,omitempty"`
+	Authors                []AdminCreateGameAuthor `json:"authors,omitempty"`
+	IsModerated            bool                    `json:"is_moderated,omitempty"`
+	MaxPlayers             int                     `json:"max_players,omitempty"`
+	MaxTeamMembers         int                     `json:"max_team_members,omitempty"`
+	PrizeCents             int                     `json:"prize_cents,omitempty"`
+	CertificateAccessMode  int                     `json:"certificate_access_mode,omitempty"`
+	CertificatePlaces      int                     `json:"certificate_places,omitempty"`
+	StatAvailabilityTypeID int                     `json:"stat_availability_type_id,omitempty"`
+	ScenarioAvailability   int                     `json:"scenario_availability,omitempty"`
+	ShowFee                int                     `json:"show_fee,omitempty"`
+	// CompetitionID is the calendar category; -1 is "Typical".
+	CompetitionID int `json:"competition_id,omitempty"`
+	// AFC is the author complexity in the route's own 0..1 spelling.
+	AFC float64 `json:"afc,omitempty"`
+}
+
 // AdminGameStatusRequest is models.AdminGameStatusRequest.
 type AdminGameStatusRequest struct {
 	StatusID           int  `json:"status_id"`

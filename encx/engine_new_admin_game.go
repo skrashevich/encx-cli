@@ -12,6 +12,60 @@ import (
 
 // --- Game editor ---
 
+// AdminCreateGame creates a game and returns its id. Title and StartDateTime
+// are checked here, the same fields legacyAdminCreateGame refuses before
+// sending the request, so both engines fail the same way instead of one
+// spending a round trip on the server's generic "Invalid request body".
+func (e *newEngine) AdminCreateGame(ctx context.Context, params AdminCreateGameParams) (int, error) {
+	if strings.TrimSpace(params.Title) == "" {
+		return 0, fmt.Errorf("encx: admin create game: title is required")
+	}
+	if strings.TrimSpace(params.StartDateTime) == "" {
+		return 0, fmt.Errorf("encx: admin create game: start date is required")
+	}
+
+	req := enapi.AdminCreateGameRequest{
+		Title:           params.Title,
+		Descr:           params.Description,
+		GameTypeID:      params.GameType,
+		StartDateTime:   params.StartDateTime,
+		FinishDateTime:  params.FinishDateTime,
+		RequestLastDate: params.RequestLastDate,
+		ZoneID:          params.ZoneID,
+		IsModerated:     params.IsModerated,
+	}
+	for _, login := range authorLogins(params.Authors) {
+		req.Authors = append(req.Authors, enapi.AdminCreateGameAuthor{Login: login})
+	}
+
+	// The route's answer is untyped in the API document, so the id is dug out of
+	// whatever shape comes back rather than decoded into a struct.
+	var created map[string]any
+	if err := e.c.api().PostJSON(ctx, "/admin/games", req, &created); err != nil {
+		return 0, err
+	}
+	id := gameIDFromCreationPayload(created)
+	if id == 0 {
+		return 0, fmt.Errorf("encx: создание игры: ответ движка не содержит идентификатора")
+	}
+	return id, nil
+}
+
+// gameIDFromCreationPayload digs the new game's id out of the untyped answer.
+//
+// The API document declares the answer of POST /admin/games an open object.
+// Measured on a live domain it is flat and keyed game_id, alongside game_num,
+// status_id and zone_id; id is accepted too in case the route ever spells it the
+// way the rest of the API does.
+func gameIDFromCreationPayload(payload map[string]any) int {
+	for _, key := range []string{"game_id", "id"} {
+		if value, ok := payload[key].(float64); ok && value != 0 {
+			return int(value)
+		}
+	}
+	return 0
+}
+
 func (e *newEngine) AdminGetGameInfo(ctx context.Context, gameId int) (*AdminGameInfo, error) {
 	var editor enapi.AdminGameEditorResponse
 	if err := e.c.api().GetJSON(ctx, fmt.Sprintf("/admin/games/%d", gameId), nil, &editor); err != nil {
@@ -121,14 +175,23 @@ func (e *newEngine) AdminUpdateGameInfo(ctx context.Context, gameId int, info Ad
 }
 
 func splitLogins(value string) []map[string]any {
-	parts := strings.FieldsFunc(value, func(r rune) bool { return r == ',' || r == ';' })
-	authors := make([]map[string]any, 0, len(parts))
-	for _, part := range parts {
-		if login := strings.TrimSpace(part); login != "" {
-			authors = append(authors, map[string]any{"login": login})
-		}
+	logins := authorLogins(value)
+	authors := make([]map[string]any, 0, len(logins))
+	for _, login := range logins {
+		authors = append(authors, map[string]any{"login": login})
 	}
 	return authors
+}
+
+func authorLogins(value string) []string {
+	parts := strings.FieldsFunc(value, func(r rune) bool { return r == ',' || r == ';' })
+	logins := make([]string, 0, len(parts))
+	for _, part := range parts {
+		if login := strings.TrimSpace(part); login != "" {
+			logins = append(logins, login)
+		}
+	}
+	return logins
 }
 
 func itoaOrEmpty(value int) string {
