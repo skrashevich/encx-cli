@@ -92,10 +92,10 @@ func TestEngineAutoRequiresTheSiteToClaimTheDomain(t *testing.T) {
 		body string
 		want EngineMode
 	}{
-		{"claims another domain", `{"id":1,"name":"foreign","primary_domain":"other.en.cx"}`, EngineLegacy},
-		{"names no domain at all", `{"id":1,"name":"anything"}`, EngineLegacy},
-		{"claims ours as primary", `{"id":135,"primary_domain":"demo.en.cx"}`, EngineNew},
-		{"claims ours as an alias", `{"id":135,"primary_domain":"demo.encounter.cx",
+		{"claims another domain", `{"id":1,"name":"foreign","primary_domain":"other.en.cx","is_site_active_by_rule":true}`, EngineLegacy},
+		{"names no domain at all", `{"id":1,"name":"anything","is_site_active_by_rule":true}`, EngineLegacy},
+		{"claims ours as primary", `{"id":135,"primary_domain":"demo.en.cx","is_site_active_by_rule":true}`, EngineNew},
+		{"claims ours as an alias", `{"id":135,"primary_domain":"demo.encounter.cx","is_site_active_by_rule":true,
 		  "domains":[{"domain":"demo.encounter.cx","is_primary":true},{"domain":"demo.en.cx"}]}`, EngineNew},
 	}
 	for _, tc := range cases {
@@ -107,6 +107,41 @@ func TestEngineAutoRequiresTheSiteToClaimTheDomain(t *testing.T) {
 
 			// No WithAPIBaseURL: the host was derived, so it has to prove itself.
 			c := New("demo.en.cx", WithHTTP())
+			c.apiBaseURL = srv.URL
+			if got := c.Engine(); got != tc.want {
+				t.Errorf("Engine = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
+// TestEngineAutoRequiresTheSiteToBeActiveOnTheNewBackend pins the failure the
+// registry rollout exposed: api.en.cx now lists sites that are still served by
+// the ASP.NET engine (moscow.en.cx answered as site 51 with an empty game
+// catalog), so owning the domain is no longer proof of migration. The backend
+// marks the actually migrated sites with is_site_active_by_rule.
+func TestEngineAutoRequiresTheSiteToBeActiveOnTheNewBackend(t *testing.T) {
+	t.Setenv(EngineEnvVar, "auto")
+	cases := []struct {
+		name string
+		body string
+		want EngineMode
+	}{
+		{"registered but not active", `{"id":51,"name":"Москва",
+		  "primary_domain":"moscow.en.cx","is_site_active_by_rule":false}`, EngineLegacy},
+		{"flag missing entirely", `{"id":51,"name":"Москва",
+		  "primary_domain":"moscow.en.cx"}`, EngineLegacy},
+		{"registered and active", `{"id":135,"name":"Демо город",
+		  "primary_domain":"moscow.en.cx","is_site_active_by_rule":true}`, EngineNew},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			srv := httptest.NewTestServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				_, _ = w.Write([]byte(tc.body))
+			}))
+			srv.Start()
+
+			c := New("moscow.en.cx", WithHTTP())
 			c.apiBaseURL = srv.URL
 			if got := c.Engine(); got != tc.want {
 				t.Errorf("Engine = %q, want %q", got, tc.want)
@@ -135,7 +170,7 @@ func TestEngineAutoDoesNotCacheATransportFailure(t *testing.T) {
 			_ = conn.Close()
 			return
 		}
-		_, _ = w.Write([]byte(`{"id":135,"primary_domain":"demo.en.cx"}`))
+		_, _ = w.Write([]byte(`{"id":135,"primary_domain":"demo.en.cx","is_site_active_by_rule":true}`))
 	}))
 	srv.Start()
 
@@ -238,7 +273,7 @@ func (rec *engineRouteRecorder) handler(t *testing.T) http.HandlerFunc {
 				_, _ = w.Write([]byte(`{"error":"domain_unregistered","key":"Domain name is unregistered","code":404}`))
 				return
 			}
-			_, _ = w.Write([]byte(`{"id":135,"name":"Демо город"}`))
+			_, _ = w.Write([]byte(`{"id":135,"name":"Демо город","is_site_active_by_rule":true}`))
 		case r.URL.Path == "/login/signin":
 			_, _ = w.Write([]byte(`{"Error":0,"Message":"ok"}`))
 		case r.URL.Path == "/login":
@@ -385,7 +420,7 @@ func TestEngineAutoProbeAsksForTheClientDomain(t *testing.T) {
 	var probed string
 	srv := httptest.NewTestServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		probed = r.URL.Path
-		_, _ = w.Write([]byte(`{"id":135,"name":"Демо город"}`))
+		_, _ = w.Write([]byte(`{"id":135,"name":"Демо город","is_site_active_by_rule":true}`))
 	}))
 	srv.Start()
 

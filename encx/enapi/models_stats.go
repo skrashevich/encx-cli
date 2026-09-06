@@ -106,6 +106,10 @@ type Site struct {
 	City          *City        `json:"city"`
 	Province      *Province    `json:"province"`
 	Country       *Country     `json:"country"`
+	// IsSiteActiveByRule separates the sites this backend actually serves from
+	// the ones it merely lists: the registry mirrors legacy sites that are still
+	// on the ASP.NET engine, and only the migrated ones carry this flag.
+	IsSiteActiveByRule bool `json:"is_site_active_by_rule"`
 }
 
 // SiteDomain is models.SiteDomain — one of the domains a site answers on.

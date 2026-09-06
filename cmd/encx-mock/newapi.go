@@ -47,6 +47,9 @@ func (s *server) handleAPISiteByDomain(w http.ResponseWriter, r *http.Request) {
 		"primary_domain": domain,
 		"domains":        []map[string]any{{"id": 1, "site_id": 1, "domain": domain, "is_primary": true}},
 		"status_id":      1,
+		// The probe treats a site without this flag as still on the legacy
+		// engine; the mock serves the new API, so it declares itself migrated.
+		"is_site_active_by_rule": true,
 	})
 }
 

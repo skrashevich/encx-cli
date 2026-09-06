@@ -268,6 +268,14 @@ func (c *Client) probeNewEngine(ctx context.Context) (migrated, definitive bool)
 			c.APIBaseURL(), site.ID, site.Name)
 		return false, true
 	}
+	// Owning the domain is no longer proof of migration: the registry mirrors
+	// legacy sites too (moscow.en.cx answers as site 51 with an empty game
+	// catalog). Only a site the backend marks active is actually served by it.
+	if !site.IsSiteActiveByRule {
+		c.debugf("encx engine probe: %s is registered as site %d %q but not active on the new backend, using legacy",
+			c.domain, site.ID, site.Name)
+		return false, true
+	}
 	c.debugf("encx engine probe: %s is on the new backend (site %d %q)", c.domain, site.ID, site.Name)
 	return true, true
 }
