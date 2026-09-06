@@ -5,6 +5,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/sipeed/picoclaw/pkg/providers"
 )
@@ -178,5 +179,24 @@ func TestRunAgentLoopKeepsApprovalGateWithPicoClaw(t *testing.T) {
 	toolResult := provider.calls[1][len(provider.calls[1])-1]
 	if toolResult.Role != "tool" || !strings.Contains(toolResult.Content, "user denied") {
 		t.Fatalf("declined tool result = %#v", toolResult)
+	}
+}
+
+func TestBuildSystemPromptStampsCurrentTime(t *testing.T) {
+	fixed := time.Date(2026, 9, 7, 14, 7, 0, 0, time.FixedZone("MSK", 3*60*60))
+	orig := systemPromptNow
+	systemPromptNow = func() time.Time { return fixed }
+	defer func() { systemPromptNow = orig }()
+
+	prompt := buildSystemPrompt(&config{domain: "tech.en.cx"}, &llmSession{})
+
+	if !strings.Contains(prompt, "2026-09-07T14:07:00+03:00") {
+		t.Fatalf("prompt missing local RFC3339 timestamp:\n%s", prompt)
+	}
+	if !strings.Contains(prompt, "2026-09-07T11:07:00Z") {
+		t.Fatalf("prompt missing UTC timestamp:\n%s", prompt)
+	}
+	if !strings.Contains(prompt, "authoritative") {
+		t.Fatalf("prompt missing time-handling rule:\n%s", prompt)
 	}
 }

@@ -103,10 +103,16 @@ func newLLMSessionForPrompt(prompt string) *llmSession {
 	}
 }
 
+// systemPromptNow is the clock used when stamping the current date/time into
+// the agent system prompt. It is a package var so tests can pin it.
+var systemPromptNow = time.Now
+
 func buildSystemPrompt(cfg *config, session *llmSession) string {
+	now := systemPromptNow()
 	return `You are an autonomous agent for the Encounter (en.cx) game engine CLI tool.
 The user gives you a natural language request. Execute it step by step using the available tools.
 The current domain is: ` + cfg.domain + `
+The current date and time is: ` + now.Format(time.RFC3339) + ` (local time, RFC3339; ` + now.UTC().Format(time.RFC3339) + ` in UTC).
 ` + func() string {
 		if cfg.gameId != 0 {
 			return fmt.Sprintf("The current game ID is: %d\n", cfg.gameId)
@@ -114,6 +120,7 @@ The current domain is: ` + cfg.domain + `
 		return ""
 	}() + `
 Rules:
+- TIME: Treat the "current date and time" above as authoritative. Never guess or infer today's date from memory. Resolve every relative time the user gives ("in a minute", "tonight", "tomorrow", "next Saturday") against that value, and echo the absolute date/time you computed so the user can check it.
 - NEVER FABRICATE (strict): Do not invent, guess, or infer facts about game content, tool results, files, URLs, or anything else. If information is missing, call the appropriate tools to obtain it. If tools still cannot provide it, say clearly that the information is unavailable — do not fill gaps with assumptions, stereotypes, or plausible-sounding details.
 - Execute multi-step tasks by calling tools one at a time. You will receive the result of each tool call.
 - Use tool results to inform your next action (e.g., get level IDs before renaming levels).

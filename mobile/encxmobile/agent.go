@@ -276,7 +276,12 @@ func newAgentSession(
 		return nil, fmt.Errorf("encxmobile: build engine toolset: %w", err)
 	}
 	session.catalog = catalog
-	session.systemPrompt = cfg.SystemPrompt + "\n\n" + catalog.SystemPromptAddendum()
+	now := time.Now()
+	session.systemPrompt = cfg.SystemPrompt + "\n\n" +
+		"The current date and time is " + now.Format(time.RFC3339) + " (local time, RFC3339; " +
+		now.UTC().Format(time.RFC3339) + " in UTC). Treat this as authoritative: never guess today's " +
+		"date, and resolve any relative time the player mentions against it.\n\n" +
+		catalog.SystemPromptAddendum()
 
 	registry := tools.NewToolRegistry()
 	for _, tool := range catalog.Tools() {
