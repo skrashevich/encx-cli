@@ -12,6 +12,13 @@ func AntiSpamURLFromError(err error) string {
 	return encx.AntiSpamURLFromError(err)
 }
 
+// IsGameNotFoundError reports whether err says the domain does not host the requested game
+// (wrong game id, or a game that lives on another domain). This is permanent: retrying or
+// re-logging in cannot make the game appear, so the app should point at the domain instead.
+func IsGameNotFoundError(err error) bool {
+	return encx.IsGameNotFound(err)
+}
+
 // IsUndecodableAcceptedError reports whether err is an unreadable reply from a 2xx response, i.e.
 // the request reached the engine and only the reply could not be parsed.
 //

@@ -52,9 +52,12 @@ func (c *Client) getGameModel(ctx context.Context, gameId int, extraQuery url.Va
 	}
 	c.setHeaders(req)
 
-	status, _, body, err := c.doRequestAndRead(req)
+	status, headers, body, err := c.doRequestAndRead(req)
 	if err != nil {
 		return nil, fmt.Errorf("encx: game request: %w", err)
+	}
+	if err := c.gameNotFoundFromRedirect(gameId, status, headers); err != nil {
+		return nil, err
 	}
 
 	return c.decodeGameModelJSON(body, status, "game model")
@@ -83,9 +86,12 @@ func (c *Client) postGameModel(ctx context.Context, gameId int, formValues ...ur
 	c.setHeaders(req)
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 
-	status, _, body, err := c.doRequestAndRead(req)
+	status, headers, body, err := c.doRequestAndRead(req)
 	if err != nil {
 		return nil, fmt.Errorf("encx: game request: %w", err)
+	}
+	if err := c.gameNotFoundFromRedirect(gameId, status, headers); err != nil {
+		return nil, err
 	}
 
 	return c.decodeGameModelJSON(body, status, "game model")
@@ -178,9 +184,12 @@ func (c *Client) legacyGetPenaltyHint(ctx context.Context, gameId, penaltyId int
 	}
 	c.setHeaders(req)
 
-	status, _, body, err := c.doRequestAndRead(req)
+	status, headers, body, err := c.doRequestAndRead(req)
 	if err != nil {
 		return nil, fmt.Errorf("encx: hint request: %w", err)
+	}
+	if err := c.gameNotFoundFromRedirect(gameId, status, headers); err != nil {
+		return nil, err
 	}
 
 	return c.decodeGameModelJSON(body, status, "hint response")

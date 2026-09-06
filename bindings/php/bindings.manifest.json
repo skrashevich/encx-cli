@@ -791,6 +791,10 @@
       "reason": "parameter \"err\" has type error, which cannot cross the C ABI: a Go error is an interface value with no C representation"
     },
     {
+      "goName": "IsGameNotFoundError",
+      "reason": "parameter \"err\" has type error, which cannot cross the C ABI: a Go error is an interface value with no C representation"
+    },
+    {
       "goName": "IsUndecodableAcceptedError",
       "reason": "parameter \"err\" has type error, which cannot cross the C ABI: a Go error is an interface value with no C representation"
     },
