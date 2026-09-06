@@ -574,6 +574,60 @@ func cmdAdminDeleteCorrection(ctx context.Context, cfg *config, client *encx.Cli
 	fmt.Printf("Correction %s deleted\n", args[0])
 }
 
+func cmdAdminCreateGame(ctx context.Context, cfg *config, client *encx.Client, args []string) {
+	if len(args) == 0 {
+		fatal("Usage: encli admin-create-game <key=value ...> (title, start, finish required)")
+	}
+
+	params := encx.AdminCreateGameParams{}
+	for _, arg := range args {
+		key, val, ok := strings.Cut(arg, "=")
+		if !ok {
+			fatal("Arguments must be in key=value format. Got: %s", arg)
+		}
+		switch strings.ToLower(key) {
+		case "title":
+			params.Title = val
+		case "description", "descr":
+			params.Description = val
+		case "start":
+			params.StartDateTime = val
+		case "finish":
+			params.FinishDateTime = val
+		case "request_last_date":
+			params.RequestLastDate = val
+		case "game_type":
+			n, err := strconv.Atoi(val)
+			if err != nil {
+				fatal("Invalid game_type: %s", val)
+			}
+			params.GameType = n
+		case "zone_id":
+			n, err := strconv.Atoi(val)
+			if err != nil {
+				fatal("Invalid zone_id: %s", val)
+			}
+			params.ZoneID = n
+		case "authors":
+			params.Authors = val
+		case "moderated":
+			params.IsModerated = val == "true" || val == "1"
+		default:
+			fatal("Unknown field: %s (supported: title, description, start, finish, request_last_date, game_type, zone_id, authors, moderated)", key)
+		}
+	}
+
+	id, err := client.AdminCreateGame(ctx, params)
+	if err != nil {
+		fatal("Failed to create game: %v", err)
+	}
+	if cfg.jsonOutput {
+		outputJSON(map[string]any{"success": true, "game_id": id})
+		return
+	}
+	fmt.Printf("Game created: %d\n", id)
+}
+
 func cmdAdminWipeGame(ctx context.Context, cfg *config, client *encx.Client) {
 	requireGameId(cfg)
 

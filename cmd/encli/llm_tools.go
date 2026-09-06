@@ -195,6 +195,11 @@ func getTools(reviewMode bool) []llmTool {
 			Parameters:  json.RawMessage(`{"type":"object","properties":{"game_id":{"type":"integer","description":"Game ID"},"correction_id":{"type":"string","description":"Correction ID"}},"required":["game_id","correction_id"]}`),
 		}},
 		{Type: "function", Function: llmFunction{
+			Name:        "admin_create_game",
+			Description: "Create a new game. Returns the new game's ID (use it as game_id for subsequent admin_* calls).",
+			Parameters:  json.RawMessage(`{"type":"object","properties":{"title":{"type":"string","description":"Game title"},"description":{"type":"string","description":"Game description (HTML)"},"start":{"type":"string","description":"Start datetime, RFC3339 (e.g. 2026-09-10T18:00:00+03:00)"},"finish":{"type":"string","description":"Finish datetime, RFC3339"},"game_type":{"type":"integer","enum":[0,1,2],"description":"0 Single, 1 Team, 2 Personal"},"zone_id":{"type":"integer","description":"Game zone, legacy engine only (0 Схватка, 1 Мозговой штурм, 2 Фотоэкстрим, 3 Мокрые войны, 4 Кэшинг, 5 Фотоохота, 7 Точки, 8 Конкурс, 9 Викторина). The new engine takes the zone from the domain and rejects any non-zero value."},"authors":{"type":"string","description":"Comma-separated author logins; defaults to the current user if omitted"},"request_last_date":{"type":"string","description":"Last date to request participation, RFC3339"},"moderated":{"type":"boolean","description":"Require moderation of answers"}},"required":["title","start","finish"]}`),
+		}},
+		{Type: "function", Function: llmFunction{
 			Name:        "admin_wipe_game",
 			Description: "Completely reset a game: delete all bonuses, sectors, hints, levels, and corrections",
 			Parameters:  json.RawMessage(`{"type":"object","properties":{"game_id":{"type":"integer","description":"Game ID"}},"required":["game_id"]}`),

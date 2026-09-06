@@ -56,6 +56,7 @@ func isAdminMutationTool(name string) bool {
 		"admin_set_comment",
 		"admin_add_correction",
 		"admin_delete_correction",
+		"admin_create_game",
 		"admin_wipe_game",
 		"admin_copy_game",
 		"admin_update_game",

@@ -373,6 +373,9 @@ func main() {
 	case "admin-copy-game":
 		requireAdminAuth(ctx, cfg, client)
 		cmdAdminCopyGame(ctx, cfg, client, positional)
+	case "admin-create-game":
+		requireAdminAuth(ctx, cfg, client)
+		cmdAdminCreateGame(ctx, cfg, client, positional)
 	case "admin-game-info":
 		requireAdminAuth(ctx, cfg, client)
 		cmdAdminGameInfo(ctx, cfg, client)
@@ -517,6 +520,7 @@ Admin commands (require game editor rights):
   admin-calc-ik            Calculate game coefficient (IK)
   admin-wipe-game          Completely reset a game (delete all content)
   admin-copy-game          Copy entire game to another game
+  admin-create-game        Create a new game
 
 LLM mode:
   --llm <prompt>  Natural language command (uses OpenRouter API)
@@ -741,6 +745,10 @@ func printCommandHelp(cmd string) {
 		fmt.Fprintln(os.Stderr, "Usage: encli admin-copy-game -game-id <source-id> <target-id>")
 		fmt.Fprintln(os.Stderr, "  Copy entire game (levels, settings, bonuses, sectors, hints) to target game.")
 		fmt.Fprintln(os.Stderr, "  Target game levels are created automatically if needed.")
+	case "admin-create-game":
+		fmt.Fprintln(os.Stderr, "Usage: encli admin-create-game <key=value ...>")
+		fmt.Fprintln(os.Stderr, "  Create a new game. Required: title, start, finish (RFC3339, e.g. 2026-09-10T18:00:00+03:00).")
+		fmt.Fprintln(os.Stderr, "  Optional: description, game_type (0 single/1 team/2 personal), zone_id, authors (comma-separated logins), request_last_date, moderated.")
 	case "admin-not-deliver":
 		fmt.Fprintln(os.Stderr, "Usage: encli admin-not-deliver -game-id <id>")
 		fmt.Fprintln(os.Stderr, "  Mark game as not delivered (несостоявшаяся).")

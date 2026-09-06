@@ -525,6 +525,9 @@ encli admin-update-message -game-id 12345 1 <message-id> text="Новый тек
 # message-id берите из admin-messages
 encli admin-delete-message -game-id 12345 1 <message-id>
 
+# Создать новую игру (title, start, finish обязательны; даты в RFC3339)
+encli admin-create-game title="Новая игра" start="2026-09-10T18:00:00+03:00" finish="2026-09-11T18:00:00+03:00"
+
 # Информация об игре (название, авторы, описание, дата финиша)
 encli admin-game-info -game-id 12345
 
@@ -712,6 +715,7 @@ encli -game-id 12345 --llm "прочитай levels.md и создай уров�
 | `admin-messages` | Показывает сообщения уровня |
 | `admin-update-message` | Обновляет сообщение по ID |
 | `admin-delete-message` | Удаляет сообщение по ID |
+| `admin-create-game` | Создаёт новую игру (`key=value`: title, start, finish обязательны) |
 | `admin-game-info` | Показывает информацию об игре (название, авторы, описание, дата) |
 | `admin-update-game` | Обновляет настройки игры (название, описание, приз и др.) |
 | `admin-deliver` | Помечает игру как состоявшуюся |

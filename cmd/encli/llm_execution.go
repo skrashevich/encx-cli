@@ -361,6 +361,40 @@ func executeLLMToolCall(ctx context.Context, cfg *config, client *encx.Client, s
 		requireAdminAuth(ctx, cfg, client)
 		cmdAdminDeleteCorrection(ctx, cfg, client, []string{getString("correction_id")})
 
+	case "admin_create_game":
+		requireAdminAuth(ctx, cfg, client)
+		var positional []string
+		if t := getString("title"); t != "" {
+			positional = append(positional, "title="+t)
+		}
+		if d := getString("description"); d != "" {
+			positional = append(positional, "description="+d)
+		}
+		if s := getString("start"); s != "" {
+			positional = append(positional, "start="+s)
+		}
+		if f := getString("finish"); f != "" {
+			positional = append(positional, "finish="+f)
+		}
+		if _, ok := args["game_type"]; ok {
+			positional = append(positional, "game_type="+strconv.Itoa(getInt("game_type")))
+		}
+		if _, ok := args["zone_id"]; ok {
+			positional = append(positional, "zone_id="+strconv.Itoa(getInt("zone_id")))
+		}
+		if a := getString("authors"); a != "" {
+			positional = append(positional, "authors="+a)
+		}
+		if r := getString("request_last_date"); r != "" {
+			positional = append(positional, "request_last_date="+r)
+		}
+		if v, ok := args["moderated"]; ok {
+			if b, ok := v.(bool); ok && b {
+				positional = append(positional, "moderated=true")
+			}
+		}
+		cmdAdminCreateGame(ctx, cfg, client, positional)
+
 	case "admin_wipe_game":
 		requireAdminAuth(ctx, cfg, client)
 		cmdAdminWipeGame(ctx, cfg, client)

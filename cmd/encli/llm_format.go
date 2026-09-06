@@ -128,6 +128,12 @@ func formatToolCallForDisplay(session *llmSession, name, argsJSON string) string
 		return format(rt("Adding correction", "Добавляю коррекцию"))
 	case "admin_delete_correction":
 		return format(rt("Deleting correction", "Удаляю коррекцию"))
+	case "admin_create_game":
+		title := getAnyString(args["title"])
+		if title != "" {
+			return format(rt("Creating game: ", "Создаю игру: ") + title)
+		}
+		return format(rt("Creating game", "Создаю игру"))
 	case "admin_wipe_game":
 		return format(rt("Wiping game (full reset)", "Очищаю игру (полный сброс)"))
 	case "admin_copy_game":
@@ -287,6 +293,16 @@ func formatToolApprovalDetails(session *llmSession, name, argsJSON string) []str
 		}
 		if c := truncateDisplay(getAnyString(args["comment"]), 120); c != "" {
 			add("Comment: "+c, "Комментарий: "+c)
+		}
+	case "admin_create_game":
+		if t := getAnyString(args["title"]); t != "" {
+			add("Title: "+t, "Название: "+t)
+		}
+		if s := getAnyString(args["start"]); s != "" {
+			add("Start: "+s, "Начало: "+s)
+		}
+		if f := getAnyString(args["finish"]); f != "" {
+			add("Finish: "+f, "Финиш: "+f)
 		}
 	case "admin_wipe_game":
 		add("Full game reset (irreversible)", "Полная очистка игры (необратимо)")
