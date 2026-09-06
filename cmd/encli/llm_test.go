@@ -68,6 +68,15 @@ func TestIsReviewApprovalPrompt(t *testing.T) {
 	if isReviewApprovalPrompt("создай 3 новых уровня с бонусами") {
 		t.Fatal("create prompt should not enable review approval mode")
 	}
+	if isReviewApprovalPrompt("создай тестовую игру из 10 уровней. она будет использоваться для проверки функционирования ботов и приложений через api") {
+		t.Fatal("create prompt with noun 'проверки' in purpose clause should not enable review approval mode")
+	}
+	if !isReviewApprovalPrompt("перепроверь уровни и предложи исправления") {
+		t.Fatal("expected 'перепроверь' to enable approval mode")
+	}
+	if !isReviewApprovalPrompt("нужно проверить ответы во всех секторах") {
+		t.Fatal("expected 'проверить' to enable approval mode")
+	}
 }
 
 func TestParsePendingAdminFixInjectsGameID(t *testing.T) {

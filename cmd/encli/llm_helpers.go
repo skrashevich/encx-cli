@@ -62,10 +62,12 @@ func getAnyInt(v any) int {
 
 func isReviewApprovalPrompt(prompt string) bool {
 	prompt = strings.ToLower(prompt)
+	// Verb forms only: the noun "проверка/проверки" shows up in purpose clauses
+	// of creation requests ("игра для проверки ботов") and must not flip the
+	// session into review mode, which hides all admin mutation tools.
 	markers := []string{
-		"проверь",
-		"провер",
-		"перепроверь",
+		"проверь",   // also matches "проверьте", "перепроверь(те)"
+		"проверить", // "нужно проверить"
 		"убедись",
 		"пройдись",
 		"review",
