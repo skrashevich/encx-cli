@@ -727,6 +727,10 @@
       "reason": "method receiver is *AgentSession, not *EncClient; only the client handle is bound"
     },
     {
+      "goName": "AgentSession.FailLocation",
+      "reason": "method receiver is *AgentSession, not *EncClient; only the client handle is bound"
+    },
+    {
       "goName": "AgentSession.HistoryJSON",
       "reason": "method receiver is *AgentSession, not *EncClient; only the client handle is bound"
     },
@@ -740,6 +744,10 @@
     },
     {
       "goName": "AgentSession.ResolveConfirmation",
+      "reason": "method receiver is *AgentSession, not *EncClient; only the client handle is bound"
+    },
+    {
+      "goName": "AgentSession.ResolveLocation",
       "reason": "method receiver is *AgentSession, not *EncClient; only the client handle is bound"
     },
     {

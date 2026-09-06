@@ -187,6 +187,9 @@ type recordingDelegate struct {
 	session         *AgentSession
 	approve         bool
 	ignore          bool
+	// locationJSON answers a location request; locationFailure fails it instead.
+	locationJSON    string
+	locationFailure string
 }
 
 func (d *recordingDelegate) OnEvent(eventJSON string) {
@@ -209,6 +212,22 @@ func (d *recordingDelegate) OnConfirmationRequest(callID string, turn int64, too
 		return
 	}
 	_ = d.session.ResolveConfirmation(callID, d.approve)
+}
+
+func (d *recordingDelegate) OnLocationRequest(requestID string, turn int64) {
+	d.mu.Lock()
+	payload := d.locationJSON
+	failure := d.locationFailure
+	ignore := d.ignore
+	d.mu.Unlock()
+	if ignore {
+		return
+	}
+	if failure != "" {
+		_ = d.session.FailLocation(requestID, failure)
+		return
+	}
+	_ = d.session.ResolveLocation(requestID, payload)
 }
 
 func (d *recordingDelegate) pendingCallIDs() []string {
@@ -959,6 +978,10 @@ func (d *cancellingDelegate) OnConfirmationRequest(callID string, turn int64, to
 	_ = d.session.ResolveConfirmation(callID, false)
 }
 
+func (d *cancellingDelegate) OnLocationRequest(requestID string, turn int64) {
+	_ = d.session.FailLocation(requestID, "cancelled")
+}
+
 func TestConfirmationRequestCarriesItsTurn(t *testing.T) {
 	engine := newFakeEngine()
 	provider := &scriptedProvider{responses: []*providers.LLMResponse{
@@ -988,6 +1011,11 @@ func (d *turnRecordingDelegate) OnEvent(string) {}
 func (d *turnRecordingDelegate) OnConfirmationRequest(callID string, turn int64, toolName, argsJSON string) {
 	d.turn = turn
 	_ = d.session.ResolveConfirmation(callID, true)
+}
+
+func (d *turnRecordingDelegate) OnLocationRequest(requestID string, turn int64) {
+	d.turn = turn
+	_ = d.session.FailLocation(requestID, "not available in this test")
 }
 
 func TestEmptyMessageIsRejected(t *testing.T) {

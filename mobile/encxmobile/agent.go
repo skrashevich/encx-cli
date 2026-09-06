@@ -50,6 +50,13 @@ type AgentDelegate interface {
 	// queue should drop requests from a turn that has already ended: the
 	// notification is delivered asynchronously and can outlive its turn.
 	OnConfirmationRequest(callID string, turn int64, toolName string, argsJSON string)
+	// OnLocationRequest asks the host for the device's current GPS position. The
+	// host must answer exactly once by calling ResolveLocation or FailLocation
+	// with the same requestID; until then the tool call is blocked.
+	//
+	// turn plays the same role as in OnConfirmationRequest: a host that queues
+	// requests should drop those from a turn that has already ended.
+	OnLocationRequest(requestID string, turn int64)
 }
 
 // agentConfig is the JSON contract between the host app and the agent.
@@ -67,6 +74,10 @@ type agentConfig struct {
 	SystemPrompt    string `json:"system_prompt"`
 	// WebToolsEnabled adds DuckDuckGo search and a page reader to the toolset.
 	WebToolsEnabled bool `json:"web_tools"`
+	// LocationToolsEnabled adds a tool that reads the device's GPS position
+	// through the host delegate. The OS permission prompt still gates the actual
+	// fix, so enabling it never reveals a location the player has not granted.
+	LocationToolsEnabled bool `json:"location_tools"`
 	// MaxIterations caps the tool-call steps in one turn. Zero means the default;
 	// a negative value removes the cap.
 	MaxIterations         int     `json:"max_iterations"`
@@ -177,9 +188,12 @@ type AgentSession struct {
 	delegate AgentDelegate
 	history  []providers.Message
 	pending  map[string]chan bool
-	cancel   context.CancelFunc
-	turn     int64
-	callSeq  int64
+	// pendingLocation mirrors pending for enc_device_location calls, which wait
+	// for a position instead of a yes/no verdict.
+	pendingLocation map[string]chan locationReply
+	cancel          context.CancelFunc
+	turn            int64
+	callSeq         int64
 }
 
 // NewAgentSession builds an agent over this client. configJSON carries the LLM
@@ -232,12 +246,13 @@ func newAgentSession(
 	silenceAgentLogging()
 
 	session := &AgentSession{
-		provider:      provider,
-		model:         cfg.Model,
-		options:       cfg.llmOptions(),
-		maxIterations: cfg.MaxIterations,
-		endpoint:      strings.TrimSpace(cfg.APIBase),
-		pending:       map[string]chan bool{},
+		provider:        provider,
+		model:           cfg.Model,
+		options:         cfg.llmOptions(),
+		maxIterations:   cfg.MaxIterations,
+		endpoint:        strings.TrimSpace(cfg.APIBase),
+		pending:         map[string]chan bool{},
+		pendingLocation: map[string]chan locationReply{},
 	}
 
 	// An LLM runs the tool calls of one turn in parallel, so a single question can
@@ -269,6 +284,9 @@ func newAgentSession(
 	}
 	if cfg.WebToolsEnabled {
 		registerWebTools(registry, session.observe)
+	}
+	if cfg.LocationToolsEnabled {
+		registry.Register(session.observe(&locationTool{session: session}))
 	}
 	session.registry = registry
 	return session, nil
@@ -527,10 +545,15 @@ func (s *AgentSession) isRunning() bool {
 	return s.cancel != nil
 }
 
-// failPendingLocked declines every waiting confirmation. The caller holds s.mu.
+// failPendingLocked declines every waiting confirmation and fails every waiting
+// location request. The caller holds s.mu.
 func (s *AgentSession) failPendingLocked() {
 	for callID, waiter := range s.pending {
 		delete(s.pending, callID)
 		waiter <- false
+	}
+	for requestID, waiter := range s.pendingLocation {
+		delete(s.pendingLocation, requestID)
+		waiter <- locationReply{errMessage: "the location request was cancelled"}
 	}
 }
