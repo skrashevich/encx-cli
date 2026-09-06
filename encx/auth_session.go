@@ -39,7 +39,7 @@ func (c *Client) legacyLoginComplete(ctx context.Context, login, password string
 		return fmt.Errorf("encx: login error %d: %s", resp.Error, LoginErrorText(resp.Error))
 	}
 	if err := c.legacyVerifyAdminSession(ctx); err != nil {
-		return fmt.Errorf("encx: signed in but administration pages still require login: %w", err)
+		return fmt.Errorf("%w: administration pages still require login: %v", ErrAdminAccessUnverified, err)
 	}
 	return nil
 }

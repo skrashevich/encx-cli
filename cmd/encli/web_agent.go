@@ -77,12 +77,7 @@ func runWebChatTurn(ctx context.Context, hub *webHub, chatID string) {
 		t.session = &llmSession{}
 	}
 	if last := lastUserMessageContent(t.messages); last != "" {
-		if !t.session.reviewApprovalMode {
-			t.session.preferRussian = looksLikeRussian(last)
-		}
-		if !t.session.reviewApprovalMode && isReviewApprovalPrompt(last) {
-			t.session.reviewApprovalMode = true
-		}
+		t.session.preferRussian = looksLikeRussian(last)
 	}
 	ensureChatSystemPrompt(t, chatCfg)
 

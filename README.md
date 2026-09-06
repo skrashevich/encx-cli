@@ -528,11 +528,18 @@ encli admin-delete-message -game-id 12345 1 <message-id>
 # Создать новую игру (title, start, finish обязательны; даты в RFC3339)
 encli admin-create-game title="Новая игра" start="2026-09-10T18:00:00+03:00" finish="2026-09-11T18:00:00+03:00"
 
-# Информация об игре (название, авторы, описание, дата финиша)
+# Информация об игре (название, авторы, описание, даты, модерация заявок)
 encli admin-game-info -game-id 12345
 
-# Обновить настройки игры (название, описание, приз)
+# Обновить настройки игры
+# Ключи: title, authors, description, prize, start, finish, request_last_date, moderated
+# Не указанные ключи сохраняют текущее значение
 encli admin-update-game -game-id 12345 title="Новое название" description="Описание"
+
+# Перенести старт и включить автоприём заявок (moderated=false)
+# Даты в RFC3339; старый движок понимает и DD.MM.YYYY HH:MM:SS
+# Старт нельзя изменить после начала игры
+encli admin-update-game -game-id 12345 start="2026-09-10T18:00:00+03:00" moderated=false
 
 # Полная очистка игры (обнуление)
 encli admin-wipe-game -game-id 67890
@@ -717,7 +724,7 @@ encli -game-id 12345 --llm "прочитай levels.md и создай уров�
 | `admin-delete-message` | Удаляет сообщение по ID |
 | `admin-create-game` | Создаёт новую игру (`key=value`: title, start, finish обязательны) |
 | `admin-game-info` | Показывает информацию об игре (название, авторы, описание, дата) |
-| `admin-update-game` | Обновляет настройки игры (название, описание, приз и др.) |
+| `admin-update-game` | Обновляет настройки игры (`key=value`: title, authors, description, prize, start, finish, request_last_date, moderated) |
 | `admin-deliver` | Помечает игру как состоявшуюся |
 | `admin-award-points` | Начисляет очки участникам |
 | `admin-end-ratings` | Завершает приём оценок |

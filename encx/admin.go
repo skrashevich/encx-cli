@@ -1004,6 +1004,9 @@ func (c *Client) legacyAdminGetGameInfo(ctx context.Context, gameId int) (*Admin
 	info.Title = inputs["GameTitle"]
 	info.Authors = inputs["GameAuthors"]
 	info.Prize = inputs["Prize"]
+	// A started game renders the start disabled, so parseEnabledInputs leaves
+	// StartDateTime empty and legacyAdminUpdateGameInfo omits it in turn.
+	info.StartDateTime = inputs["StartDateTime"]
 	info.FinishDateTime = inputs["FinishDateTime"]
 	info.RequestLastDate = inputs["RequestLastDate"]
 	info.MaxPlayers = inputs["MaxPlayers"]
@@ -1045,8 +1048,16 @@ func (c *Client) legacyAdminUpdateGameInfo(ctx context.Context, gameId int, info
 	form.Set("GameAuthors", info.Authors)
 	form.Set("Descr", info.Description)
 	form.Set("Prize", info.Prize)
-	form.Set("FinishDateTime", info.FinishDateTime)
-	form.Set("RequestLastDate", info.RequestLastDate)
+	// legacyDateTime leaves the form's own spelling alone and converts an
+	// RFC3339 value into it, so a caller may write either.
+	form.Set("FinishDateTime", legacyDateTime(info.FinishDateTime))
+	form.Set("RequestLastDate", legacyDateTime(info.RequestLastDate))
+	// The start travels only when the caller has one: the page keeps the current
+	// value for a field the post omits, while an empty StartDateTime — what a
+	// started game reads back — would be rejected as a missing date.
+	if start := legacyDateTime(info.StartDateTime); start != "" {
+		form.Set("StartDateTime", start)
+	}
 	form.Set("Tabs1_tabsContent_baseSettings_vp1", "Tabs1_tabsContent_baseSettings_vp1")
 
 	if info.IsModerated {

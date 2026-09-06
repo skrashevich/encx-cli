@@ -45,7 +45,7 @@ func TestGetToolsIncludesLocalAndWikipediaTools(t *testing.T) {
 	}
 	for _, name := range want {
 		found := false
-		for _, tool := range getTools(false) {
+		for _, tool := range getTools() {
 			if tool.Function.Name == name {
 				found = true
 				break

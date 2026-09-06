@@ -147,10 +147,13 @@ func formatToolCallForDisplay(session *llmSession, name, argsJSON string) string
 	case "admin_update_game":
 		// Show which fields are being updated
 		fields := []string{}
-		for _, f := range []string{"title", "description", "prize"} {
+		for _, f := range []string{"title", "description", "prize", "start", "finish", "request_last_date"} {
 			if v := getAnyString(args[f]); v != "" {
 				fields = append(fields, f)
 			}
+		}
+		if _, ok := moderatedArg(args["moderated"]); ok {
+			fields = append(fields, "moderated")
 		}
 		if len(fields) > 0 {
 			return format(rt("Updating: ", "Обновляю: ") + strings.Join(fields, ", "))
@@ -316,10 +319,19 @@ func formatToolApprovalDetails(session *llmSession, name, argsJSON string) []str
 			{"authors", "Authors", "Авторы"},
 			{"description", "Description", "Описание"},
 			{"prize", "Prize", "Приз"},
+			{"start", "Start date", "Дата старта"},
 			{"finish", "Finish date", "Дата финиша"},
+			{"request_last_date", "Requests until", "Приём заявок до"},
 		} {
 			if v := truncateDisplay(stripHTML(getAnyString(args[pair.key])), 100); v != "" {
 				add(pair.labelEn+": "+v, pair.labelRu+": "+v)
+			}
+		}
+		if moderated, ok := moderatedArg(args["moderated"]); ok {
+			if moderated {
+				add("Requests: need approval", "Заявки: требуют подтверждения")
+			} else {
+				add("Requests: accepted automatically", "Заявки: автоматический приём")
 			}
 		}
 	case "admin_not_deliver":

@@ -62,7 +62,6 @@ type llmToolCallFunction struct {
 
 type llmSession struct {
 	securityMode           AgentSecurityMode
-	reviewApprovalMode     bool
 	applyingApprovedFix    bool
 	preferRussian          bool
 	pendingFixes           []pendingAdminFix
@@ -99,7 +98,7 @@ func cmdLLM(ctx context.Context, cfg *config, client *encx.Client, prompt string
 	}
 
 	tools := getToolsForSession(session)
-	debugf("picoclaw mode initialized: base_url=%s model=%s review_mode=%v tools=%d prompt=%q", baseURL, model, session.reviewApprovalMode, len(tools), summarizeDebugText(prompt, 0))
+	debugf("picoclaw mode initialized: base_url=%s model=%s tools=%d prompt=%q", baseURL, model, len(tools), summarizeDebugText(prompt, 0))
 
 	loopIn := AgentRunInput{
 		Cfg:      cfg,

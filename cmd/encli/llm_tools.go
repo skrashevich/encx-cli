@@ -2,7 +2,7 @@ package main
 
 import "encoding/json"
 
-func getTools(reviewMode bool) []llmTool {
+func getTools() []llmTool {
 	tools := []llmTool{
 		{Type: "function", Function: llmFunction{
 			Name:        "login",
@@ -216,8 +216,8 @@ func getTools(reviewMode bool) []llmTool {
 		}},
 		{Type: "function", Function: llmFunction{
 			Name:        "admin_update_game",
-			Description: "Update game settings (title, description, authors, prize, finish date). Only specified fields are changed; others are preserved.",
-			Parameters:  json.RawMessage(`{"type":"object","properties":{"game_id":{"type":"integer","description":"Game ID"},"title":{"type":"string","description":"Game title"},"authors":{"type":"string","description":"Game authors"},"description":{"type":"string","description":"Game description (HTML)"},"prize":{"type":"string","description":"Prize value"},"finish":{"type":"string","description":"Finish datetime DD.MM.YYYY HH:MM:SS"}},"required":["game_id"]}`),
+			Description: "Update game settings (title, description, authors, prize, start/finish dates, request deadline, request moderation). Only specified fields are changed; others are preserved.",
+			Parameters:  json.RawMessage(`{"type":"object","properties":{"game_id":{"type":"integer","description":"Game ID"},"title":{"type":"string","description":"Game title"},"authors":{"type":"string","description":"Game authors"},"description":{"type":"string","description":"Game description (HTML)"},"prize":{"type":"string","description":"Prize value"},"start":{"type":"string","description":"Start datetime, RFC3339 (e.g. 2026-09-10T18:00:00+03:00). Cannot be changed once the game has started."},"finish":{"type":"string","description":"Finish datetime, RFC3339"},"request_last_date":{"type":"string","description":"Last date to request participation, RFC3339"},"moderated":{"type":"boolean","description":"Participation requests need the organizer's approval; false accepts them automatically"}},"required":["game_id"]}`),
 		}},
 		{Type: "function", Function: llmFunction{
 			Name:        "admin_not_deliver",
@@ -249,20 +249,11 @@ func getTools(reviewMode bool) []llmTool {
 			Description: "Fetch a Wikipedia article summary (plain-text intro extract) by title. Use to verify facts from a known article title.",
 			Parameters:  json.RawMessage(`{"type":"object","properties":{"title":{"type":"string","description":"Article title"},"lang":{"type":"string","description":"Wikipedia language code (default: ru)"}},"required":["title"]}`),
 		}},
-	}
-	if reviewMode {
-		tools = append(tools, llmTool{Type: "function", Function: llmFunction{
+		{Type: "function", Function: llmFunction{
 			Name:        "propose_admin_fix",
-			Description: "Queue exactly one proposed fix for user approval during review mode. Use this instead of direct admin mutation tools when you detect a concrete issue. Each proposal must be minimal and target one problem only.",
+			Description: "Queue exactly one proposed fix for user approval. Use this instead of direct admin mutation tools when the user asked to check/audit/review existing content rather than to change it. Each proposal must be minimal and target one problem only.",
 			Parameters:  json.RawMessage(`{"type":"object","properties":{"title":{"type":"string","description":"Short human-readable title for this fix"},"summary":{"type":"string","description":"Why this fix is needed and what is wrong right now"},"level_number":{"type":"integer","description":"Affected level number when applicable"},"steps":{"type":"array","description":"Concrete admin mutation calls to execute if the user approves this fix","items":{"type":"object","properties":{"tool":{"type":"string","enum":["admin_set_autopass","admin_set_block","admin_create_bonus","admin_delete_bonus","admin_create_sector","admin_delete_sector","admin_create_hint","admin_delete_hint","admin_create_task","admin_set_comment"]},"arguments":{"type":"object","description":"Arguments for that admin tool call"}},"required":["tool","arguments"]}}},"required":["title","summary","steps"]}`),
-		}})
-		filtered := make([]llmTool, 0, len(tools))
-		for _, tool := range tools {
-			if shouldExposeToolInReview(tool.Function.Name) {
-				filtered = append(filtered, tool)
-			}
-		}
-		return filtered
+		}},
 	}
 	return tools
 }

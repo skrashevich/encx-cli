@@ -434,7 +434,8 @@ func TestMockAdminGameInfoRoundTrip(t *testing.T) {
 
 	if err := c.AdminUpdateGameInfo(ctx, mockGameID, encx.AdminGameInfo{
 		Title: "Изменённая игра", Description: "Описание",
-		MaxPlayers: "42", MaxTeamPlayers: "7", AuthorComplexity: "3",
+		StartDateTime: "2026-09-10T15:00:00Z",
+		MaxPlayers:    "42", MaxTeamPlayers: "7", AuthorComplexity: "3",
 		IsModerated: true, ShowFinishPlace: true,
 	}); err != nil {
 		t.Fatalf("AdminUpdateGameInfo: %v", err)
@@ -447,6 +448,9 @@ func TestMockAdminGameInfoRoundTrip(t *testing.T) {
 		info.MaxPlayers != "42" || info.MaxTeamPlayers != "7" ||
 		!info.IsModerated || !info.ShowFinishPlace {
 		t.Errorf("info = %+v", info)
+	}
+	if info.StartDateTime != "2026-09-10T15:00:00Z" {
+		t.Errorf("StartDateTime = %q, want the start that was written", info.StartDateTime)
 	}
 	// The legacy dropdown is ten times the REST afc, and the engine stores afc
 	// to a tenth — so a whole number survives the trip.

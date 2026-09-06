@@ -3,6 +3,7 @@ package encx
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -59,6 +60,19 @@ func TestNewEngineLoginMapsFailuresToLegacyCodes(t *testing.T) {
 		{
 			name: "captcha required", status: http.StatusUnauthorized,
 			body:      `{"error":"captcha required","captcha_token":"tok-1","captcha_url":"https://api.en.cx/captcha/tok-1"}`,
+			wantError: 1,
+			wantURL:   func(r *LoginResponse) *string { return r.CaptchaUrl },
+		},
+		{
+			// The live api.en.cx shape after a few failed attempts: 401 with a
+			// prose error that never says "captcha", the signal carried by the
+			// captcha_required flag and image_url instead. This must map to 1
+			// (solve a captcha), not 2 (wrong login or password) — otherwise a
+			// correct password is reported as wrong.
+			name: "captcha wall, no captcha in the text", status: http.StatusUnauthorized,
+			body: `{"captcha_required":true,` +
+				`"error":"The sequence of random numbers you entered is not equal to displayed in the grid above.",` +
+				`"captcha_token":"7196feea","image_url":"/captcha/7196feea.gif"}`,
 			wantError: 1,
 			wantURL:   func(r *LoginResponse) *string { return r.CaptchaUrl },
 		},
@@ -174,6 +188,60 @@ func TestNewEngineLoginCompleteRejectsBadCredentials(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), LoginErrorText(2)) {
 		t.Errorf("error = %v, want it to mention %q", err, LoginErrorText(2))
+	}
+}
+
+// TestNewEngineLoginCompleteCaptchaIsNotBadCredentials pins the reported bug:
+// after a few failed attempts api.en.cx answers even a correct password with a
+// 401 captcha wall, and encx used to translate that to "wrong login or
+// password". It must say a captcha is required and carry its URL instead.
+func TestNewEngineLoginCompleteCaptchaIsNotBadCredentials(t *testing.T) {
+	c := newEngineClient(t, func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusUnauthorized)
+		_, _ = w.Write([]byte(`{"captcha_required":true,` +
+			`"error":"The sequence of random numbers you entered is not equal to displayed in the grid above.",` +
+			`"captcha_token":"tok-77","image_url":"/captcha/tok-77.gif"}`))
+	})
+
+	err := c.LoginComplete(context.Background(), "user", "pass")
+	if err == nil {
+		t.Fatal("LoginComplete accepted a captcha wall as success")
+	}
+	if strings.Contains(err.Error(), LoginErrorText(2)) {
+		t.Errorf("error = %v, must not claim wrong login or password", err)
+	}
+	if !strings.Contains(err.Error(), LoginErrorText(1)) {
+		t.Errorf("error = %v, want it to mention %q", err, LoginErrorText(1))
+	}
+	if !strings.Contains(err.Error(), "/captcha/tok-77.gif") {
+		t.Errorf("error = %v, want it to carry the captcha URL", err)
+	}
+}
+
+// TestNewEngineLoginCompleteReportsUnverifiedAdminSession pins that a sign-in
+// which succeeded but could not be confirmed for administration is reported via
+// the ErrAdminAccessUnverified sentinel, so cmdLogin can keep the player session
+// instead of signing in a second time.
+func TestNewEngineLoginCompleteReportsUnverifiedAdminSession(t *testing.T) {
+	c := newEngineClient(t, func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/login":
+			_, _ = w.Write([]byte(`{"token":"jwt"}`))
+		case "/auth/session":
+			w.WriteHeader(http.StatusUnauthorized)
+			_, _ = w.Write([]byte(`{"error":"unauthorized","code":401}`))
+		}
+	})
+
+	err := c.LoginComplete(context.Background(), "user", "pass")
+	if err == nil {
+		t.Fatal("LoginComplete did not report the unverified admin session")
+	}
+	if !errors.Is(err, ErrAdminAccessUnverified) {
+		t.Errorf("error = %v, want errors.Is(err, ErrAdminAccessUnverified)", err)
+	}
+	if c.APIToken() != "jwt" {
+		t.Errorf("APIToken = %q, want the session kept as jwt", c.APIToken())
 	}
 }
 

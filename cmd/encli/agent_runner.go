@@ -99,8 +99,7 @@ func emitAgent(cb AgentCallbacks, ev AgentEvent) {
 
 func newLLMSessionForPrompt(prompt string) *llmSession {
 	return &llmSession{
-		reviewApprovalMode: isReviewApprovalPrompt(prompt),
-		preferRussian:      looksLikeRussian(prompt),
+		preferRussian: looksLikeRussian(prompt),
 	}
 }
 
@@ -130,16 +129,8 @@ Rules:
 - SELF-VERIFICATION: After creating or modifying levels, verify your own work by calling admin_level_content for each affected level. Check that: (1) all sector codes/answers are present and correct, (2) timings (autopass, answer block) are set to non-zero values if the level is timed, (3) hints are present if needed and have correct text/delays, (4) task text matches the intended answers. If you discover errors, fix them immediately before reporting success.
 - LOCAL FILES: Use read_local_file, list_local_dir, and search_local_files to read scripts, notes, or scenario files on disk. Paths are relative to LLM_FILES_ROOT (defaults to the current working directory). You cannot read files outside that root.
 - WIKIPEDIA: Use wikipedia_search to find articles and wikipedia_article to read summaries when you need to verify facts, dates, places, or historical details for quest content.
-- Respond in the same language as the user's request.` + securityModeSystemPromptAddendum(session) + func() string {
-		if session == nil || !session.reviewApprovalMode {
-			return ""
-		}
-		return `
-- This request is in review/approval mode. You may inspect and analyze existing content, but you must NOT directly modify the game.
-- If you find an issue that should be fixed, call propose_admin_fix once per issue. One proposal = one user approval decision.
-- Each proposed fix must contain only the minimal admin mutation steps needed to resolve that one issue.
-- After proposing fixes, give a concise audit summary. Do not ask the user for confirmation in normal text; the CLI will handle approval interactively.`
-	}()
+- REVIEW/AUDIT REQUESTS: when the user asks to check, verify, audit, or review existing content WITHOUT explicitly asking for changes, do NOT call admin mutation tools directly. Call propose_admin_fix once per discovered issue (one proposal = one user approval decision), each with only the minimal admin mutation steps needed to resolve that one issue, then give a concise audit summary. Do not ask the user for confirmation in normal text; the interface handles approvals. When the user explicitly asks to create or modify content, use the admin mutation tools directly.
+- Respond in the same language as the user's request.` + securityModeSystemPromptAddendum(session)
 }
 
 func formatAgentExecutionReport(session *llmSession, model string, pricing *llmPricing,

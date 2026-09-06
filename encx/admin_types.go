@@ -116,13 +116,21 @@ type AdminCorrection struct {
 
 // AdminGameInfo holds the data from the game editor page (GameEditor.aspx).
 type AdminGameInfo struct {
-	Title           string `json:"title"`
-	Authors         string `json:"authors"`
-	Description     string `json:"description"`
-	Prize           string `json:"prize"`
+	Title       string `json:"title"`
+	Authors     string `json:"authors"`
+	Description string `json:"description"`
+	Prize       string `json:"prize"`
+	// StartDateTime is empty when the game has already begun: the editor
+	// disables the field then, and neither engine may move a start that has
+	// passed. Dates travel in the spelling their engine speaks — RFC3339 on the
+	// new one, "02.01.2006 15:04:05" on the legacy form, which also accepts
+	// RFC3339 and converts it.
+	StartDateTime   string `json:"start_datetime,omitempty"`
 	FinishDateTime  string `json:"finish_datetime,omitempty"`
 	RequestLastDate string `json:"request_last_date,omitempty"`
-	IsModerated     bool   `json:"is_moderated"`
+	// IsModerated makes participation requests wait for the organiser's
+	// approval; false is the automatic acceptance the editor offers instead.
+	IsModerated bool `json:"is_moderated"`
 
 	// Visibility settings
 	GameStatAvailability     string `json:"game_stat_availability,omitempty"`

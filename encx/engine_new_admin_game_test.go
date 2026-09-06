@@ -12,7 +12,9 @@ import (
 const gameEditorFixture = `{
   "game": {
     "id": 82448, "game_num": 12, "title": "Игра", "descr": "Описание",
-    "prize": 5000, "finish_date_time": "2026-09-01T21:00:00Z",
+    "prize": 5000, "started": false,
+    "start_date_time": "2026-09-01T15:00:00Z",
+    "finish_date_time": "2026-09-01T21:00:00Z",
     "request_last_date": "2026-09-01T18:00:00Z",
     "accept_rate_from_date_time": "2026-09-01T21:00:00Z",
     "is_moderated": true, "show_finish_place": true,
@@ -138,6 +140,83 @@ func TestNewEngineAdminGameInfoRoundTrip(t *testing.T) {
 	}
 	if body["max_players"] != float64(40) || body["max_team_members"] != float64(6) {
 		t.Errorf("limits = %v/%v", body["max_players"], body["max_team_members"])
+	}
+	if body["start_date_time"] != "2026-09-01T15:00:00Z" {
+		t.Errorf("start_date_time = %v, want the start that was read back", body["start_date_time"])
+	}
+}
+
+// The start is editable on both engines, so it has to reach the route rather
+// than be dropped on the way — the gap that left it settable only in the web
+// admin panel.
+func TestNewEngineAdminUpdateGameInfoWritesStart(t *testing.T) {
+	var calls []adminCall
+	c := newGameAdminClient(t, &calls)
+
+	err := c.AdminUpdateGameInfo(context.Background(), 82448, AdminGameInfo{
+		StartDateTime: "2026-09-10T18:00:00+03:00",
+	})
+	if err != nil {
+		t.Fatalf("AdminUpdateGameInfo: %v", err)
+	}
+	var body map[string]any
+	if err := json.Unmarshal([]byte(lastCall(t, calls).body), &body); err != nil {
+		t.Fatalf("body is not JSON: %q", lastCall(t, calls).body)
+	}
+	if body["start_date_time"] != "2026-09-10T18:00:00+03:00" {
+		t.Errorf("start_date_time = %v", body["start_date_time"])
+	}
+}
+
+// A game that has begun reads back without a start: neither engine may move it,
+// and the legacy editor disables the field, so a read-modify-write must not try.
+func TestNewEngineAdminGetGameInfoHidesStartOfStartedGame(t *testing.T) {
+	var calls []adminCall
+	c := newEngineClient(t, func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		calls = append(calls, adminCall{method: r.Method, path: r.URL.Path, body: string(body)})
+		_, _ = w.Write([]byte(strings.Replace(gameEditorFixture,
+			`"started": false`, `"started": true`, 1)))
+	})
+	ctx := context.Background()
+
+	info, err := c.AdminGetGameInfo(ctx, 82448)
+	if err != nil {
+		t.Fatalf("AdminGetGameInfo: %v", err)
+	}
+	if info.StartDateTime != "" {
+		t.Errorf("StartDateTime = %q, want it withheld for a started game", info.StartDateTime)
+	}
+	if err := c.AdminUpdateGameInfo(ctx, 82448, *info); err != nil {
+		t.Fatalf("AdminUpdateGameInfo: %v", err)
+	}
+	var body map[string]any
+	if err := json.Unmarshal([]byte(lastCall(t, calls).body), &body); err != nil {
+		t.Fatalf("body is not JSON: %q", lastCall(t, calls).body)
+	}
+	if _, ok := body["start_date_time"]; ok {
+		t.Errorf("start_date_time = %v was sent for a started game", body["start_date_time"])
+	}
+}
+
+// The legacy editor's date spelling carries no zone while this route stores an
+// instant, so it is refused with an explanation instead of being sent as a time
+// that is off by the domain's offset.
+func TestNewEngineAdminUpdateGameInfoRefusesLegacyDateSpelling(t *testing.T) {
+	var calls []adminCall
+	c := newGameAdminClient(t, &calls)
+
+	err := c.AdminUpdateGameInfo(context.Background(), 82448, AdminGameInfo{
+		StartDateTime: "10.09.2026 18:00:00",
+	})
+	if err == nil {
+		t.Fatal("AdminUpdateGameInfo accepted a legacy-spelled date")
+	}
+	if !strings.Contains(err.Error(), "RFC3339") {
+		t.Errorf("error = %v, want it to name the format the route takes", err)
+	}
+	if len(calls) != 0 {
+		t.Errorf("the request was sent anyway: %v", adminCallPaths(calls))
 	}
 }
 

@@ -46,6 +46,19 @@ func getAnyString(v any) string {
 	return decodeBareUnicodeEscapes(s)
 }
 
+// moderatedArg reads a flag a model may have written as a JSON boolean or as
+// its spelling in a string. It reports whether the value was one at all, so an
+// absent or unreadable flag is left to the game's current setting.
+func moderatedArg(v any) (value, ok bool) {
+	switch val := v.(type) {
+	case bool:
+		return val, true
+	case string:
+		return parseBoolArg(val)
+	}
+	return false, false
+}
+
 func getAnyInt(v any) int {
 	switch val := v.(type) {
 	case float64:
@@ -58,30 +71,6 @@ func getAnyInt(v any) int {
 	default:
 		return 0
 	}
-}
-
-func isReviewApprovalPrompt(prompt string) bool {
-	prompt = strings.ToLower(prompt)
-	// Verb forms only: the noun "проверка/проверки" shows up in purpose clauses
-	// of creation requests ("игра для проверки ботов") and must not flip the
-	// session into review mode, which hides all admin mutation tools.
-	markers := []string{
-		"проверь",   // also matches "проверьте", "перепроверь(те)"
-		"проверить", // "нужно проверить"
-		"убедись",
-		"пройдись",
-		"review",
-		"audit",
-		"verify",
-		"check",
-		"ensure",
-	}
-	for _, marker := range markers {
-		if strings.Contains(prompt, marker) {
-			return true
-		}
-	}
-	return false
 }
 
 func looksLikeRussian(s string) bool {

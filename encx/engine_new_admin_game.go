@@ -6,6 +6,7 @@ import (
 	"net/url"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/skrashevich/encx-cli/encx/enapi"
 )
@@ -88,6 +89,7 @@ func (e *newEngine) AdminGetGameInfo(ctx context.Context, gameId int) (*AdminGam
 		Authors:                  strings.Join(logins, ","),
 		Description:              game.Descr,
 		Prize:                    itoaOrEmpty(game.Prize),
+		StartDateTime:            startDateTimeOrEmpty(game),
 		FinishDateTime:           game.FinishDateTime,
 		RequestLastDate:          game.RequestLastDate,
 		IsModerated:              game.IsModerated,
@@ -102,6 +104,17 @@ func (e *newEngine) AdminGetGameInfo(ctx context.Context, gameId int) (*AdminGam
 		AcceptRateFrom:           game.AcceptRateFromDateTime,
 		AuthorComplexity:         formatFloatOrEmpty(game.AFC * afcToLegacyScale),
 	}, nil
+}
+
+// startDateTimeOrEmpty hides the start of a game that has already begun, the
+// way the legacy editor disables the field there. Both engines refuse to move a
+// start that has passed, so handing it back would only make a read-modify-write
+// fail on a value the caller never touched.
+func startDateTimeOrEmpty(game *enapi.Game) string {
+	if game.Started {
+		return ""
+	}
+	return game.StartDateTime
 }
 
 // afcToLegacyScale converts between the two spellings of the author complexity.
@@ -136,12 +149,33 @@ func (e *newEngine) AdminUpdateGameInfo(ctx context.Context, gameId int, info Ad
 			update[key] = parsed
 		}
 	}
+	// A date in the legacy editor's spelling is a wall-clock time with no zone,
+	// while this route stores an instant: converting one into the other here
+	// would move the game by the domain's offset. The caller is told what to
+	// write instead of reading the route's bare "Validation failed".
+	var dateErr error
+	setDateTime := func(key, value string) {
+		value = strings.TrimSpace(value)
+		if value == "" {
+			return
+		}
+		if _, err := time.Parse(legacyCreateDateLayout, value); err == nil {
+			if dateErr == nil {
+				dateErr = fmt.Errorf(
+					"encx: дата %q записана в формате старой админки; новый движок "+
+						"принимает RFC3339, например 2026-09-10T18:00:00+03:00", value)
+			}
+			return
+		}
+		update[key] = value
+	}
 
 	setString("title", info.Title)
 	setString("descr", info.Description)
-	setString("finish_date_time", info.FinishDateTime)
-	setString("request_last_date", info.RequestLastDate)
-	setString("accept_rate_from_date_time", info.AcceptRateFrom)
+	setDateTime("start_date_time", info.StartDateTime)
+	setDateTime("finish_date_time", info.FinishDateTime)
+	setDateTime("request_last_date", info.RequestLastDate)
+	setDateTime("accept_rate_from_date_time", info.AcceptRateFrom)
 	// prize_cents is named for the column it feeds, not for a different unit:
 	// writing prize_cents=1234 makes models.Game.prize read back as 1234. The
 	// value therefore travels exactly as AdminGetGameInfo handed it over, the way
@@ -171,6 +205,9 @@ func (e *newEngine) AdminUpdateGameInfo(ctx context.Context, gameId int, info Ad
 	update["is_moderated"] = info.IsModerated
 	update["show_finish_place"] = info.ShowFinishPlace
 
+	if dateErr != nil {
+		return dateErr
+	}
 	return e.c.api().PatchJSON(ctx, fmt.Sprintf("/admin/games/%d", gameId), update, nil)
 }
 

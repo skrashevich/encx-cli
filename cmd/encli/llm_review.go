@@ -31,13 +31,6 @@ type proposalOutcome struct {
 	StepRuns int
 }
 
-func shouldExposeToolInReview(name string) bool {
-	if name == "propose_admin_fix" {
-		return true
-	}
-	return !isAdminMutationTool(name)
-}
-
 func isAdminMutationTool(name string) bool {
 	switch name {
 	case "admin_create_levels",

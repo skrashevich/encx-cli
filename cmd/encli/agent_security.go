@@ -38,10 +38,7 @@ func isMutationTool(name string) bool {
 	}
 }
 
-func shouldExposeTool(name string, mode AgentSecurityMode, reviewMode bool) bool {
-	if reviewMode {
-		return shouldExposeToolInReview(name)
-	}
+func shouldExposeTool(name string, mode AgentSecurityMode) bool {
 	if mode == SecurityModeReadonly && isMutationTool(name) {
 		return false
 	}
@@ -49,18 +46,17 @@ func shouldExposeTool(name string, mode AgentSecurityMode, reviewMode bool) bool
 }
 
 func getToolsForSession(session *llmSession) []llmTool {
-	review := session != nil && session.reviewApprovalMode
 	mode := SecurityModeFull
 	if session != nil {
 		mode = session.securityMode.effective()
 	}
-	all := getTools(review)
-	if mode == SecurityModeFull && !review {
+	all := getTools()
+	if mode != SecurityModeReadonly {
 		return all
 	}
 	filtered := make([]llmTool, 0, len(all))
 	for _, tool := range all {
-		if shouldExposeTool(tool.Function.Name, mode, review) {
+		if shouldExposeTool(tool.Function.Name, mode) {
 			filtered = append(filtered, tool)
 		}
 	}

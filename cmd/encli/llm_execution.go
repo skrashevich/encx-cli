@@ -118,14 +118,10 @@ func executeLLMToolCall(ctx context.Context, cfg *config, client *encx.Client, s
 	if securityBlocksMutation(session, name) {
 		fatal("Tool %q is blocked in read-only mode", name)
 	}
-	if session != nil && session.reviewApprovalMode && !session.applyingApprovedFix && isAdminMutationTool(name) {
-		fatal("Direct admin mutations are disabled during review. Use propose_admin_fix instead.")
-	}
-
 	switch name {
 	case "propose_admin_fix":
-		if session == nil || !session.reviewApprovalMode {
-			fatal("propose_admin_fix is only available in review mode")
+		if session == nil {
+			fatal("propose_admin_fix requires an active agent session")
 		}
 		proposal, err := parsePendingAdminFix(args, cfg.gameId)
 		if err != nil {
@@ -427,8 +423,19 @@ func executeLLMToolCall(ctx context.Context, cfg *config, client *encx.Client, s
 		if p := getString("prize"); p != "" {
 			positional = append(positional, "prize="+p)
 		}
+		if s := getString("start"); s != "" {
+			positional = append(positional, "start="+s)
+		}
 		if f := getString("finish"); f != "" {
 			positional = append(positional, "finish="+f)
+		}
+		if r := getString("request_last_date"); r != "" {
+			positional = append(positional, "request_last_date="+r)
+		}
+		// An absent moderated flag leaves the game's current setting alone;
+		// cmdAdminUpdateGame reads the game before writing it back.
+		if moderated, ok := moderatedArg(args["moderated"]); ok {
+			positional = append(positional, "moderated="+strconv.FormatBool(moderated))
 		}
 		cmdAdminUpdateGame(ctx, cfg, client, positional)
 

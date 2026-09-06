@@ -280,6 +280,7 @@ func (s *server) handleAdminGamePatch(w http.ResponseWriter, r *http.Request) {
 	}
 	setString("title", &st.title)
 	setString("descr", &st.descr)
+	setString("start_date_time", &st.startDateTime)
 	setString("finish_date_time", &st.finishDateTime)
 	setString("request_last_date", &st.requestLastDate)
 	setString("accept_rate_from_date_time", &st.acceptRateFrom)

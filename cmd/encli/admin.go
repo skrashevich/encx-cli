@@ -574,6 +574,20 @@ func cmdAdminDeleteCorrection(ctx context.Context, cfg *config, client *encx.Cli
 	fmt.Printf("Correction %s deleted\n", args[0])
 }
 
+// parseBoolArg reads the flag spellings the key=value arguments accept. It
+// reports whether the value was one of them, so a typo is refused instead of
+// quietly meaning false — which, in a read-modify-write update, would flip a
+// setting the caller meant to turn on.
+func parseBoolArg(val string) (value, ok bool) {
+	switch strings.ToLower(strings.TrimSpace(val)) {
+	case "true", "1", "yes", "on":
+		return true, true
+	case "false", "0", "no", "off":
+		return false, true
+	}
+	return false, false
+}
+
 func cmdAdminCreateGame(ctx context.Context, cfg *config, client *encx.Client, args []string) {
 	if len(args) == 0 {
 		fatal("Usage: encli admin-create-game <key=value ...> (title, start, finish required)")
@@ -611,7 +625,11 @@ func cmdAdminCreateGame(ctx context.Context, cfg *config, client *encx.Client, a
 		case "authors":
 			params.Authors = val
 		case "moderated":
-			params.IsModerated = val == "true" || val == "1"
+			b, ok := parseBoolArg(val)
+			if !ok {
+				fatal("Invalid moderated: %s (use true/false)", val)
+			}
+			params.IsModerated = b
 		default:
 			fatal("Unknown field: %s (supported: title, description, start, finish, request_last_date, game_type, zone_id, authors, moderated)", key)
 		}
@@ -684,8 +702,14 @@ func cmdAdminGameInfo(ctx context.Context, cfg *config, client *encx.Client) {
 	fmt.Printf("Title:       %s\n", info.Title)
 	fmt.Printf("Authors:     %s\n", info.Authors)
 	fmt.Printf("Prize:       %s\n", info.Prize)
+	if info.StartDateTime != "" {
+		fmt.Printf("Start:       %s\n", info.StartDateTime)
+	} else {
+		fmt.Printf("Start:       (game already started, not editable)\n")
+	}
 	fmt.Printf("Finish:      %s\n", info.FinishDateTime)
-	fmt.Printf("Moderated:   %v\n", info.IsModerated)
+	fmt.Printf("Requests to: %s\n", info.RequestLastDate)
+	fmt.Printf("Moderated:   %v (false = requests are accepted automatically)\n", info.IsModerated)
 	fmt.Printf("Description: %s\n", stripHTML(info.Description))
 }
 
@@ -713,10 +737,20 @@ func cmdAdminUpdateGame(ctx context.Context, cfg *config, client *encx.Client, a
 			info.Description = val
 		case "prize":
 			info.Prize = val
+		case "start":
+			info.StartDateTime = val
 		case "finish":
 			info.FinishDateTime = val
+		case "request_last_date":
+			info.RequestLastDate = val
+		case "moderated":
+			b, ok := parseBoolArg(val)
+			if !ok {
+				fatal("Invalid moderated: %s (use true/false)", val)
+			}
+			info.IsModerated = b
 		default:
-			fatal("Unknown field: %s (supported: title, authors, description, prize, finish)", key)
+			fatal("Unknown field: %s (supported: title, authors, description, prize, start, finish, request_last_date, moderated)", key)
 		}
 	}
 

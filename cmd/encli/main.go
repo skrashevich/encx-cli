@@ -6,6 +6,7 @@ import (
 	"cmp"
 	"context"
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
 	"os"
@@ -521,6 +522,8 @@ Admin commands (require game editor rights):
   admin-wipe-game          Completely reset a game (delete all content)
   admin-copy-game          Copy entire game to another game
   admin-create-game        Create a new game
+  admin-game-info          Show game settings
+  admin-update-game        Update game settings (key=value)
 
 LLM mode:
   --llm <prompt>  Natural language command (uses OpenRouter API)
@@ -749,6 +752,15 @@ func printCommandHelp(cmd string) {
 		fmt.Fprintln(os.Stderr, "Usage: encli admin-create-game <key=value ...>")
 		fmt.Fprintln(os.Stderr, "  Create a new game. Required: title, start, finish (RFC3339, e.g. 2026-09-10T18:00:00+03:00).")
 		fmt.Fprintln(os.Stderr, "  Optional: description, game_type (0 single/1 team/2 personal), zone_id, authors (comma-separated logins), request_last_date, moderated.")
+	case "admin-game-info":
+		fmt.Fprintln(os.Stderr, "Usage: encli admin-game-info -game-id <id>")
+		fmt.Fprintln(os.Stderr, "  Show game settings: title, authors, prize, dates, request moderation.")
+	case "admin-update-game":
+		fmt.Fprintln(os.Stderr, "Usage: encli admin-update-game -game-id <id> <key=value ...>")
+		fmt.Fprintln(os.Stderr, "  Supported keys: title, authors, description, prize, start, finish, request_last_date, moderated.")
+		fmt.Fprintln(os.Stderr, "  Dates are RFC3339 (2026-09-10T18:00:00+03:00); the legacy engine also takes DD.MM.YYYY HH:MM:SS.")
+		fmt.Fprintln(os.Stderr, "  start cannot be changed once the game has started; moderated=false accepts requests automatically.")
+		fmt.Fprintln(os.Stderr, "  Keys left out keep their current value.")
 	case "admin-not-deliver":
 		fmt.Fprintln(os.Stderr, "Usage: encli admin-not-deliver -game-id <id>")
 		fmt.Fprintln(os.Stderr, "  Mark game as not delivered (несостоявшаяся).")
@@ -960,14 +972,19 @@ func cmdLogin(ctx context.Context, cfg *config, client *encx.Client) {
 		cfg.password = promptPassword("Password: ")
 	}
 	debugf("cmd login: attempting login for %s", cfg.login)
+	// LoginComplete already establishes the session and, on the legacy engine,
+	// falls back to the JSON sign-in internally. A second client.Login() here
+	// only burned another attempt against the brute-force / captcha limit and,
+	// on the new engine, evicted the session it had just obtained. So call it
+	// once: keep a session that merely could not be verified for administration,
+	// and treat anything else as a real sign-in failure.
 	if err := client.LoginComplete(ctx, cfg.login, cfg.password); err != nil {
-		debugf("cmd login: complete/admin login failed, falling back to JSON login: %v", err)
-		resp, jsonErr := client.Login(ctx, cfg.login, cfg.password)
-		if jsonErr != nil {
-			fatalEncx("Login failed", jsonErr)
+		if !errors.Is(err, encx.ErrAdminAccessUnverified) {
+			fatalEncx("Login failed", err)
 		}
-		if resp.Error != 0 {
-			fatal("Login error %d: %s", resp.Error, encx.LoginErrorText(resp.Error))
+		debugf("cmd login: %v", err)
+		if !cfg.jsonOutput {
+			fmt.Fprintf(os.Stderr, "Warning: signed in without administration access: %v\n", err)
 		}
 	}
 	debugf("cmd login: login successful for %s", cfg.login)

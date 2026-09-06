@@ -25,18 +25,27 @@ type loginRequest struct {
 // failure bodies, which the API documents only by prose. Reading them through
 // one permissive struct keeps a new error field from breaking the decode.
 type loginPayload struct {
-	Token               string          `json:"token"`
-	Message             string          `json:"message"`
-	SessionClass        string          `json:"session_class"`
-	User                json.RawMessage `json:"user"`
-	Error               string          `json:"error"`
-	Code                int             `json:"code"`
-	CaptchaToken        string          `json:"captcha_token"`
-	CaptchaURL          string          `json:"captcha_url"`
-	IPUnblockURL        string          `json:"ip_unblock_url"`
-	BruteForceURL       string          `json:"brute_force_unblock_url"`
-	ConfirmEmailURL     string          `json:"confirm_email_url"`
-	AdminWhoCanActivate []string        `json:"admin_who_can_activate"`
+	Token        string          `json:"token"`
+	Message      string          `json:"message"`
+	SessionClass string          `json:"session_class"`
+	User         json.RawMessage `json:"user"`
+	Error        string          `json:"error"`
+	Code         int             `json:"code"`
+	// CaptchaRequired is the structured "solve a captcha to continue" signal.
+	// The message text alone is not enough: after a few failed attempts this
+	// backend answers even a correct password with 401 and a prose error
+	// ("The sequence of random numbers you entered is not equal to displayed
+	// in the grid above.") that never contains the word "captcha".
+	CaptchaRequired bool   `json:"captcha_required"`
+	CaptchaToken    string `json:"captcha_token"`
+	CaptchaURL      string `json:"captcha_url"`
+	// ImageURL is where this backend puts the captcha image; captcha_url is the
+	// documented name but the live API sends image_url.
+	ImageURL            string   `json:"image_url"`
+	IPUnblockURL        string   `json:"ip_unblock_url"`
+	BruteForceURL       string   `json:"brute_force_unblock_url"`
+	ConfirmEmailURL     string   `json:"confirm_email_url"`
+	AdminWhoCanActivate []string `json:"admin_who_can_activate"`
 }
 
 // clientClassHeader tells the backend which session class the caller belongs to.
@@ -95,6 +104,12 @@ func (e *newEngine) Login(ctx context.Context, login, password string, opts ...L
 	// result into the legacy LoginResponse contract callers already handle.
 	_ = json.Unmarshal([]byte(apiErr.Body), &payload)
 	resp := loginResponseFromAPIError(apiErr, payload)
+	// The captcha image path comes back relative ("/captcha/<token>.gif");
+	// callers show it to the user, so make it reachable.
+	if resp.CaptchaUrl != nil && strings.HasPrefix(*resp.CaptchaUrl, "/") {
+		abs := strings.TrimRight(e.c.APIBaseURL(), "/") + *resp.CaptchaUrl
+		resp.CaptchaUrl = &abs
+	}
 	e.c.setCaptchaToken(payload.CaptchaToken)
 	return resp, nil
 }
@@ -106,8 +121,8 @@ func loginResponseFromAPIError(apiErr *enapi.APIError, payload loginPayload) *Lo
 	if resp.Message == "" {
 		resp.Message = firstNonEmpty(payload.Error, apiErr.Message, apiErr.Err, apiErr.Body)
 	}
-	if payload.CaptchaURL != "" {
-		resp.CaptchaUrl = &payload.CaptchaURL
+	if u := firstNonEmpty(payload.CaptchaURL, payload.ImageURL); u != "" {
+		resp.CaptchaUrl = &u
 	}
 	if payload.IPUnblockURL != "" {
 		resp.IpUnblockUrl = &payload.IPUnblockURL
@@ -125,7 +140,10 @@ func loginResponseFromAPIError(apiErr *enapi.APIError, payload loginPayload) *Lo
 	// contains "ip" — turn wrong credentials into an IP block.
 	marker := strings.ToLower(firstNonEmpty(payload.Error, apiErr.Err, apiErr.SentenceKey))
 	switch {
-	case strings.Contains(marker, "captcha"):
+	case payload.CaptchaRequired || payload.CaptchaToken != "" || strings.Contains(marker, "captcha"):
+		// A captcha challenge, not bad credentials: the caller must solve it
+		// (LoginOptions.MagicNumbers) and retry, so this must not fall through
+		// to the 401 -> "wrong login or password" case below.
 		resp.Error = 1
 	case strings.Contains(marker, "brute"):
 		resp.Error = 9
@@ -162,10 +180,17 @@ func (e *newEngine) LoginComplete(ctx context.Context, login, password string, o
 		return err
 	}
 	if resp.Error != 0 {
-		return fmt.Errorf("encx: login error %d: %s", resp.Error, LoginErrorText(resp.Error))
+		detail := LoginErrorText(resp.Error)
+		if resp.Message != "" && resp.Message != detail {
+			detail = fmt.Sprintf("%s (%s)", detail, resp.Message)
+		}
+		if resp.CaptchaUrl != nil && *resp.CaptchaUrl != "" {
+			detail = fmt.Sprintf("%s [captcha: %s]", detail, *resp.CaptchaUrl)
+		}
+		return fmt.Errorf("encx: login error %d: %s", resp.Error, detail)
 	}
 	if err := e.VerifyAdminSession(ctx); err != nil {
-		return fmt.Errorf("encx: signed in but the session is not accepted: %w", err)
+		return fmt.Errorf("%w: %v", ErrAdminAccessUnverified, err)
 	}
 	return nil
 }

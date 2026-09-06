@@ -2,12 +2,24 @@ package encx
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/url"
 	"strconv"
 	"strings"
 )
+
+// ErrAdminAccessUnverified reports that the sign-in itself succeeded and a
+// session is now active, but it could not be confirmed for game administration
+// (the admin check was rejected, or a concurrent sign-in of the same class
+// evicted the fresh session before it could be checked).
+//
+// Callers that only need a player session may treat a LoginComplete error that
+// matches this via errors.Is as success and keep the session; callers that need
+// administration must not. Either way it means "do not sign in again": the
+// credentials were accepted.
+var ErrAdminAccessUnverified = errors.New("encx: signed in, but administration access could not be verified")
 
 // legacyLogin authenticates the user against the ASP.NET engine.
 // On success (Error == 0), session cookies are stored in the client's cookie jar

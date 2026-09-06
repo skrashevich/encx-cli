@@ -10,7 +10,7 @@ import (
 func TestGetToolsIncludesAdminLevelContent(t *testing.T) {
 	t.Parallel()
 
-	for _, tool := range getTools(false) {
+	for _, tool := range getTools() {
 		if tool.Function.Name == "admin_level_content" {
 			return
 		}
@@ -42,40 +42,58 @@ func TestPrintCommandHelpIncludesAdminLevelContent(t *testing.T) {
 	}
 }
 
-func TestGetToolsReviewModeAddsProposalAndBlocksMutations(t *testing.T) {
+// The start and the request settings are editable through the CLI on both
+// engines, so the agent has to be able to reach them too.
+func TestAdminUpdateGameToolOffersStartAndRequestSettings(t *testing.T) {
 	t.Parallel()
 
-	var hasProposal bool
-	for _, tool := range getTools(true) {
-		switch tool.Function.Name {
-		case "propose_admin_fix":
-			hasProposal = true
-		case "admin_create_sector", "admin_delete_sector", "admin_set_comment":
-			t.Fatalf("review mode should not expose mutation tool %q", tool.Function.Name)
+	for _, tool := range getTools() {
+		if tool.Function.Name != "admin_update_game" {
+			continue
 		}
+		params := string(tool.Function.Parameters)
+		for _, key := range []string{"start", "request_last_date", "moderated"} {
+			if !strings.Contains(params, `"`+key+`"`) {
+				t.Errorf("admin_update_game does not take %q: %s", key, params)
+			}
+		}
+		return
 	}
-	if !hasProposal {
-		t.Fatal("review mode does not expose propose_admin_fix")
+	t.Fatal("admin_update_game tool is not registered")
+}
+
+func TestModeratedArgReadsBothSpellings(t *testing.T) {
+	t.Parallel()
+
+	for _, tc := range []struct {
+		raw         any
+		want, wasOk bool
+	}{
+		{true, true, true},
+		{false, false, true},
+		{"true", true, true},
+		{"0", false, true},
+		{"maybe", false, false},
+		{nil, false, false},
+	} {
+		got, ok := moderatedArg(tc.raw)
+		if got != tc.want || ok != tc.wasOk {
+			t.Errorf("moderatedArg(%#v) = %v, %v; want %v, %v", tc.raw, got, ok, tc.want, tc.wasOk)
+		}
 	}
 }
 
-func TestIsReviewApprovalPrompt(t *testing.T) {
+func TestGetToolsExposesProposalAlongsideMutations(t *testing.T) {
 	t.Parallel()
 
-	if !isReviewApprovalPrompt("пройдись по уровням ещё раз, убедись что ответы залиты правильно") {
-		t.Fatal("expected Russian review prompt to enable approval mode")
+	found := map[string]bool{}
+	for _, tool := range getTools() {
+		found[tool.Function.Name] = true
 	}
-	if isReviewApprovalPrompt("создай 3 новых уровня с бонусами") {
-		t.Fatal("create prompt should not enable review approval mode")
-	}
-	if isReviewApprovalPrompt("создай тестовую игру из 10 уровней. она будет использоваться для проверки функционирования ботов и приложений через api") {
-		t.Fatal("create prompt with noun 'проверки' in purpose clause should not enable review approval mode")
-	}
-	if !isReviewApprovalPrompt("перепроверь уровни и предложи исправления") {
-		t.Fatal("expected 'перепроверь' to enable approval mode")
-	}
-	if !isReviewApprovalPrompt("нужно проверить ответы во всех секторах") {
-		t.Fatal("expected 'проверить' to enable approval mode")
+	for _, name := range []string{"propose_admin_fix", "admin_create_game", "admin_create_sector", "admin_set_comment"} {
+		if !found[name] {
+			t.Fatalf("tool %q is not exposed", name)
+		}
 	}
 }
 

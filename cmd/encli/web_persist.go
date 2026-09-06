@@ -26,7 +26,6 @@ type persistedChat struct {
 
 type persistedSess struct {
 	SecurityMode       AgentSecurityMode `json:"security_mode,omitempty"`
-	ReviewApprovalMode bool              `json:"review_approval_mode"`
 	PreferRussian      bool              `json:"prefer_russian"`
 	PendingFixes       []pendingAdminFix `json:"pending_fixes,omitempty"`
 	LoadedLevelContent []int             `json:"loaded_level_content,omitempty"`
@@ -66,10 +65,9 @@ func (s *ChatStore) LoadFromDisk() error {
 			messages:   pc.Messages,
 			uiMessages: pc.UIMessages,
 			session: &llmSession{
-				securityMode:       pc.Session.SecurityMode.effective(),
-				reviewApprovalMode: pc.Session.ReviewApprovalMode,
-				preferRussian:      pc.Session.PreferRussian,
-				pendingFixes:       pc.Session.PendingFixes,
+				securityMode:  pc.Session.SecurityMode.effective(),
+				preferRussian: pc.Session.PreferRussian,
+				pendingFixes:  pc.Session.PendingFixes,
 			},
 		}
 		if t.session == nil {
@@ -105,7 +103,6 @@ func (s *ChatStore) Persist(id string) {
 	if t.session != nil {
 		pc.Session = persistedSess{
 			SecurityMode:       t.session.securityMode.effective(),
-			ReviewApprovalMode: t.session.reviewApprovalMode,
 			PreferRussian:      t.session.preferRussian,
 			PendingFixes:       append([]pendingAdminFix(nil), t.session.pendingFixes...),
 			LoadedLevelContent: loadedLevelsSlice(t.session.loadedLevelContent),
