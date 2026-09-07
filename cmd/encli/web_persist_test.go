@@ -54,7 +54,7 @@ func TestAutoTitleFromMessage(t *testing.T) {
 
 func TestChatMatchesQuery(t *testing.T) {
 	s := ChatSnapshot{
-		Title: "mars quest",
+		Title:    "mars quest",
 		Messages: []UIMessage{{Content: "orbit"}},
 	}
 	if !chatMatchesQuery(s, "orbit") {

@@ -97,6 +97,39 @@ func main() {
 		}
 	}
 
+	// TUI chat mode: encli [flags] -chat
+	for i := 1; i < len(os.Args); i++ {
+		if os.Args[i] == "-chat" || os.Args[i] == "--chat" {
+			flagArgs := append([]string(nil), os.Args[1:i]...)
+			flagArgs = append(flagArgs, os.Args[i+1:]...)
+			fs := flag.NewFlagSet("encli", flag.ExitOnError)
+			cfg := &config{}
+			fs.StringVar(&cfg.domain, "domain", cmp.Or(os.Getenv("ENCX_DOMAIN"), "tech.en.cx"), "Default Encounter domain for new chats")
+			fs.StringVar(&cfg.login, "login", os.Getenv("ENCX_LOGIN"), "Login username")
+			fs.StringVar(&cfg.password, "password", os.Getenv("ENCX_PASSWORD"), "Login password")
+			fs.IntVar(&cfg.gameId, "game-id", envInt("ENCX_GAME_ID", 0), "Default game ID for new chats")
+			fs.BoolVar(&cfg.insecure, "insecure", envBool("ENCX_INSECURE"), "Skip TLS verification")
+			fs.BoolVar(&cfg.useHTTP, "http", false, "Use plain HTTP")
+			fs.BoolVar(&cfg.debug, "debug", envBool("ENCX_DEBUG"), "Enable debug logging")
+			registerHARFlags(fs, cfg)
+			registerEngineFlag(fs, cfg)
+			fs.BoolVar(&cfg.agentReadonly, "readonly", false, "Agent: block tools that modify or delete data")
+			fs.Parse(flagArgs)
+			if cfg.agentReadonly {
+				cfg.agentSecurity = SecurityModeReadonly
+			} else {
+				cfg.agentSecurity = SecurityModeApprove
+			}
+			debugMode = cfg.debug
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			if err := cmdChat(ctx, cfg); err != nil && err != context.Canceled {
+				fatal("%v", err)
+			}
+			return
+		}
+	}
+
 	// Check for --llm mode: encli [flags] --llm <natural language prompt>
 	for i := 1; i < len(os.Args); i++ {
 		if os.Args[i] == "--llm" {
@@ -529,6 +562,13 @@ LLM mode:
   --llm <prompt>  Natural language command (uses OpenRouter API)
                   Example: encli --llm "скопируй игру 82033 в 82034"
   --readonly      Block agent tools that modify or delete data (LLM and -web)
+
+TUI chat:
+  -chat           Full-screen terminal chat with the built-in agent
+                  Shares history, sessions and security modes with -web
+                  Slash commands: /help /new /chats /domain /game /games /mode
+                                  /login /logout /auth /delete /export /quit
+                  Keys: Enter send, Tab focus list, Ctrl+B chats, Esc cancel run
 
 Web UI:
   -web            Start local chat UI for the built-in agent (opens browser)

@@ -339,9 +339,23 @@ func printApprovalSummary(session *llmSession, outcomes []proposalOutcome) {
 		}
 		lines = append(lines, fmt.Sprintf("- %s: %s", outcome.Title, outcome.Error))
 	}
-	fmt.Println(strings.Join(lines, "\n"))
+	summary := strings.Join(lines, "\n")
+	if approvalLog != nil {
+		approvalLog(summary)
+		return
+	}
+	fmt.Println(summary)
 }
 
+// approvalLog redirects approval-flow output. When nil (CLI, --llm, -web) the
+// historical split is kept: messages on stderr, the summary on stdout. The TUI
+// installs a sink so nothing is written to the terminal behind the alt-screen.
+var approvalLog func(string)
+
 func printApprovalMessage(session *llmSession, message string) {
+	if approvalLog != nil {
+		approvalLog(message)
+		return
+	}
 	fmt.Fprintln(os.Stderr, message)
 }
