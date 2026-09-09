@@ -46,11 +46,16 @@ func resolveLocalPath(userPath string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	rootWithSep := root + string(os.PathSeparator)
-	if abs != root && !strings.HasPrefix(abs, rootWithSep) {
-		return "", errors.New("path is outside LLM_FILES_ROOT")
+	if withinRoot(abs, root) || withinRoot(abs, chatUploadsRoot()) {
+		return abs, nil
 	}
-	return abs, nil
+	return "", errors.New("path is outside LLM_FILES_ROOT")
+}
+
+// withinRoot reports whether abs is root itself or a descendant of it. Both
+// arguments are expected to already be absolute and cleaned.
+func withinRoot(abs, root string) bool {
+	return abs == root || strings.HasPrefix(abs, root+string(os.PathSeparator))
 }
 
 func toolReadLocalFile(path string, maxBytes, offset int) {

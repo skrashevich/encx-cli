@@ -1048,13 +1048,70 @@ body::before {
 /* Composer */
 .composer {
   display: grid;
-  grid-template-columns: auto minmax(0, 1fr) auto;
+  grid-template-columns: auto auto minmax(0, 1fr) auto;
   gap: 10px 14px;
   align-items: end;
   padding: 14px 22px 20px;
   border-top: 1px solid var(--border);
   background: color-mix(in srgb, var(--bg-panel) 95%, transparent);
   backdrop-filter: blur(10px);
+}
+
+.composer-attachments {
+  grid-column: 1 / -1;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.attachment-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 8px 5px 12px;
+  border-radius: 999px;
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  color: var(--text-muted);
+  animation: msg-in 0.3s var(--ease-out);
+}
+
+.attachment-chip.uploading {
+  color: var(--text-faint);
+}
+
+.attachment-chip.error {
+  border-color: color-mix(in srgb, var(--danger) 55%, var(--border));
+  color: var(--danger);
+}
+
+.attachment-chip-name {
+  color: var(--text);
+  max-width: 16rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.attachment-chip-remove {
+  display: inline-grid;
+  place-items: center;
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  border: none;
+  border-radius: 50%;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+  font-size: 0.85rem;
+  line-height: 1;
+}
+
+.attachment-chip-remove:hover {
+  background: var(--bg-hover);
 }
 
 .composer-mode {

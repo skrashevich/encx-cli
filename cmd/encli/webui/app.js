@@ -18,6 +18,7 @@ const state = {
   approvalPrompt: null,
   searchQuery: '',
   catalogGames: [],
+  attachments: [],
 };
 
 const ROLE_RU = {
@@ -581,7 +582,7 @@ function renderChatList() {
         ${running ? '<span class="dot-running" aria-hidden="true"></span>' : ''}
         <span>${escapeHtml(c.domain || '')}</span>
       </span>`;
-    btn.addEventListener('click', () => selectChat(id));
+    btn.addEventListener('click', () => switchChat(id));
 
     const del = document.createElement('button');
     del.type = 'button';
@@ -617,7 +618,7 @@ async function deleteChat(chatId) {
       hideApprovalBar();
       clearAgentStatus();
       state.agentRunning = false;
-      await selectChat(null);
+      await switchChat(null);
     }
     await loadChats();
     toast('Чат удалён.');
@@ -752,6 +753,79 @@ function clearToolChips() {
   hideToolChipTooltip();
   $('tool-chips').innerHTML = '';
   state.pendingTools = [];
+}
+
+function formatFileSize(bytes) {
+  const n = Number(bytes) || 0;
+  if (n < 1024) return `${n} B`;
+  if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`;
+  return `${(n / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+function renderAttachments() {
+  const wrap = $('composer-attachments');
+  if (!wrap) return;
+  wrap.innerHTML = '';
+  wrap.hidden = state.attachments.length === 0;
+  state.attachments.forEach((att, idx) => {
+    const chip = document.createElement('span');
+    chip.className = `attachment-chip ${att.status}`;
+    const name = document.createElement('span');
+    name.className = 'attachment-chip-name';
+    name.textContent = att.status === 'error' ? `${att.file.name} — ошибка` : att.file.name;
+    name.title = att.status === 'error' ? att.error || '' : `${att.file.name} (${formatFileSize(att.file.size)})`;
+    chip.appendChild(name);
+    if (att.status === 'uploading') {
+      const spinner = document.createElement('span');
+      spinner.textContent = '…';
+      chip.appendChild(spinner);
+    }
+    const remove = document.createElement('button');
+    remove.type = 'button';
+    remove.className = 'attachment-chip-remove';
+    remove.setAttribute('aria-label', `Убрать файл ${att.file.name}`);
+    remove.textContent = '×';
+    remove.addEventListener('click', () => removeAttachment(idx));
+    chip.appendChild(remove);
+    wrap.appendChild(chip);
+  });
+}
+
+function removeAttachment(idx) {
+  state.attachments.splice(idx, 1);
+  renderAttachments();
+}
+
+async function uploadAttachment(att) {
+  att.status = 'uploading';
+  renderAttachments();
+  try {
+    const chatId = state.activeId || (await ensureActiveChat());
+    if (!chatId) throw new Error('Нет активного чата');
+    const fd = new FormData();
+    fd.append('file', att.file, att.file.name);
+    const res = await api(`/chats/${encodeURIComponent(chatId)}/files`, { method: 'POST', body: fd });
+    att.path = res.path;
+    att.name = res.name || att.file.name;
+    att.size = res.size;
+    att.status = 'done';
+  } catch (e) {
+    att.status = 'error';
+    att.error = e.message || String(e);
+    toast(`Не удалось загрузить файл «${att.file.name}»: ${att.error}`, true);
+  }
+  renderAttachments();
+}
+
+function onFilesSelected(ev) {
+  const files = Array.from(ev.target.files || []);
+  ev.target.value = '';
+  for (const file of files) {
+    const att = { file, status: 'pending', path: '', name: file.name, size: file.size, error: '' };
+    state.attachments.push(att);
+    void uploadAttachment(att);
+  }
+  renderAttachments();
 }
 
 function toolNameFromPayload(p) {
@@ -968,6 +1042,8 @@ function refreshSendState() {
     !busy && (hasChat || (isLoggedInOnDomain(domain) && gameId > 0));
   $('message-input').disabled = !canCompose;
   $('btn-send').disabled = !canCompose;
+  const attachBtn = $('btn-attach');
+  if (attachBtn) attachBtn.disabled = !canCompose;
   $('btn-export').disabled = !hasChat;
   $('btn-cancel').disabled = !hasChat || !busy;
   const modeSel = $('field-security-mode');
@@ -1135,6 +1211,15 @@ async function finishAgentTurn() {
   refreshSendState();
 }
 
+/** Switches to a different chat than the one currently active, discarding any
+ * staged attachments — unlike selectChat, which ensureActiveChat also calls
+ * mid-upload to create a chat on demand, when attachments must survive. */
+async function switchChat(chatId) {
+  state.attachments = [];
+  renderAttachments();
+  await selectChat(chatId);
+}
+
 async function selectChat(chatId) {
   state.activeId = chatId;
   renderChatList();
@@ -1218,7 +1303,7 @@ async function createChat() {
       return;
     }
     await loadChats();
-    await selectChat(id);
+    await switchChat(id);
     toast('Новый чат создан.');
   } catch (e) {
     toast(e.message || String(e), true);
@@ -1228,7 +1313,14 @@ async function createChat() {
 async function sendMessage() {
   const input = $('message-input');
   const text = input.value.trim();
-  if (!text || state.agentRunning) return;
+  if (state.agentRunning) return;
+  if (state.attachments.some((a) => a.status === 'uploading')) {
+    toast('Файлы ещё загружаются…', true);
+    return;
+  }
+  const failed = state.attachments.filter((a) => a.status === 'error');
+  const ready = state.attachments.filter((a) => a.status === 'done');
+  if (!text && ready.length === 0) return;
   if (!state.activeId) {
     const id = await ensureActiveChat();
     if (!id) {
@@ -1238,11 +1330,14 @@ async function sendMessage() {
   }
   clearToolChips();
   try {
+    const files = ready.map((a) => ({ path: a.path, name: a.name }));
     await api(`/chats/${encodeURIComponent(state.activeId)}/messages`, {
       method: 'POST',
-      body: { content: text },
+      body: { content: text, files },
     });
     input.value = '';
+    state.attachments = failed;
+    renderAttachments();
     state.agentRunning = true;
     clearToolChips();
     setAgentStatus('start', 'Запуск агента…');
@@ -1306,6 +1401,8 @@ function bindUI() {
   $('btn-new-chat').addEventListener('click', () => createChat());
   $('btn-patch-chat').addEventListener('click', () => patchActiveChat());
   $('btn-send').addEventListener('click', () => sendMessage());
+  $('btn-attach')?.addEventListener('click', () => $('file-input').click());
+  $('file-input')?.addEventListener('change', onFilesSelected);
   $('btn-logout').addEventListener('click', () => logout());
   $('btn-export').addEventListener('click', () => exportChat('markdown'));
   $('btn-cancel').addEventListener('click', () => cancelAgent());

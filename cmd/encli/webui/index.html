@@ -86,6 +86,7 @@
       </div>
 
       <footer class="composer" aria-label="Ввод сообщения">
+        <div class="composer-attachments" id="composer-attachments" hidden></div>
         <div class="composer-mode field-inline field-security" id="composer-mode">
           <label for="field-security-mode">Режим агента</label>
           <select id="field-security-mode" name="security-mode" aria-label="Режим безопасности агента" disabled>
@@ -94,6 +95,8 @@
             <option value="full">Полный доступ</option>
           </select>
         </div>
+        <input type="file" id="file-input" multiple hidden />
+        <button type="button" class="btn btn-ghost btn-icon" id="btn-attach" title="Прикрепить файл" aria-label="Прикрепить файл" disabled>📎</button>
         <label class="composer-field">
           <span class="visually-hidden">Сообщение</span>
           <textarea id="message-input" rows="2" placeholder="Напишите задачу агенту…" aria-label="Сообщение" disabled></textarea>

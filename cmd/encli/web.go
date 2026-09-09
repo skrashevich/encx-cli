@@ -77,6 +77,7 @@ func (h *webHub) mount(mux *http.ServeMux) {
 	mux.HandleFunc("PATCH /api/v1/chats/{id}", h.httpPatchChat)
 	mux.HandleFunc("DELETE /api/v1/chats/{id}", h.httpDeleteChat)
 	mux.HandleFunc("POST /api/v1/chats/{id}/messages", h.httpPostMessage)
+	mux.HandleFunc("POST /api/v1/chats/{id}/files", h.httpUploadChatFile)
 	mux.HandleFunc("GET /api/v1/chats/{id}/events", h.httpSSE)
 	mux.HandleFunc("POST /api/v1/chats/{id}/cancel", h.httpCancelChat)
 	mux.HandleFunc("GET /api/v1/chats/{id}/approval", h.httpGetApproval)
@@ -276,7 +277,8 @@ func (h *webHub) httpDeleteChat(w http.ResponseWriter, r *http.Request) {
 }
 
 type postMessageRequest struct {
-	Content string `json:"content"`
+	Content string            `json:"content"`
+	Files   []uploadedFileRef `json:"files,omitempty"`
 }
 
 func (h *webHub) httpPostMessage(w http.ResponseWriter, r *http.Request) {
@@ -285,11 +287,15 @@ func (h *webHub) httpPostMessage(w http.ResponseWriter, r *http.Request) {
 	if !readJSONBody(w, r, &req) {
 		return
 	}
-	if req.Content == "" {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "content required"})
+	if req.Content == "" && len(req.Files) == 0 {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "content or files required"})
 		return
 	}
-	msg, ok, busy := h.store.AppendUserMessageUnlessRunning(id, req.Content)
+	content := req.Content
+	if len(req.Files) > 0 {
+		content = appendUploadedFilesNote(content, req.Files)
+	}
+	msg, ok, busy := h.store.AppendUserMessageUnlessRunning(id, content)
 	if !ok {
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "chat not found"})
 		return
