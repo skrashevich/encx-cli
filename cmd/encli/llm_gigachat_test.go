@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -33,11 +34,13 @@ func newTestGigaChatProviderWithTokens(
 	baseURL string, client *http.Client, tokens *gigachatTokenStore,
 ) *gigachatProvider {
 	return &gigachatProvider{
-		baseURL:        baseURL,
-		model:          defaultGigaChatModel,
-		tokens:         tokens,
-		client:         client,
-		functionsState: map[string]string{},
+		baseURL: baseURL,
+		model:   defaultGigaChatModel,
+		tokens:  tokens,
+		client:  client,
+		// A store of its own, so tests neither inherit nor leave behind state in
+		// the one the process shares between agent runs.
+		states: &gigachatFunctionStates{prefix: "test", states: map[string]string{}},
 	}
 }
 
@@ -226,7 +229,7 @@ func TestGigaChatProviderParsesFunctionCall(t *testing.T) {
 	if response.FinishReason != "function_call" {
 		t.Fatalf("finish reason = %q", response.FinishReason)
 	}
-	if got := provider.functionsStateFor(call.ID); got != "state-42" {
+	if got := provider.states.get(call.ID); got != "state-42" {
 		t.Fatalf("functions state for %s = %q, want state-42", call.ID, got)
 	}
 }
@@ -439,6 +442,117 @@ func TestNewPicoProviderBuildsAGigaChatProvider(t *testing.T) {
 	}
 }
 
+// TestGigaChatProviderSendsNullContentWithAFunctionCall pins the field that
+// broke every tool round trip: PicoClaw leaves the assistant content empty on
+// the message that carries a call, and GigaChat answers an empty content next
+// to a function_call with HTTP 422, "JSON parse error at line 1 column 1: The
+// document is empty". Only null is accepted there.
+func TestGigaChatProviderSendsNullContentWithAFunctionCall(t *testing.T) {
+	stub := newGigaChatChatStub(t, func(w http.ResponseWriter) {
+		_, _ = w.Write([]byte(`{"choices":[{"message":{"role":"assistant","content":"готово"},"finish_reason":"stop"}]}`))
+	})
+	provider := newTestGigaChatProvider(t, stub.server.URL, stub.server.Client())
+
+	conversation := []providers.Message{
+		{Role: "user", Content: "удали игру 32042"},
+		{Role: "assistant", Content: "", ToolCalls: []providers.ToolCall{{
+			ID:        "call-1",
+			Type:      "function",
+			Name:      "admin_levels",
+			Arguments: map[string]any{"game_id": 32042},
+		}}},
+		{Role: "tool", ToolCallID: "call-1", Content: `{"success":true}`},
+	}
+	if _, err := provider.Chat(context.Background(), conversation, testToolDefinitions(), "", nil); err != nil {
+		t.Fatalf("Chat: %v", err)
+	}
+
+	messages := stub.request(0)["messages"].([]any)
+	assistant := messages[1].(map[string]any)
+	content, present := assistant["content"]
+	if !present {
+		t.Fatal("the assistant message dropped content entirely, want an explicit null")
+	}
+	if content != nil {
+		t.Fatalf("content = %#v alongside a function_call, want null", content)
+	}
+	// A message without a call keeps its text: the null is the call's rule, not
+	// a blanket one.
+	user := messages[0].(map[string]any)
+	if user["content"] != "удали игру 32042" {
+		t.Fatalf("user content = %#v, want the text verbatim", user["content"])
+	}
+}
+
+// TestGigaChatFunctionStateSurvivesANewProvider pins where the id has to live:
+// a provider lives for one agent run, which is one user message, and the next
+// message replays the same history through a provider built from scratch. Kept
+// per provider, the functions_state_id of every earlier call was gone by then.
+func TestGigaChatFunctionStateSurvivesANewProvider(t *testing.T) {
+	shared := &gigachatFunctionStates{prefix: "test", states: map[string]string{}}
+
+	first := newGigaChatChatStub(t, func(w http.ResponseWriter) {
+		_, _ = w.Write([]byte(`{"choices":[{"message":{"role":"assistant","content":"",` +
+			`"function_call":{"name":"admin_levels","arguments":{"game_id":77}},` +
+			`"functions_state_id":"state-42"},"finish_reason":"function_call"}]}`))
+	})
+	opening := newTestGigaChatProvider(t, first.server.URL, first.server.Client())
+	opening.states = shared
+
+	response, err := opening.Chat(context.Background(),
+		[]providers.Message{{Role: "user", Content: "покажи уровни"}}, testToolDefinitions(), "", nil)
+	if err != nil {
+		t.Fatalf("Chat: %v", err)
+	}
+	call := response.ToolCalls[0]
+
+	// The next user message: a new run, a new provider, the same conversation.
+	second := newGigaChatChatStub(t, func(w http.ResponseWriter) {
+		_, _ = w.Write([]byte(`{"choices":[{"message":{"role":"assistant","content":"готово"},"finish_reason":"stop"}]}`))
+	})
+	resumed := newTestGigaChatProvider(t, second.server.URL, second.server.Client())
+	resumed.states = shared
+
+	conversation := []providers.Message{
+		{Role: "user", Content: "покажи уровни"},
+		{Role: "assistant", Content: "", ToolCalls: []providers.ToolCall{{
+			ID: call.ID, Type: "function", Name: call.Name, Arguments: call.Arguments,
+		}}},
+		{Role: "tool", ToolCallID: call.ID, Content: `{"levels":3}`},
+		{Role: "user", Content: "а теперь удали игру"},
+	}
+	if _, err := resumed.Chat(context.Background(), conversation, testToolDefinitions(), "", nil); err != nil {
+		t.Fatalf("Chat: %v", err)
+	}
+
+	assistant := second.request(0)["messages"].([]any)[1].(map[string]any)
+	if assistant["functions_state_id"] != "state-42" {
+		t.Fatalf("functions_state_id = %v, want the id from the run that made the call",
+			assistant["functions_state_id"])
+	}
+}
+
+// TestGigaChatFunctionStateEvictsTheOldestIDs keeps a long-lived server from
+// holding every call it ever made.
+func TestGigaChatFunctionStateEvictsTheOldestIDs(t *testing.T) {
+	states := &gigachatFunctionStates{prefix: "test", states: map[string]string{}}
+
+	ids := make([]string, 0, gigachatFunctionStateLimit+10)
+	for i := range gigachatFunctionStateLimit + 10 {
+		ids = append(ids, states.callID("", fmt.Sprintf("state-%d", i)))
+	}
+	if len(states.states) != gigachatFunctionStateLimit {
+		t.Fatalf("remembered %d ids, want the limit of %d", len(states.states), gigachatFunctionStateLimit)
+	}
+	if got := states.get(ids[0]); got != "" {
+		t.Errorf("the oldest id still resolves to %q", got)
+	}
+	last := len(ids) - 1
+	if got := states.get(ids[last]); got != fmt.Sprintf("state-%d", last) {
+		t.Errorf("the newest id resolves to %q", got)
+	}
+}
+
 // PicoClaw registers the level-review continuation guard with RegisterHidden,
 // which keeps it out of ToProviderDefs — so its synthetic call names a function
 // GigaChat was never shown. Sending it as a function_call risks a rejection and
@@ -564,7 +678,7 @@ func TestGigaChatProviderKeepsAStampedCallID(t *testing.T) {
 	if call.ID != "6127d50d-7b63-4d47-b051-b796abbd6fae" {
 		t.Fatalf("call id = %q, want the id GigaChat stamped", call.ID)
 	}
-	if got := provider.functionsStateFor(call.ID); got != "state-9" {
+	if got := provider.states.get(call.ID); got != "state-9" {
 		t.Fatalf("functions state = %q, want it keyed by the stamped id", got)
 	}
 }

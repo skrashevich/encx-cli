@@ -34,16 +34,70 @@ type gigachatProvider struct {
 	tokens  *gigachatTokenStore
 	client  *http.Client
 
-	// mu guards functionsState, which maps a tool call id to the
-	// functions_state_id GigaChat returned with it. The model expects that id
-	// back on the assistant message that carried the call, and PicoClaw's
-	// Message has no field to carry it through the loop.
-	mu             sync.Mutex
-	functionsState map[string]string
+	// states maps a tool call id to the functions_state_id GigaChat returned
+	// with it. The model expects that id back on the assistant message that
+	// carried the call, and PicoClaw's Message has no field to carry it through
+	// the loop.
+	states *gigachatFunctionStates
+}
 
-	// nextCallID numbers the synthetic tool call ids. GigaChat's function_call
-	// has no id of its own, but the tool loop matches results to calls by id.
-	nextCallID int
+// gigachatFunctionStates remembers functions_state_id per tool call id, and
+// mints the ids themselves.
+//
+// It is shared by every provider in the process because a provider lives for
+// one agent run — that is, one user message — while a chat replays its whole
+// history on the next one. Kept per provider, the id was known only for the
+// calls made since the last message the user typed, and every earlier call went
+// back to the model without one, which is what breaks the continuation of a
+// tool dialogue.
+type gigachatFunctionStates struct {
+	mu sync.Mutex
+	// prefix makes minted ids unique to this process, so a persisted chat whose
+	// calls were numbered by an earlier run cannot collide with a fresh id and
+	// pick up a state that belongs to another call.
+	prefix string
+	states map[string]string
+	// order tracks insertion so the oldest ids can be evicted: a server that
+	// stays up for weeks would otherwise hold every call it ever made.
+	order []string
+	next  int
+}
+
+// gigachatFunctionStateLimit caps the remembered ids. An evicted one degrades to
+// an omitted functions_state_id, which is what a restart does anyway.
+const gigachatFunctionStateLimit = 4096
+
+var gigachatStates = &gigachatFunctionStates{prefix: newRqUID(), states: map[string]string{}}
+
+func (s *gigachatFunctionStates) get(callID string) string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.states[callID]
+}
+
+// callID settles on an id for a call and remembers the functions_state_id that
+// came with it. The third model generation stamps its own id; the second sends
+// none, so one is invented — the tool loop matches results to calls by id.
+func (s *gigachatFunctionStates) callID(stamped, functionsStateID string) string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	id := stamped
+	if id == "" {
+		s.next++
+		id = fmt.Sprintf("gigachat-call-%s-%d", s.prefix, s.next)
+	}
+	if functionsStateID == "" {
+		return id
+	}
+	if _, seen := s.states[id]; !seen {
+		s.order = append(s.order, id)
+	}
+	s.states[id] = functionsStateID
+	for len(s.order) > gigachatFunctionStateLimit {
+		delete(s.states, s.order[0])
+		s.order = s.order[1:]
+	}
+	return id
 }
 
 func newGigaChatProvider(cfg gigachatConfig) (providers.LLMProvider, error) {
@@ -56,11 +110,11 @@ func newGigaChatProvider(cfg gigachatConfig) (providers.LLMProvider, error) {
 		return nil, err
 	}
 	return &gigachatProvider{
-		baseURL:        cfg.baseURL,
-		model:          cfg.model,
-		tokens:         tokens,
-		client:         client,
-		functionsState: map[string]string{},
+		baseURL: cfg.baseURL,
+		model:   cfg.model,
+		tokens:  tokens,
+		client:  client,
+		states:  gigachatStates,
 	}, nil
 }
 
@@ -69,11 +123,26 @@ func (p *gigachatProvider) GetDefaultModel() string { return p.model }
 // --- wire types ---
 
 type gigachatMessage struct {
-	Role             string                `json:"role"`
-	Content          string                `json:"content"`
+	Role string `json:"role"`
+	// Content is a pointer because GigaChat separates an absent content from an
+	// empty one: an assistant message that carries a function_call must send
+	// content null, and "" there is refused with a 422 whose body reports a
+	// JSON parse error on an empty document.
+	Content          *string               `json:"content"`
 	Name             string                `json:"name,omitempty"`
 	FunctionCall     *gigachatFunctionCall `json:"function_call,omitempty"`
 	FunctionsStateID string                `json:"functions_state_id,omitempty"`
+}
+
+// gigachatContent wraps message text for the wire.
+func gigachatContent(text string) *string { return &text }
+
+// gigachatText reads a content field that may be null.
+func gigachatText(content *string) string {
+	if content == nil {
+		return ""
+	}
+	return *content
 }
 
 type gigachatFunctionCall struct {
@@ -176,16 +245,16 @@ func (p *gigachatProvider) gigachatMessages(
 		case "tool":
 			name, sentAsCall := names[message.ToolCallID]
 			if !sentAsCall {
-				out = append(out, gigachatMessage{Role: "user", Content: message.Content})
+				out = append(out, gigachatMessage{Role: "user", Content: gigachatContent(message.Content)})
 				continue
 			}
 			out = append(out, gigachatMessage{
 				Role:    "function",
 				Name:    name,
-				Content: gigachatToolContent(message.Content),
+				Content: gigachatContent(gigachatToolContent(message.Content)),
 			})
 		case "assistant":
-			converted := gigachatMessage{Role: "assistant", Content: message.Content}
+			converted := gigachatMessage{Role: "assistant", Content: gigachatContent(message.Content)}
 			if len(message.ToolCalls) > 0 {
 				call := message.ToolCalls[0]
 				if _, ok := advertised[call.Name]; ok {
@@ -194,12 +263,18 @@ func (p *gigachatProvider) gigachatMessages(
 						Name:      call.Name,
 						Arguments: gigachatCallArguments(call),
 					}
-					converted.FunctionsStateID = p.functionsStateFor(call.ID)
+					converted.FunctionsStateID = p.states.get(call.ID)
+					// The call travels with content null. GigaChat reads the
+					// content of a message that carries a function_call as a
+					// document of its own, so the empty string PicoClaw leaves
+					// there is refused: "JSON parse error at line 1 column 1:
+					// The document is empty".
+					converted.Content = nil
 				}
 			}
 			out = append(out, converted)
 		default:
-			out = append(out, gigachatMessage{Role: message.Role, Content: message.Content})
+			out = append(out, gigachatMessage{Role: message.Role, Content: gigachatContent(message.Content)})
 		}
 	}
 	return out
@@ -220,29 +295,6 @@ func gigachatCallArguments(call providers.ToolCall) map[string]any {
 		return nil
 	}
 	return arguments
-}
-
-func (p *gigachatProvider) functionsStateFor(callID string) string {
-	p.mu.Lock()
-	defer p.mu.Unlock()
-	return p.functionsState[callID]
-}
-
-// callID settles on an id for a call and remembers the functions_state_id that
-// came with it. The third model generation stamps its own id; the second sends
-// none, so one is invented — the tool loop matches results to calls by id.
-func (p *gigachatProvider) callID(stamped, functionsStateID string) string {
-	p.mu.Lock()
-	defer p.mu.Unlock()
-	id := stamped
-	if id == "" {
-		p.nextCallID++
-		id = fmt.Sprintf("gigachat-call-%d", p.nextCallID)
-	}
-	if functionsStateID != "" {
-		p.functionsState[id] = functionsStateID
-	}
-	return id
 }
 
 // --- the chat call ---
@@ -272,6 +324,8 @@ func (p *gigachatProvider) Chat(
 		return nil, fmt.Errorf("encode the GigaChat request: %w", err)
 	}
 
+	debugf("gigachat request: %s", summarizeDebugText(string(body), 4000))
+
 	payload, err := p.post(ctx, body)
 	if err != nil {
 		return nil, err
@@ -287,7 +341,7 @@ func (p *gigachatProvider) Chat(
 
 	choice := decoded.Choices[0]
 	response := &providers.LLMResponse{
-		Content:      choice.Message.Content,
+		Content:      gigachatText(choice.Message.Content),
 		FinishReason: choice.FinishReason,
 	}
 	if decoded.Usage != nil {
@@ -307,7 +361,7 @@ func (p *gigachatProvider) Chat(
 			argumentsJSON = []byte("{}")
 		}
 		response.ToolCalls = []providers.ToolCall{{
-			ID:        p.callID(call.ID, choice.Message.FunctionsStateID),
+			ID:        p.states.callID(call.ID, choice.Message.FunctionsStateID),
 			Type:      "function",
 			Name:      call.Name,
 			Arguments: arguments,
