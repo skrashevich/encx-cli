@@ -14,8 +14,8 @@ import (
 )
 
 // resolveAgentConfig is the single LLM transport resolution used by --llm,
-// -chat and -web. The transport is either an OpenAI-compatible API key or a
-// ChatGPT subscription stored by `encli codex-login`.
+// -chat and -web. The transport is an OpenAI-compatible API key, a ChatGPT
+// subscription stored by `encli codex-login`, or GigaChat's OAuth key.
 func resolveAgentConfig(cfg *config) (AgentConfig, error) {
 	var requested string
 	if cfg != nil {
@@ -25,13 +25,18 @@ func resolveAgentConfig(cfg *config) (AgentConfig, error) {
 	apiKey := cmp.Or(os.Getenv("LLM_API_KEY"), os.Getenv("OPENROUTER_API_KEY"))
 	endpoint := cmp.Or(os.Getenv("LLM_BASE_URL"), os.Getenv("OPENROUTER_BASE_URL"))
 
-	// Without an explicit choice a stored ChatGPT sign-in is used only when
-	// nothing else was configured. Both an API key and a base URL are deliberate
-	// statements of intent — in particular a local proxy needs no key, so a
-	// credential file left over from an earlier `codex-login` must not silently
-	// redirect that setup to chatgpt.com.
-	if authMethod == "" && apiKey == "" && endpoint == "" && hasCodexCredential() {
-		authMethod = authMethodCodex
+	// Without an explicit choice a stored ChatGPT sign-in or a GigaChat key is
+	// used only when nothing else was configured. Both an API key and a base URL
+	// are deliberate statements of intent — in particular a local proxy needs no
+	// key, so a credential left over from an earlier `codex-login` must not
+	// silently redirect that setup to chatgpt.com.
+	if authMethod == "" && apiKey == "" && endpoint == "" {
+		switch {
+		case hasCodexCredential():
+			authMethod = authMethodCodex
+		case hasGigaChatCredentials():
+			authMethod = authMethodGigaChat
+		}
 	}
 
 	switch authMethod {
@@ -43,9 +48,19 @@ func resolveAgentConfig(cfg *config) (AgentConfig, error) {
 			AuthMethod: authMethodCodex,
 			Model:      codexModel(cmp.Or(os.Getenv("LLM_MODEL"), os.Getenv("OPENROUTER_MODEL"))),
 		}, nil
+	case authMethodGigaChat:
+		gigachat, err := gigachatConfigFromEnv(cmp.Or(os.Getenv("LLM_MODEL"), os.Getenv("OPENROUTER_MODEL")))
+		if err != nil {
+			return AgentConfig{}, err
+		}
+		return AgentConfig{
+			AuthMethod: authMethodGigaChat,
+			Model:      gigachat.model,
+			BaseURL:    gigachat.baseURL,
+		}, nil
 	case "", authMethodAPIKey:
 	default:
-		return AgentConfig{}, fmt.Errorf("unknown LLM auth method %q: use apikey or codex", authMethod)
+		return AgentConfig{}, fmt.Errorf("unknown LLM auth method %q: use apikey, codex or gigachat", authMethod)
 	}
 
 	baseURL := cmp.Or(endpoint, defaultLLMBaseURL)

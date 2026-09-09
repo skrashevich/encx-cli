@@ -1,6 +1,7 @@
 package main
 
 import (
+	"cmp"
 	"context"
 	"encoding/json"
 	"errors"
@@ -50,7 +51,8 @@ type AgentConfig struct {
 	BaseURL string
 
 	// AuthMethod selects the transport: empty or "apikey" uses APIKey against
-	// BaseURL, "codex" uses the ChatGPT subscription stored by codex-login.
+	// BaseURL, "codex" uses the ChatGPT subscription stored by codex-login,
+	// "gigachat" uses the GigaChat authorization key in GIGACHAT_CREDENTIALS.
 	AuthMethod string
 
 	// Provider overrides HTTP provider construction. It is used by tests and by
@@ -136,7 +138,8 @@ Rules:
 - TASK DECOMPOSITION: Enumeration tools (admin_levels, game lists, directory listings) return IDs, names, and metadata only — not full content. If the user needs scenario text, per-level details, or an audit/summary across items, call the read tool (admin_level_content, read_local_file, etc.) for every relevant item before your final answer. A complete-looking table or summary built only from names is wrong.
 - Starting/launching a game is NOT available via CLI — only through the web interface. Inform the user if they ask.
 - When asked to CREATE a game/levels, make them INTERESTING and DIFFERENT: give unique names, add tasks with creative quest text, add sectors with answers, add hints. Don't just create empty shells.
-- ALWAYS COMPLETE THE FULL TASK. If asked to create N levels, create ALL N levels with tasks, sectors (answers), and hints. Never stop partway through and offer to "continue if needed". You have up to 200 tool calls — use them. Do not summarize partial work as if it were complete.
+- SCOPE: the user's LATEST message defines the task. Do what it asks and nothing more. If it asks for one action (for example "wipe the game"), perform that action and report the result — do not also resume an earlier request that was interrupted, cancelled, or replaced by this one. Resume previous work only when the user asks you to continue it.
+- ALWAYS COMPLETE THE FULL TASK (within the scope above). If asked to create N levels, create ALL N levels with tasks, sectors (answers), and hints. Never stop partway through and offer to "continue if needed". You have up to 200 tool calls — use them. Do not summarize partial work as if it were complete.
 - SELF-VERIFICATION: After creating or modifying levels, verify your own work by calling admin_level_content for each affected level. Check that: (1) all sector codes/answers are present and correct, (2) timings (autopass, answer block) are set to non-zero values if the level is timed, (3) hints are present if needed and have correct text/delays, (4) task text matches the intended answers. If you discover errors, fix them immediately before reporting success.
 - LOCAL FILES: Use read_local_file, list_local_dir, and search_local_files to read scripts, notes, or scenario files on disk. Use read_pdf_file to extract text from a PDF (rulebook, uploaded document, scan) instead of read_local_file, which only handles text files. Paths are relative to LLM_FILES_ROOT (defaults to the current working directory). You cannot read files outside that root.
 - WIKIPEDIA: Use wikipedia_search to find articles and wikipedia_article to read summaries when you need to verify facts, dates, places, or historical details for quest content.
@@ -248,6 +251,12 @@ type observedPicoProvider struct {
 	cb       AgentCallbacks
 	stats    *agentRunStats
 	lastUser string
+
+	// seen is the conversation handed to the model on the most recent turn.
+	// RunToolLoop builds its history in a slice of its own and returns only the
+	// final text, so this is the one place the tool calls and their results can
+	// be recovered and written back into the caller's conversation.
+	seen []providers.Message
 }
 
 func (p *observedPicoProvider) GetDefaultModel() string { return p.delegate.GetDefaultModel() }
@@ -259,6 +268,7 @@ func (p *observedPicoProvider) Chat(
 	model string,
 	options map[string]any,
 ) (*providers.LLMResponse, error) {
+	p.seen = messages
 	_, _, completedTurns, _, _, _ := p.stats.snapshot()
 	turn := completedTurns + 1
 	emitStatus(p.cb, "llm", p.session.reviewText(
@@ -385,6 +395,33 @@ type picoLegacyToolRuntime struct {
 	input *AgentRunInput
 	cb    AgentCallbacks
 	stats *agentRunStats
+
+	// delivered records the document-bearing calls already answered in this run,
+	// keyed by tool name and arguments.
+	//
+	// An identical call returns identical bytes, and those bytes now stay in the
+	// conversation for the rest of the run. A model that re-reads a long document
+	// instead of paging through it would otherwise pay for the same prefix on
+	// every turn: twenty such calls once pushed a 72-page PDF past a 261k context
+	// limit. Guarded by legacyToolExecutionMu, which every execute call holds.
+	delivered map[string]struct{}
+}
+
+// repeatedContentRead reports whether this exact content read was already
+// answered, remembering it otherwise.
+func (r *picoLegacyToolRuntime) repeatedContentRead(name, argsJSON string) bool {
+	if _, isContentTool := contentToolFields[name]; !isContentTool {
+		return false
+	}
+	key := name + "\x00" + argsJSON
+	if _, seen := r.delivered[key]; seen {
+		return true
+	}
+	if r.delivered == nil {
+		r.delivered = map[string]struct{}{}
+	}
+	r.delivered[key] = struct{}{}
+	return false
 }
 
 func (r *picoLegacyToolRuntime) execute(ctx context.Context, name, argsJSON string) *toolshared.ToolResult {
@@ -420,6 +457,21 @@ func (r *picoLegacyToolRuntime) execute(ctx context.Context, name, argsJSON stri
 	))
 	emitAgent(r.cb, AgentEvent{Type: agentEventToolStart, ToolName: name, ToolArgs: argsJSON})
 	debugf("picoclaw tool call: name=%s args=%s", name, summarizeDebugArgs(argsJSON))
+
+	if r.repeatedContentRead(name, argsJSON) {
+		// Reported as an error, not a note: a note was ignored sixty times in a
+		// row by a model that kept asking for the same document, burning a turn
+		// each time. The loop and the model both treat an error as something to
+		// act on rather than retry.
+		result := `{"error":"Refused: these exact arguments were already read in this conversation and ` +
+			`returned the same text. Re-read that earlier result instead. To see more of the document you ` +
+			`MUST change the arguments — pass page=N for a PDF, or offset=N for a text file."}`
+		emitAgent(r.cb, AgentEvent{Type: agentEventToolDone, ToolName: name, ToolArgs: argsJSON, ToolResult: result})
+		debugf("picoclaw tool call: name=%s repeated with identical arguments, refused", name)
+		refused := toolshared.SilentResult(result)
+		refused.IsError = true
+		return refused
+	}
 
 	started := time.Now()
 	rawResult := executeToolCallSafe(ctx, r.input.Cfg, r.input.Client, r.input.Session, name, argsJSON)
@@ -462,8 +514,15 @@ func newPicoProvider(agentCfg AgentConfig) (providers.LLMProvider, error) {
 	if agentCfg.Provider != nil {
 		return agentCfg.Provider, nil
 	}
-	if agentCfg.AuthMethod == authMethodCodex {
+	switch agentCfg.AuthMethod {
+	case authMethodCodex:
 		return newCodexProvider()
+	case authMethodGigaChat:
+		gigachat, err := gigachatConfigFromEnv(agentCfg.Model)
+		if err != nil {
+			return nil, err
+		}
+		return newGigaChatProvider(gigachat)
 	}
 	provider := providers.NewHTTPProviderWithMaxTokensFieldAndRequestTimeout(
 		agentCfg.APIKey,
@@ -484,16 +543,23 @@ func newPicoProvider(agentCfg AgentConfig) (providers.LLMProvider, error) {
 // resolveAgentPricing skips the OpenRouter model catalog for subscription runs:
 // a ChatGPT plan is not billed per token, and the catalog would not know the
 // Codex model anyway.
+//
+// GigaChat is skipped too, for the opposite reason: it does bill per token, but
+// in its own units against a prepaid balance rather than in the dollars the
+// report would print, so no cost line is better than a wrong one.
 func resolveAgentPricing(ctx context.Context, agentCfg AgentConfig) *llmPricing {
-	if agentCfg.AuthMethod == authMethodCodex {
+	switch agentCfg.AuthMethod {
+	case authMethodCodex:
 		return &llmPricing{isSubscription: true}
+	case authMethodGigaChat:
+		return nil
 	}
 	return fetchLLMPricing(ctx, agentCfg.BaseURL, agentCfg.APIKey, agentCfg.Model)
 }
 
 func newPicoRegistry(input *AgentRunInput, cb AgentCallbacks, stats *agentRunStats) (*tools.ToolRegistry, error) {
 	registry := tools.NewToolRegistry()
-	runtime := &picoLegacyToolRuntime{input: input, cb: cb, stats: stats}
+	runtime := &picoLegacyToolRuntime{input: input, cb: cb, stats: stats, delivered: map[string]struct{}{}}
 	for _, definition := range input.Tools {
 		var parameters map[string]any
 		if err := json.Unmarshal(definition.Function.Parameters, &parameters); err != nil {
@@ -534,6 +600,82 @@ func picoMessages(messages []llmMessage) []providers.Message {
 		out = append(out, converted)
 	}
 	return out
+}
+
+// llmMessagesFrom converts PicoClaw's conversation back into the persisted
+// form, dropping the continuation guard.
+//
+// The guard is registered hidden, so it never appears in the tool catalog the
+// model is shown. Keeping its synthetic call in the saved history would leave
+// every later turn referring to a function the model has no definition for.
+func llmMessagesFrom(messages []providers.Message) []llmMessage {
+	dropped := map[string]struct{}{}
+	out := make([]llmMessage, 0, len(messages))
+
+	for _, message := range messages {
+		if message.Role == "tool" {
+			if _, isGuard := dropped[message.ToolCallID]; isGuard {
+				continue
+			}
+			out = append(out, llmMessage{
+				Role:       message.Role,
+				Content:    message.Content,
+				ToolCallID: message.ToolCallID,
+			})
+			continue
+		}
+
+		converted := llmMessage{Role: message.Role, Content: message.Content}
+		for _, call := range message.ToolCalls {
+			if call.Name == levelReviewNudgeTool {
+				dropped[call.ID] = struct{}{}
+				continue
+			}
+			converted.ToolCalls = append(converted.ToolCalls, llmToolCall{
+				ID:       call.ID,
+				Type:     cmp.Or(call.Type, "function"),
+				Function: llmToolCallFunction{Name: call.Name, Arguments: toolCallArgumentsJSON(call)},
+			})
+		}
+		if converted.Role == "assistant" && converted.Content == "" && len(converted.ToolCalls) == 0 {
+			// An assistant turn that carried nothing but the guard.
+			continue
+		}
+		out = append(out, converted)
+	}
+	return out
+}
+
+// interruptedRunNote records, in the conversation itself, that a run stopped
+// before it finished.
+//
+// Without it the transcript ends on a tool result and reads like work still in
+// progress, so the next user message is answered as a continuation: a run that
+// was cancelled after creating four levels was silently resumed by the turn
+// that followed, on top of the levels it had already made. A cancellation is
+// the user saying stop, so it says so explicitly; any other failure may be
+// worth retrying and is reported as a failure instead.
+func interruptedRunNote(err error) string {
+	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+		return "[Выполнение прервано пользователем. Всё, что было сделано до этого момента, показано выше " +
+			"и уже применено. Не продолжай прерванную задачу без новой явной просьбы.]"
+	}
+	return fmt.Sprintf("[Выполнение прервано ошибкой: %v. Всё, что было сделано до этого момента, показано "+
+		"выше и уже применено. Прежде чем что-то менять, проверь текущее состояние игры.]", err)
+}
+
+func toolCallArgumentsJSON(call providers.ToolCall) string {
+	if call.Function != nil && strings.TrimSpace(call.Function.Arguments) != "" {
+		return call.Function.Arguments
+	}
+	if len(call.Arguments) == 0 {
+		return "{}"
+	}
+	encoded, err := json.Marshal(call.Arguments)
+	if err != nil {
+		return "{}"
+	}
+	return string(encoded)
 }
 
 func isRetryableLLMError(err error) bool {
@@ -604,7 +746,29 @@ func runAgentLoop(ctx context.Context, agentCfg AgentConfig, input *AgentRunInpu
 		Tools:         registry,
 		MaxIterations: maxAgentTurns,
 	}, picoMessages(input.Messages), "encli", "agent")
+
+	// Carry the tool calls and their results back into the conversation.
+	//
+	// Only the final assistant text used to survive a run, so a document read by
+	// a tool vanished the moment the turn ended: the next turn saw the model's
+	// own paraphrase of it and nothing else. That is how a scenario read from an
+	// attached PDF turned into an invented one on the following message.
+	//
+	// This runs before the error check on purpose. A cancelled or failed run has
+	// already changed the game on the server, and dropping its history does not
+	// undo any of that — it only hides it. A run stopped after creating four
+	// levels left a conversation that still read as "the request was never
+	// answered", so the next message was served as if nothing had happened and
+	// the work was started over.
+	if len(provider.seen) > len(input.Messages) {
+		input.Messages = llmMessagesFrom(provider.seen)
+	}
+
 	if err != nil {
+		input.Messages = append(input.Messages, llmMessage{
+			Role:    "assistant",
+			Content: interruptedRunNote(err),
+		})
 		emitAgent(cb, AgentEvent{Type: agentEventError, Err: err, Message: err.Error()})
 		return input.Messages, err
 	}

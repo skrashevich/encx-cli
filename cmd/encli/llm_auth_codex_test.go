@@ -23,13 +23,17 @@ func isolateLLMEnv(t *testing.T) string {
 	for _, key := range []string{
 		"LLM_AUTH", "LLM_API_KEY", "OPENROUTER_API_KEY",
 		"LLM_MODEL", "OPENROUTER_MODEL", "LLM_BASE_URL", "OPENROUTER_BASE_URL",
+		"GIGACHAT_CREDENTIALS", "GIGACHAT_SCOPE", "GIGACHAT_AUTH_URL",
+		"GIGACHAT_BASE_URL", "GIGACHAT_MODEL", "GIGACHAT_CA_BUNDLE", "GIGACHAT_INSECURE",
 	} {
 		t.Setenv(key, "")
 	}
 	path := filepath.Join(t.TempDir(), "codex-auth.json")
 	t.Setenv(codexAuthFileEnvVar, path)
 	resetCodexTokenStores()
+	resetGigaChatTokenStores()
 	t.Cleanup(resetCodexTokenStores)
+	t.Cleanup(resetGigaChatTokenStores)
 	return path
 }
 
@@ -977,7 +981,7 @@ func TestResolveAgentConfigMissingKeyPointsAtCodexLogin(t *testing.T) {
 func TestResolveAgentConfigRejectsAnUnknownAuthMethod(t *testing.T) {
 	isolateLLMEnv(t)
 	_, err := resolveAgentConfig(&config{llmAuth: "chatgpt"})
-	if err == nil || !strings.Contains(err.Error(), "apikey or codex") {
+	if err == nil || !strings.Contains(err.Error(), "apikey, codex or gigachat") {
 		t.Fatalf("error = %v, want the accepted values", err)
 	}
 }

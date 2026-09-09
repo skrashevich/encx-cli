@@ -2,12 +2,32 @@ package main
 
 import (
 	"encoding/json"
+	"fmt"
+	"unicode/utf8"
+
 	"github.com/skrashevich/encx-cli/encx"
 )
+
+// contentToolFields names the tools whose whole purpose is to bring a document
+// INTO the conversation, and the JSON field carrying it.
+//
+// The generic summarizer below collapses every string it meets to
+// maxToolTextForLLM, which for these tools destroys the result instead of
+// shrinking it: a 72-page PDF reached the model as 240 bytes while the payload
+// still claimed "truncated": false. They get a real budget and an honest report
+// of what was cut.
+var contentToolFields = map[string]string{
+	"read_local_file":   "content",
+	"read_pdf_file":     "content",
+	"wikipedia_article": "extract",
+}
 
 func prepareToolResultForLLM(name, result string) string {
 	if result == "" {
 		return result
+	}
+	if field, ok := contentToolFields[name]; ok {
+		return truncateToolContent(result, field)
 	}
 	if name == "admin_level_content" {
 		if len(result) <= 20000 {
@@ -501,6 +521,75 @@ func summarizeStatTop(groups [][]encx.StatItem, limit int) []map[string]any {
 		})
 	}
 	return out
+}
+
+// truncateToolContent trims one document-bearing field to maxToolContentForLLM
+// and, when it has to cut, says so in the payload the model reads.
+//
+// The tool's own metadata is rewritten rather than left alone: read/extract
+// lengths describe what was delivered, truncated becomes true, and a hint names
+// the argument that fetches the next slice. Silently shipping a fragment under
+// "truncated": false is what let a model treat the first page of a scenario as
+// the whole document.
+func truncateToolContent(result, field string) string {
+	var payload map[string]any
+	if !decodeJSON(result, &payload) {
+		return result
+	}
+	content, ok := payload[field].(string)
+	if !ok || len(content) <= maxToolContentForLLM {
+		return result
+	}
+
+	delivered := truncateUTF8(content, maxToolContentForLLM)
+	omitted := len(content) - len(delivered)
+	payload[field] = delivered
+	payload["truncated"] = true
+	payload["omitted_bytes"] = omitted
+
+	switch field {
+	case "content":
+		// read_local_file reports what it read; read_pdf_file does too, and both
+		// must now describe the shorter text.
+		if _, present := payload["read"]; present {
+			payload["read"] = len(delivered)
+		}
+		if pages, present := payload["num_pages"]; present {
+			// A byte offset into the concatenated text of a multi-page document
+			// names no page, so there is nothing to resume from: the only way
+			// forward is page by page. Say so, and say that repeating this call
+			// returns these same bytes — otherwise the model asks again, and with
+			// tool results now kept for the whole run every repeat is paid twice.
+			payload["hint"] = fmt.Sprintf(
+				"This is only the first %d bytes of a %v-page document. Repeating this call returns "+
+					"exactly these bytes again: to read the rest, call read_pdf_file with page=1, then page=2, "+
+					"and so on up to page=%v.",
+				len(delivered), pages, pages)
+		} else {
+			payload["hint"] = fmt.Sprintf(
+				"Only %d bytes are shown. Call read_local_file again with offset=%d to continue.",
+				len(delivered), getAnyInt(payload["offset"])+len(delivered))
+		}
+	case "extract":
+		payload["hint"] = fmt.Sprintf("Only the first %d bytes of the article are shown.", len(delivered))
+	}
+
+	trimmed, err := json.Marshal(payload)
+	if err != nil {
+		return result
+	}
+	return string(trimmed)
+}
+
+// truncateUTF8 cuts s to at most limit bytes without splitting a rune.
+func truncateUTF8(s string, limit int) string {
+	if len(s) <= limit {
+		return s
+	}
+	for limit > 0 && !utf8.RuneStart(s[limit]) {
+		limit--
+	}
+	return s[:limit]
 }
 
 func summarizeGenericJSON(result string) (string, bool) {

@@ -79,7 +79,8 @@ type codexCredential struct {
 // callers that never parsed a flag set.
 func registerLLMAuthFlag(fs *flag.FlagSet, cfg *config) {
 	fs.StringVar(&cfg.llmAuth, "llm-auth", "",
-		"Agent LLM transport: apikey (default) or codex for a ChatGPT subscription (env: LLM_AUTH)")
+		"Agent LLM transport: apikey (default), codex for a ChatGPT subscription, "+
+			"or gigachat for the Sber GigaChat API (env: LLM_AUTH)")
 }
 
 // codexModel picks the model for a subscription run, resolving the name the

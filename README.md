@@ -605,15 +605,19 @@ encli codex-logout             # удалить сохранённую учёт�
 | Условие | Транспорт |
 |---|---|
 | `-llm-auth codex` или `LLM_AUTH=codex` | Подписка ChatGPT (ошибка, если `codex-login` не выполнен) |
+| `-llm-auth gigachat` или `LLM_AUTH=gigachat` | GigaChat (ошибка, если не задан `GIGACHAT_CREDENTIALS`) |
 | `-llm-auth apikey` или `LLM_AUTH=apikey` | Только API-ключ, сохранённая учётка игнорируется |
 | Ничего не задано, `LLM_API_KEY` задан | API-ключ (явный ключ всегда в приоритете) |
 | Ничего не задано, задан `LLM_BASE_URL` / `OPENROUTER_BASE_URL` | Указанный endpoint (в том числе локальный прокси без ключа) |
-| Ничего не задано, ключа и endpoint нет, учётка есть | Подписка ChatGPT |
+| Ничего не задано, ключа и endpoint нет, учётка ChatGPT есть | Подписка ChatGPT |
+| Ничего не задано, ключа и endpoint нет, задан `GIGACHAT_CREDENTIALS` | GigaChat |
 
-Автовыбор подписки срабатывает, только когда не задано вообще ничего: и ключ, и
-base URL — это явно выраженное намерение, поэтому оставшаяся с прошлого раза
+Автовыбор подписки или GigaChat срабатывает, только когда не задано вообще ничего:
+и ключ, и base URL — это явно выраженное намерение, поэтому оставшаяся с прошлого раза
 учётка не уводит локальный прокси на `chatgpt.com`. Чтобы использовать подписку
-при заданном ключе или endpoint, укажите `-llm-auth codex` явно.
+при заданном ключе или endpoint, укажите `-llm-auth codex` явно. Учётка ChatGPT имеет
+приоритет над `GIGACHAT_CREDENTIALS`; выбрать GigaChat при обеих настройках можно
+через `-llm-auth gigachat`.
 
 Модель по умолчанию для подписки — `gpt-5.3-codex-spark`; `LLM_MODEL` её переопределяет, но только
 именем, которое backend действительно обслуживает: префикс `openai/` отбрасывается,
@@ -634,6 +638,73 @@ encli -web
 # Явный выбор, когда в окружении есть и LLM_API_KEY
 encli -llm-auth codex -game-id 12345 --llm "покажи статус игры"
 ```
+
+### GigaChat (Сбер)
+
+Агент умеет работать на [GigaChat API](https://developers.sber.ru/docs/ru/gigachat/api/main).
+Ключ авторизации (`Authorization key` — base64 от `Client ID:Client Secret`) берётся в
+личном кабинете Сбера, в проекте GigaChat API; по нему клиент сам получает access-токен,
+живущий 30 минут, и обновляет его за 2 минуты до истечения.
+
+```sh
+export GIGACHAT_CREDENTIALS=<Ключ авторизации из личного кабинета>
+encli -game-id 12345 --llm "покажи уровни"
+
+# Явный выбор, когда в окружении есть и LLM_API_KEY
+encli -llm-auth gigachat -game-id 12345 --llm "покажи статус игры"
+```
+
+| Переменная | Назначение |
+|---|---|
+| `GIGACHAT_CREDENTIALS` | Ключ авторизации (обязательна) |
+| `GIGACHAT_SCOPE` | Версия API: `GIGACHAT_API_PERS` (по умолчанию), `GIGACHAT_API_B2B`, `GIGACHAT_API_CORP` |
+| `GIGACHAT_MODEL` | Модель (по умолчанию: `GigaChat-2-Max`); при отсутствии берётся `LLM_MODEL` |
+| `GIGACHAT_BASE_URL` | Base URL API (по умолчанию: `https://api.giga.chat/v1`) |
+| `GIGACHAT_AUTH_URL` | Endpoint OAuth (по умолчанию: `https://ngw.devices.sberbank.ru:9443/api/v2/oauth`) |
+| `GIGACHAT_CA_BUNDLE` | PEM-файл с «Российским доверенным корневым УЦ» — включает проверку сертификата |
+| `GIGACHAT_INSECURE` | `0` — проверять сертификат; `1` — не проверять (по умолчанию не проверяется) |
+
+**Две площадки и модели.** По умолчанию используется `https://api.giga.chat/v1` — там живут
+`GigaChat-2`, `GigaChat-2-Pro`, `GigaChat-2-Max` и третье поколение: `GigaChat-3-Lightning`,
+`GigaChat-3-Pro`, `GigaChat-3-Ultra`. Старые имена (`GigaChat`, `GigaChat-Pro`, `GigaChat-Max`,
+`*-preview`) обслуживает только legacy-хост — для них задайте
+`GIGACHAT_BASE_URL=https://gigachat.devices.sberbank.ru/api/v1`. Если модели на площадке нет,
+API отвечает `404 No such model`; encli дополняет эту ошибку списком моделей, которые площадка
+реально отдаёт, и подсказкой про legacy-хост.
+
+`LLM_BASE_URL` для GigaChat НЕ читается — это намеренно. Переменная означает «адрес
+OpenAI-совместимого endpoint», и если бы она действовала здесь, забытый в шелле
+`LLM_BASE_URL=https://openrouter.ai/api/v1` отправил бы OAuth-токен GigaChat в заголовке
+`Authorization` постороннему хосту. Адрес переопределяется только через `GIGACHAT_BASE_URL`.
+
+**Сертификат.** GigaChat отдаётся под сертификатом Минцифры, которого нет ни в одном
+системном хранилище по умолчанию. Проверка, которая падает всегда, — это не защита, а
+поломка, поэтому по умолчанию сертификат GigaChat **не проверяется** (один раз за запуск
+об этом печатается предупреждение в stderr). Чтобы включить проверку, скачайте
+[корневой сертификат Минцифры](https://developers.sber.ru/docs/ru/gigachat/certificates)
+и укажите путь в `GIGACHAT_CA_BUNDLE` — он добавляется к системному пулу, а не заменяет
+его. Если корень уже установлен в системе, достаточно `GIGACHAT_INSECURE=0`.
+
+```sh
+# Просто работает, без проверки сертификата
+export GIGACHAT_CREDENTIALS=<ключ>
+encli -game-id 12345 --llm "проверь ответы на уровне 3"
+
+# Третье поколение
+GIGACHAT_MODEL=GigaChat-3-Ultra encli -domain demo.en.cx --llm "покажи игры на домене"
+
+# С проверкой сертификата
+export GIGACHAT_CA_BUNDLE=~/.config/encli/russian_trusted_root_ca.pem
+export GIGACHAT_MODEL=GigaChat-2-Pro
+encli -game-id 12345 --llm "проверь ответы на уровне 3"
+```
+
+Инструменты передаются GigaChat в его собственном формате (`functions` / `function_call`),
+а не в OpenAI-совместимом `tools` / `tool_calls`: OpenAI-образный запрос GigaChat принимает
+без ошибки, но молча теряет все инструменты, и агент остаётся без единого действия.
+За один ход GigaChat вызывает не больше одной функции — цикл агента от этого просто
+становится длиннее. Стоимость в отчёте о выполнении не показывается: GigaChat тарифицируется
+в собственных единицах с предоплаченного баланса, а не в долларах.
 
 **Примеры:**
 
@@ -854,8 +925,15 @@ encli import-scenario -game-id 82307 --sync-missing "/Users/svk/Downloads/moscow
 | — | `OPENROUTER_BASE_URL` | Алиас для `LLM_BASE_URL` |
 | — | `LLM_API_KEY` | API-ключ для `--llm` и `-web` (не нужен для localhost) |
 | — | `LLM_MODEL` | Модель для агента (по умолчанию: `openai/gpt-oss-120b:free`) |
-| `-llm-auth` | `LLM_AUTH` | Транспорт агента: `apikey` (по умолчанию) или `codex` — подписка ChatGPT |
+| `-llm-auth` | `LLM_AUTH` | Транспорт агента: `apikey` (по умолчанию), `codex` — подписка ChatGPT, `gigachat` — GigaChat API |
 | — | `ENCLI_CODEX_AUTH_FILE` | Путь к учётке ChatGPT (по умолчанию: `~/.config/encli/codex/auth.json`) |
+| — | `GIGACHAT_CREDENTIALS` | Ключ авторизации GigaChat (base64 от `Client ID:Client Secret`) |
+| — | `GIGACHAT_SCOPE` | Версия GigaChat API (по умолчанию: `GIGACHAT_API_PERS`) |
+| — | `GIGACHAT_MODEL` | Модель GigaChat (по умолчанию: `GigaChat-2-Max`) |
+| — | `GIGACHAT_BASE_URL` | Base URL GigaChat (по умолчанию: `https://api.giga.chat/v1`) |
+| — | `GIGACHAT_AUTH_URL` | Endpoint OAuth GigaChat (по умолчанию: `https://ngw.devices.sberbank.ru:9443/api/v2/oauth`) |
+| — | `GIGACHAT_CA_BUNDLE` | PEM с корневым сертификатом Минцифры — включает проверку TLS для GigaChat |
+| — | `GIGACHAT_INSECURE` | `0` — проверять TLS-сертификат GigaChat (по умолчанию не проверяется) |
 | — | `LLM_FILES_ROOT` | Корень каталога для `read_local_file` / `search_local_files` (по умолчанию: cwd) |
 | — | `OPENROUTER_API_KEY` | Алиас для `LLM_API_KEY` |
 | — | `OPENROUTER_MODEL` | Алиас для `LLM_MODEL` |

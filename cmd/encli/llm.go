@@ -16,7 +16,17 @@ const (
 	maxAgentTurns      = 200
 	maxToolItemsForLLM = 200
 	maxToolTextForLLM  = 240
-	maxFixSteps        = 8
+
+	// maxToolContentForLLM budgets the tools that exist to read a document into
+	// the conversation. maxToolTextForLLM is a summary width and would gut them.
+	//
+	// It matches read_local_file's own default max_bytes on purpose. A smaller
+	// budget does not save context, it costs more of it: the model finds the
+	// document cut short and asks again in another form, and every one of those
+	// attempts is a turn. Identical re-reads are refused rather than re-sent, so
+	// each distinct slice of a document is paid for exactly once per run.
+	maxToolContentForLLM = defaultLocalReadMaxBytes
+	maxFixSteps          = 8
 )
 
 // agentMode controls fatal behavior for nested tool execution: when true,

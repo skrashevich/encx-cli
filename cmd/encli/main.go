@@ -48,7 +48,7 @@ type config struct {
 	importSyncMissing bool
 	engine            string // legacy | new | auto (env: ENCX_ENGINE)
 	apiBaseURL        string // new-engine API host (env: ENCX_API_BASE_URL)
-	llmAuth           string // agent transport: apikey (default) | codex (env: LLM_AUTH)
+	llmAuth           string // agent transport: apikey (default) | codex | gigachat (env: LLM_AUTH)
 	codexDevice       bool   // codex-login: use the device-code flow
 	codexNoBrowser    bool   // codex-login: do not open a browser
 }
@@ -579,7 +579,8 @@ LLM mode:
   --llm <prompt>  Natural language command (uses OpenRouter API)
                   Example: encli --llm "скопируй игру 82033 в 82034"
   --readonly      Block agent tools that modify or delete data (LLM and -web)
-  -llm-auth       Transport: apikey (default) or codex for a ChatGPT subscription
+  -llm-auth       Transport: apikey (default), codex for a ChatGPT subscription,
+                  or gigachat for the Sber GigaChat API
                   Run 'encli codex-login' once; without LLM_API_KEY it is implied
 
 TUI chat:
@@ -617,8 +618,15 @@ Environment variables:
   LLM_BASE_URL         OpenAI-compatible API base URL (default: https://openrouter.ai/api/v1)
   LLM_API_KEY          API key for --llm mode (not required for localhost)
   LLM_MODEL            LLM model override (default: openai/gpt-oss-120b:free)
-  LLM_AUTH             Agent transport: apikey (default) or codex (see -llm-auth)
+  LLM_AUTH             Agent transport: apikey (default), codex or gigachat (see -llm-auth)
   ENCLI_CODEX_AUTH_FILE  ChatGPT credential path (default: ~/.config/encli/codex/auth.json)
+  GIGACHAT_CREDENTIALS   GigaChat authorization key (base64 of "Client ID:Client Secret")
+  GIGACHAT_SCOPE         GigaChat API version (default: GIGACHAT_API_PERS)
+  GIGACHAT_MODEL         GigaChat model (default: GigaChat-2-Max)
+  GIGACHAT_BASE_URL      GigaChat API base URL (default: https://api.giga.chat/v1)
+  GIGACHAT_AUTH_URL      GigaChat OAuth endpoint
+  GIGACHAT_CA_BUNDLE     PEM with the Russian trusted root CA (turns TLS verification on)
+  GIGACHAT_INSECURE      0 to verify GigaChat's certificate (default: not verified)
   ENCLI_WEB_ADDR       Web UI listen address for -web mode
   OPENROUTER_API_KEY   Alias for LLM_API_KEY (backward compat)
   OPENROUTER_MODEL     Alias for LLM_MODEL (backward compat)
@@ -1939,8 +1947,10 @@ func splitLLMArgs(args []string) ([]string, []string, error) {
 
 func summarizeDebugText(s string, limit int) string {
 	s = strings.Join(strings.Fields(strings.TrimSpace(s)), " ")
+	// Cut on a rune boundary: the limit is in bytes, and slicing mid-rune turns
+	// the tail of a Cyrillic summary into replacement characters.
 	if limit > 0 && len(s) > limit {
-		return s[:limit] + "..."
+		return truncateUTF8(s, limit) + "..."
 	}
 	return s
 }
