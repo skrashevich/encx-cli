@@ -179,6 +179,12 @@ func formatToolCallForDisplay(session *llmSession, name, argsJSON string) string
 	case "search_local_files":
 		pat := getAnyString(args["pattern"])
 		return format(rt("Searching files for: ", "Ищу в файлах: ") + pat)
+	case "read_pdf_file":
+		p := getAnyString(args["path"])
+		if p != "" {
+			return format(rt("Reading PDF: ", "Читаю PDF: ") + p)
+		}
+		return format(rt("Reading PDF file", "Читаю PDF-файл"))
 	case "wikipedia_search":
 		q := getAnyString(args["query"])
 		return format(rt("Wikipedia search: ", "Поиск в Википедии: ") + q)

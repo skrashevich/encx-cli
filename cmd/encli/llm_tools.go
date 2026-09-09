@@ -235,6 +235,11 @@ func getTools() []llmTool {
 			Parameters:  json.RawMessage(`{"type":"object","properties":{"path":{"type":"string","description":"Directory path (default: root)"},"recursive":{"type":"boolean","description":"List recursively up to depth 3 (max 500 entries)"}}}`),
 		}},
 		{Type: "function", Function: llmFunction{
+			Name:        "read_pdf_file",
+			Description: "Extract plain text from a local PDF file (relative to LLM_FILES_ROOT or current working directory). Use to inspect uploaded scenario documents, rulebooks, or scans saved as PDF.",
+			Parameters:  json.RawMessage(`{"type":"object","properties":{"path":{"type":"string","description":"File path (relative to LLM_FILES_ROOT or absolute within it)"},"page":{"type":"integer","description":"Extract only this page (1-based). Omit to read the whole document."},"max_bytes":{"type":"integer","description":"Max bytes of extracted text to return (default 65536, max 524288)"}},"required":["path"]}`),
+		}},
+		{Type: "function", Function: llmFunction{
 			Name:        "search_local_files",
 			Description: "Search for a substring in local text files under a directory. Returns matching file paths, line numbers, and snippets.",
 			Parameters:  json.RawMessage(`{"type":"object","properties":{"path":{"type":"string","description":"Directory or file to search (default: LLM_FILES_ROOT)"},"pattern":{"type":"string","description":"Case-insensitive substring to find"},"glob":{"type":"string","description":"Optional filename glob, e.g. *.md"},"max_matches":{"type":"integer","description":"Max matches to return (default 50)"}},"required":["pattern"]}`),

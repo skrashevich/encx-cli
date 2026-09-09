@@ -466,6 +466,9 @@ func executeLLMToolCall(ctx context.Context, cfg *config, client *encx.Client, s
 		}
 		toolSearchLocalFiles(root, getString("pattern"), getString("glob"), getInt("max_matches"))
 
+	case "read_pdf_file":
+		toolReadPdfFile(getString("path"), getInt("page"), getInt("max_bytes"))
+
 	case "wikipedia_search":
 		toolWikipediaSearch(ctx, getString("query"), getString("lang"), getInt("limit"))
 
