@@ -13,11 +13,46 @@ import (
 	"github.com/skrashevich/encx-cli/encx"
 )
 
-func resolveAgentConfig() (AgentConfig, error) {
-	baseURL := cmp.Or(os.Getenv("LLM_BASE_URL"), os.Getenv("OPENROUTER_BASE_URL"), defaultLLMBaseURL)
+// resolveAgentConfig is the single LLM transport resolution used by --llm,
+// -chat and -web. The transport is either an OpenAI-compatible API key or a
+// ChatGPT subscription stored by `encli codex-login`.
+func resolveAgentConfig(cfg *config) (AgentConfig, error) {
+	var requested string
+	if cfg != nil {
+		requested = cfg.llmAuth
+	}
+	authMethod := strings.ToLower(strings.TrimSpace(cmp.Or(requested, os.Getenv("LLM_AUTH"))))
 	apiKey := cmp.Or(os.Getenv("LLM_API_KEY"), os.Getenv("OPENROUTER_API_KEY"))
+	endpoint := cmp.Or(os.Getenv("LLM_BASE_URL"), os.Getenv("OPENROUTER_BASE_URL"))
+
+	// Without an explicit choice a stored ChatGPT sign-in is used only when
+	// nothing else was configured. Both an API key and a base URL are deliberate
+	// statements of intent — in particular a local proxy needs no key, so a
+	// credential file left over from an earlier `codex-login` must not silently
+	// redirect that setup to chatgpt.com.
+	if authMethod == "" && apiKey == "" && endpoint == "" && hasCodexCredential() {
+		authMethod = authMethodCodex
+	}
+
+	switch authMethod {
+	case authMethodCodex:
+		if _, err := loadCodexCredential(); err != nil {
+			return AgentConfig{}, err
+		}
+		return AgentConfig{
+			AuthMethod: authMethodCodex,
+			Model:      codexModel(cmp.Or(os.Getenv("LLM_MODEL"), os.Getenv("OPENROUTER_MODEL"))),
+		}, nil
+	case "", authMethodAPIKey:
+	default:
+		return AgentConfig{}, fmt.Errorf("unknown LLM auth method %q: use apikey or codex", authMethod)
+	}
+
+	baseURL := cmp.Or(endpoint, defaultLLMBaseURL)
 	if apiKey == "" && !strings.Contains(baseURL, "127.0.0.1") && !strings.Contains(baseURL, "localhost") {
-		return AgentConfig{}, fmt.Errorf("LLM_API_KEY (or OPENROUTER_API_KEY) is required for web agent mode")
+		return AgentConfig{}, fmt.Errorf(
+			"LLM_API_KEY (or OPENROUTER_API_KEY) is required for agent mode; " +
+				"alternatively sign in to a ChatGPT subscription with 'encli codex-login'")
 	}
 	model := cmp.Or(os.Getenv("LLM_MODEL"), os.Getenv("OPENROUTER_MODEL"), defaultLLMModel)
 	return AgentConfig{
@@ -57,7 +92,7 @@ func lastUserMessageContent(messages []llmMessage) string {
 }
 
 func runWebChatTurn(ctx context.Context, hub *webHub, chatID string) {
-	agentCfg, err := resolveAgentConfig()
+	agentCfg, err := resolveAgentConfig(hub.cfg)
 	if err != nil {
 		hub.publishSSE(chatID, agentEventError, map[string]any{"message": err.Error()})
 		hub.publishSSE(chatID, agentEventDone, map[string]any{"chat_id": chatID})

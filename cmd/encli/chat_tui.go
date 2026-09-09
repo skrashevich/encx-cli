@@ -25,7 +25,7 @@ func cmdChat(ctx context.Context, cfg *config) error {
 	if err := store.LoadFromDisk(); err != nil {
 		debugf("load chats from disk: %v", err)
 	}
-	agentCfg, agentErr := resolveAgentConfig()
+	agentCfg, agentErr := resolveAgentConfig(cfg)
 
 	m := newChatModel(ctx, cfg, store, registry, agentCfg, agentErr)
 

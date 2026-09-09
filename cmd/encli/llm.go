@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
-	"strings"
 
 	"github.com/skrashevich/encx-cli/encx"
 )
@@ -71,14 +70,10 @@ type llmSession struct {
 }
 
 func cmdLLM(ctx context.Context, cfg *config, client *encx.Client, prompt string) {
-	baseURL := cmp.Or(os.Getenv("LLM_BASE_URL"), os.Getenv("OPENROUTER_BASE_URL"), defaultLLMBaseURL)
-
-	apiKey := cmp.Or(os.Getenv("LLM_API_KEY"), os.Getenv("OPENROUTER_API_KEY"))
-	if apiKey == "" && !strings.Contains(baseURL, "127.0.0.1") && !strings.Contains(baseURL, "localhost") {
-		fatal("LLM_API_KEY (or OPENROUTER_API_KEY) environment variable is required for --llm mode")
+	ac, err := resolveAgentConfig(cfg)
+	if err != nil {
+		fatal("%v", err)
 	}
-
-	model := cmp.Or(os.Getenv("LLM_MODEL"), os.Getenv("OPENROUTER_MODEL"), defaultLLMModel)
 
 	// Force JSON output in LLM mode for structured results.
 	// Keep fatal exit behavior at the top level; only nested tool calls should
@@ -98,7 +93,8 @@ func cmdLLM(ctx context.Context, cfg *config, client *encx.Client, prompt string
 	}
 
 	tools := getToolsForSession(session)
-	debugf("picoclaw mode initialized: base_url=%s model=%s tools=%d prompt=%q", baseURL, model, len(tools), summarizeDebugText(prompt, 0))
+	debugf("picoclaw mode initialized: auth=%s base_url=%s model=%s tools=%d prompt=%q",
+		cmp.Or(ac.AuthMethod, authMethodAPIKey), ac.BaseURL, ac.Model, len(tools), summarizeDebugText(prompt, 0))
 
 	loopIn := AgentRunInput{
 		Cfg:      cfg,
@@ -107,13 +103,8 @@ func cmdLLM(ctx context.Context, cfg *config, client *encx.Client, prompt string
 		Messages: messages,
 		Tools:    tools,
 	}
-	ac := AgentConfig{
-		APIKey:  apiKey,
-		Model:   model,
-		BaseURL: baseURL,
-	}
 
-	_, err := runAgentLoop(ctx, ac, &loopIn, AgentCallbacks{
+	_, err = runAgentLoop(ctx, ac, &loopIn, AgentCallbacks{
 		OnEvent: func(ev AgentEvent) {
 			switch ev.Type {
 			case agentEventAssistantText:

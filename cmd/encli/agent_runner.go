@@ -49,6 +49,10 @@ type AgentConfig struct {
 	Model   string
 	BaseURL string
 
+	// AuthMethod selects the transport: empty or "apikey" uses APIKey against
+	// BaseURL, "codex" uses the ChatGPT subscription stored by codex-login.
+	AuthMethod string
+
 	// Provider overrides HTTP provider construction. It is used by tests and by
 	// callers that already own a PicoClaw provider.
 	Provider providers.LLMProvider
@@ -162,7 +166,9 @@ func formatAgentExecutionReport(session *llmSession, model string, pricing *llmP
 		if totalPromptTokens > 0 || totalCompletionTokens > 0 {
 			fmt.Fprintf(&report, "Токены:           %d (вход: %d, выход: %d)\n",
 				totalPromptTokens+totalCompletionTokens, totalPromptTokens, totalCompletionTokens)
-			if pricing != nil && pricing.isLocal {
+			if pricing != nil && pricing.isSubscription {
+				fmt.Fprintf(&report, "Стоимость:        $0 (подписка ChatGPT)\n")
+			} else if pricing != nil && pricing.isLocal {
 				fmt.Fprintf(&report, "Стоимость:        $0 (локальный прокси)\n")
 			} else if pricing != nil {
 				fmt.Fprintf(&report, "Стоимость:        $%.4f (OpenRouter pricing)\n", computeLLMCost(pricing, totalPromptTokens, totalCompletionTokens))
@@ -180,7 +186,9 @@ func formatAgentExecutionReport(session *llmSession, model string, pricing *llmP
 		if totalPromptTokens > 0 || totalCompletionTokens > 0 {
 			fmt.Fprintf(&report, "Tokens:        %d (in: %d, out: %d)\n",
 				totalPromptTokens+totalCompletionTokens, totalPromptTokens, totalCompletionTokens)
-			if pricing != nil && pricing.isLocal {
+			if pricing != nil && pricing.isSubscription {
+				fmt.Fprintf(&report, "Cost:          $0 (ChatGPT subscription)\n")
+			} else if pricing != nil && pricing.isLocal {
 				fmt.Fprintf(&report, "Cost:          $0 (local proxy)\n")
 			} else if pricing != nil {
 				fmt.Fprintf(&report, "Cost:          $%.4f (OpenRouter pricing)\n", computeLLMCost(pricing, totalPromptTokens, totalCompletionTokens))
@@ -450,9 +458,12 @@ func (*picoLevelReviewNudgeTool) Execute(_ context.Context, args map[string]any)
 	return toolshared.SilentResult(message)
 }
 
-func newPicoProvider(agentCfg AgentConfig) providers.LLMProvider {
+func newPicoProvider(agentCfg AgentConfig) (providers.LLMProvider, error) {
 	if agentCfg.Provider != nil {
-		return agentCfg.Provider
+		return agentCfg.Provider, nil
+	}
+	if agentCfg.AuthMethod == authMethodCodex {
+		return newCodexProvider()
 	}
 	provider := providers.NewHTTPProviderWithMaxTokensFieldAndRequestTimeout(
 		agentCfg.APIKey,
@@ -467,7 +478,17 @@ func newPicoProvider(agentCfg AgentConfig) providers.LLMProvider {
 	if strings.Contains(strings.ToLower(agentCfg.BaseURL), "openrouter.ai") {
 		provider.SetProviderName("openrouter")
 	}
-	return provider
+	return provider, nil
+}
+
+// resolveAgentPricing skips the OpenRouter model catalog for subscription runs:
+// a ChatGPT plan is not billed per token, and the catalog would not know the
+// Codex model anyway.
+func resolveAgentPricing(ctx context.Context, agentCfg AgentConfig) *llmPricing {
+	if agentCfg.AuthMethod == authMethodCodex {
+		return &llmPricing{isSubscription: true}
+	}
+	return fetchLLMPricing(ctx, agentCfg.BaseURL, agentCfg.APIKey, agentCfg.Model)
 }
 
 func newPicoRegistry(input *AgentRunInput, cb AgentCallbacks, stats *agentRunStats) (*tools.ToolRegistry, error) {
@@ -561,12 +582,17 @@ func runAgentLoop(ctx context.Context, agentCfg AgentConfig, input *AgentRunInpu
 	if err != nil {
 		return input.Messages, err
 	}
-	pricing := fetchLLMPricing(ctx, agentCfg.BaseURL, agentCfg.APIKey, agentCfg.Model)
+	delegate, err := newPicoProvider(agentCfg)
+	if err != nil {
+		emitAgent(cb, AgentEvent{Type: agentEventError, Err: err, Message: err.Error()})
+		return input.Messages, err
+	}
+	pricing := resolveAgentPricing(ctx, agentCfg)
 	totalStart := time.Now()
 	resetLevelEnumeration(input.Session)
 
 	provider := &observedPicoProvider{
-		delegate: newPicoProvider(agentCfg),
+		delegate: delegate,
 		session:  input.Session,
 		cb:       cb,
 		stats:    stats,

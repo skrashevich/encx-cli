@@ -48,6 +48,9 @@ type config struct {
 	importSyncMissing bool
 	engine            string // legacy | new | auto (env: ENCX_ENGINE)
 	apiBaseURL        string // new-engine API host (env: ENCX_API_BASE_URL)
+	llmAuth           string // agent transport: apikey (default) | codex (env: LLM_AUTH)
+	codexDevice       bool   // codex-login: use the device-code flow
+	codexNoBrowser    bool   // codex-login: do not open a browser
 }
 
 func main() {
@@ -79,6 +82,7 @@ func main() {
 			registerHARFlags(fs, cfg)
 			registerEngineFlag(fs, cfg)
 			fs.BoolVar(&cfg.agentReadonly, "readonly", false, "Agent: block tools that modify or delete data")
+			registerLLMAuthFlag(fs, cfg)
 			fs.StringVar(&webAddr, "web-addr", cmp.Or(os.Getenv("ENCLI_WEB_ADDR"), defaultWebAddr), "Web UI listen address")
 			if cfg.agentReadonly {
 				cfg.agentSecurity = SecurityModeReadonly
@@ -114,6 +118,7 @@ func main() {
 			registerHARFlags(fs, cfg)
 			registerEngineFlag(fs, cfg)
 			fs.BoolVar(&cfg.agentReadonly, "readonly", false, "Agent: block tools that modify or delete data")
+			registerLLMAuthFlag(fs, cfg)
 			fs.Parse(flagArgs)
 			if cfg.agentReadonly {
 				cfg.agentSecurity = SecurityModeReadonly
@@ -154,6 +159,7 @@ func main() {
 			registerHARFlags(fs, cfg)
 			registerEngineFlag(fs, cfg)
 			fs.BoolVar(&cfg.agentReadonly, "readonly", false, "Block agent tools that modify or delete data")
+			registerLLMAuthFlag(fs, cfg)
 			fs.Parse(flagArgs)
 			debugMode = cfg.debug
 			debugf("starting llm mode: domain=%s game_id=%d insecure=%v http=%v json=%v login_set=%v password_set=%v prompt_len=%d",
@@ -219,6 +225,8 @@ func main() {
 	fs.BoolVar(&cfg.importDryRun, "dry-run", false, "Dry run for import-scenario (parse only, do not modify game)")
 	fs.BoolVar(&cfg.importSyncMissing, "sync-missing", false, "Align existing import-scenario levels with the export (no full wipe)")
 	fs.StringVar(&cfg.mcpSecurity, "security", "", "Engine access for the mcp command: readonly (default), approve, full")
+	fs.BoolVar(&cfg.codexDevice, "device", false, "codex-login: use the device-code flow instead of a browser redirect")
+	fs.BoolVar(&cfg.codexNoBrowser, "no-browser", false, "codex-login: print the sign-in URL instead of opening a browser")
 
 	fs.Usage = func() { printCommandHelp(cmd) }
 	fs.Parse(args)
@@ -247,6 +255,12 @@ func main() {
 		cmdLogin(ctx, cfg, client)
 	case "logout":
 		cmdLogout(cfg)
+	case "codex-login":
+		cmdCodexLogin(cfg)
+	case "codex-logout":
+		cmdCodexLogout(cfg)
+	case "codex-status":
+		cmdCodexStatus(cfg)
 	case "games":
 		loadSession(cfg, client)
 		cmdGames(ctx, cfg, client)
@@ -485,6 +499,9 @@ Usage: encli <command> [flags]
 Commands:
   login       Authenticate and save session
   logout      Clear saved session
+  codex-login   Sign in to a ChatGPT subscription for the agent (OAuth)
+  codex-logout  Clear the stored ChatGPT credential
+  codex-status  Show the stored ChatGPT credential
   games       List available games (HTML scraping)
   game-list   List games with full details (JSON API)
   status      Show current game state
@@ -562,6 +579,8 @@ LLM mode:
   --llm <prompt>  Natural language command (uses OpenRouter API)
                   Example: encli --llm "скопируй игру 82033 в 82034"
   --readonly      Block agent tools that modify or delete data (LLM and -web)
+  -llm-auth       Transport: apikey (default) or codex for a ChatGPT subscription
+                  Run 'encli codex-login' once; without LLM_API_KEY it is implied
 
 TUI chat:
   -chat           Full-screen terminal chat with the built-in agent
@@ -598,6 +617,8 @@ Environment variables:
   LLM_BASE_URL         OpenAI-compatible API base URL (default: https://openrouter.ai/api/v1)
   LLM_API_KEY          API key for --llm mode (not required for localhost)
   LLM_MODEL            LLM model override (default: openai/gpt-oss-120b:free)
+  LLM_AUTH             Agent transport: apikey (default) or codex (see -llm-auth)
+  ENCLI_CODEX_AUTH_FILE  ChatGPT credential path (default: ~/.config/encli/codex/auth.json)
   ENCLI_WEB_ADDR       Web UI listen address for -web mode
   OPENROUTER_API_KEY   Alias for LLM_API_KEY (backward compat)
   OPENROUTER_MODEL     Alias for LLM_MODEL (backward compat)
@@ -624,6 +645,19 @@ func printCommandHelp(cmd string) {
 	case "logout":
 		fmt.Fprintln(os.Stderr, "Usage: encli logout [-domain <domain>]")
 		fmt.Fprintln(os.Stderr, "  Clear saved session for the specified domain.")
+	case "codex-login":
+		fmt.Fprintln(os.Stderr, "Usage: encli codex-login [-device] [-no-browser] [-json]")
+		fmt.Fprintln(os.Stderr, "  Sign in to a ChatGPT subscription (the backend the Codex CLI uses) so the")
+		fmt.Fprintln(os.Stderr, "  agent runs without an API key. Opens a browser and waits for the redirect.")
+		fmt.Fprintln(os.Stderr, "  -device      Show a code to enter on chatgpt.com instead (for headless hosts).")
+		fmt.Fprintln(os.Stderr, "  -no-browser  Print the sign-in URL and wait for the redirect URL to be pasted.")
+	case "codex-logout":
+		fmt.Fprintln(os.Stderr, "Usage: encli codex-logout [-json]")
+		fmt.Fprintln(os.Stderr, "  Remove the stored ChatGPT credential.")
+	case "codex-status":
+		fmt.Fprintln(os.Stderr, "Usage: encli codex-status [-json]")
+		fmt.Fprintln(os.Stderr, "  Show the stored ChatGPT credential (account, expiry, path).")
+		fmt.Fprintln(os.Stderr, "  Exits non-zero when no credential is stored.")
 	case "mcp":
 		fmt.Fprintln(os.Stderr, "Usage: encli mcp [-domain <domain>] [-security readonly|approve|full]")
 		fmt.Fprintln(os.Stderr, "  Serve the engine toolset over MCP on stdin/stdout for PicoClaw and other MCP clients.")
@@ -1843,7 +1877,9 @@ func debugf(format string, args ...any) {
 
 func isBoolFlag(arg string) bool {
 	switch arg {
-	case "-insecure", "-http", "-json", "-debug", "-har", "-web", "--web", "-readonly", "--readonly", "-dry-run", "--dry-run", "-sync-missing", "--sync-missing":
+	case "-insecure", "-http", "-json", "-debug", "-har", "-web", "--web", "-readonly", "--readonly",
+		"-dry-run", "--dry-run", "-sync-missing", "--sync-missing",
+		"-device", "--device", "-no-browser", "--no-browser":
 		return true
 	default:
 		return false
@@ -1852,7 +1888,7 @@ func isBoolFlag(arg string) bool {
 
 func isValueFlag(arg string) bool {
 	switch arg {
-	case "-domain", "-login", "-password", "-game-id", "-web-addr", "-har-out":
+	case "-domain", "-login", "-password", "-game-id", "-web-addr", "-har-out", "-llm-auth", "--llm-auth":
 		return true
 	default:
 		return false

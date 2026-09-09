@@ -15,6 +15,7 @@ type llmPricing struct {
 	promptCostPerToken     float64
 	completionCostPerToken float64
 	isLocal                bool // local proxy = free subscription
+	isSubscription         bool // ChatGPT plan: tokens are not billed per call
 }
 
 // fetchLLMPricing resolves pricing for the model at session start.
@@ -105,7 +106,7 @@ func fetchLLMPricing(ctx context.Context, baseURL, apiKey, model string) *llmPri
 
 // computeLLMCost returns the total cost in USD given pricing and token counts.
 func computeLLMCost(pricing *llmPricing, promptTokens, completionTokens int) float64 {
-	if pricing == nil || pricing.isLocal {
+	if pricing == nil || pricing.isLocal || pricing.isSubscription {
 		return 0
 	}
 	return float64(promptTokens)*pricing.promptCostPerToken +

@@ -406,7 +406,7 @@ func exportChatMarkdown(snap ChatSnapshot) string {
 }
 
 func (h *webHub) httpAgentConfig(w http.ResponseWriter, r *http.Request) {
-	agentCfg, err := resolveAgentConfig()
+	agentCfg, err := resolveAgentConfig(h.cfg)
 	if err != nil {
 		writeJSON(w, http.StatusOK, map[string]any{
 			"model":    "",
