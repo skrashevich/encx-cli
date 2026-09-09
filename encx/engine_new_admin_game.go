@@ -67,6 +67,12 @@ func gameIDFromCreationPayload(payload map[string]any) int {
 	return 0
 }
 
+// AdminDeleteGame removes the game through the same route the editor deletes
+// with. The engine answers with an empty body, so nothing is decoded.
+func (e *newEngine) AdminDeleteGame(ctx context.Context, gameId int) error {
+	return e.c.api().Delete(ctx, fmt.Sprintf("/admin/games/%d", gameId), nil, nil)
+}
+
 func (e *newEngine) AdminGetGameInfo(ctx context.Context, gameId int) (*AdminGameInfo, error) {
 	var editor enapi.AdminGameEditorResponse
 	if err := e.c.api().GetJSON(ctx, fmt.Sprintf("/admin/games/%d", gameId), nil, &editor); err != nil {

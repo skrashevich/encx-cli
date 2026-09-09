@@ -664,6 +664,31 @@ func cmdAdminWipeGame(ctx context.Context, cfg *config, client *encx.Client) {
 	}
 }
 
+// cmdAdminDeleteGame removes the game itself, not just its content. The id is
+// typed twice because the deletion cannot be undone: -game-id selects the game
+// the way every other admin command does, and the positional argument confirms
+// that this is the game the caller meant.
+func cmdAdminDeleteGame(ctx context.Context, cfg *config, client *encx.Client, args []string) {
+	requireGameId(cfg)
+	if len(args) == 0 {
+		fatal("Usage: encli admin-delete-game -game-id <id> <id> (repeat the ID to confirm, deletion is irreversible)")
+	}
+	confirmId, err := strconv.Atoi(args[0])
+	if err != nil || confirmId != cfg.gameId {
+		fatal("Confirmation ID %q does not match -game-id %d; deletion is irreversible", args[0], cfg.gameId)
+	}
+
+	if err := client.AdminDeleteGame(ctx, cfg.gameId); err != nil {
+		fatal("Failed to delete game: %v", err)
+	}
+
+	if cfg.jsonOutput {
+		outputJSON(map[string]any{"success": true, "game_id": cfg.gameId})
+		return
+	}
+	fmt.Printf("Game %d deleted\n", cfg.gameId)
+}
+
 func cmdAdminCopyGame(ctx context.Context, cfg *config, client *encx.Client, args []string) {
 	requireGameId(cfg)
 	if len(args) == 0 {

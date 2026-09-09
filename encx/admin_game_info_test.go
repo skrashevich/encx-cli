@@ -1,6 +1,7 @@
 package encx
 
 import (
+	"context"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -107,5 +108,32 @@ func TestLegacyAdminUpdateGameInfoOmitsDisabledStart(t *testing.T) {
 	}
 	if _, ok := posted["StartDateTime"]; ok {
 		t.Errorf("StartDateTime = %q was posted for a started game", posted.Get("StartDateTime"))
+	}
+}
+
+// TestLegacyAdminDeleteGameHitsTheManagerAction checks the delete link the
+// games manager renders, including the page number it carries.
+func TestLegacyAdminDeleteGameHitsTheManagerAction(t *testing.T) {
+	var requested *url.URL
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requested = r.URL
+		_, _ = w.Write([]byte("ok"))
+	}))
+	t.Cleanup(server.Close)
+	c := New(strings.TrimPrefix(server.URL, "http://"),
+		WithHTTP(), WithAdminDelay(0), WithEngine(EngineLegacy))
+
+	if err := c.AdminDeleteGame(context.Background(), 82448); err != nil {
+		t.Fatalf("AdminDeleteGame: %v", err)
+	}
+	if requested == nil {
+		t.Fatal("no request was sent")
+	}
+	if requested.Path != "/Administration/GamesManager.aspx" {
+		t.Errorf("path = %q", requested.Path)
+	}
+	query := requested.Query()
+	if query.Get("gid") != "82448" || query.Get("action") != "Delete" || query.Get("page") != "1" {
+		t.Errorf("query = %q, want gid=82448, action=Delete, page=1", requested.RawQuery)
 	}
 }

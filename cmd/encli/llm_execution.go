@@ -404,6 +404,12 @@ func executeLLMToolCall(ctx context.Context, cfg *config, client *encx.Client, s
 		requireAdminAuth(ctx, cfg, client)
 		cmdAdminCopyGame(ctx, cfg, client, []string{strconv.Itoa(targetID)})
 
+	case "admin_delete_game":
+		requireAdminAuth(ctx, cfg, client)
+		// The confirmation the CLI asks a human to type is the game id itself,
+		// which the tool call already carries.
+		cmdAdminDeleteGame(ctx, cfg, client, []string{strconv.Itoa(cfg.gameId)})
+
 	case "admin_game_info":
 		requireAdminAuth(ctx, cfg, client)
 		cmdAdminGameInfo(ctx, cfg, client)

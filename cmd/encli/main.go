@@ -421,6 +421,9 @@ func main() {
 	case "admin-copy-game":
 		requireAdminAuth(ctx, cfg, client)
 		cmdAdminCopyGame(ctx, cfg, client, positional)
+	case "admin-delete-game":
+		requireAdminAuth(ctx, cfg, client)
+		cmdAdminDeleteGame(ctx, cfg, client, positional)
 	case "admin-create-game":
 		requireAdminAuth(ctx, cfg, client)
 		cmdAdminCreateGame(ctx, cfg, client, positional)
@@ -571,6 +574,7 @@ Admin commands (require game editor rights):
   admin-calc-ik            Calculate game coefficient (IK)
   admin-wipe-game          Completely reset a game (delete all content)
   admin-copy-game          Copy entire game to another game
+  admin-delete-game        Delete a game entirely (irreversible)
   admin-create-game        Create a new game
   admin-game-info          Show game settings
   admin-update-game        Update game settings (key=value)
@@ -830,6 +834,11 @@ func printCommandHelp(cmd string) {
 		fmt.Fprintln(os.Stderr, "Usage: encli admin-copy-game -game-id <source-id> <target-id>")
 		fmt.Fprintln(os.Stderr, "  Copy entire game (levels, settings, bonuses, sectors, hints) to target game.")
 		fmt.Fprintln(os.Stderr, "  Target game levels are created automatically if needed.")
+	case "admin-delete-game":
+		fmt.Fprintln(os.Stderr, "Usage: encli admin-delete-game -game-id <id> <id>")
+		fmt.Fprintln(os.Stderr, "  Delete the game itself, with every level, bonus, hint, and result in it.")
+		fmt.Fprintln(os.Stderr, "  Repeat the ID as the positional argument to confirm: this cannot be undone.")
+		fmt.Fprintln(os.Stderr, "  To empty a game but keep it, use admin-wipe-game instead.")
 	case "admin-create-game":
 		fmt.Fprintln(os.Stderr, "Usage: encli admin-create-game <key=value ...>")
 		fmt.Fprintln(os.Stderr, "  Create a new game. Required: title, start, finish (RFC3339, e.g. 2026-09-10T18:00:00+03:00).")

@@ -210,6 +210,11 @@ func getTools() []llmTool {
 			Parameters:  json.RawMessage(`{"type":"object","properties":{"source_game_id":{"type":"integer","description":"Source game ID to copy from"},"target_game_id":{"type":"integer","description":"Target game ID to copy to"}},"required":["source_game_id","target_game_id"]}`),
 		}},
 		{Type: "function", Function: llmFunction{
+			Name:        "admin_delete_game",
+			Description: "Delete a game entirely, together with its levels, bonuses, hints and results. Irreversible: only call it when the user explicitly asked to delete that game. To empty a game but keep it, use admin_wipe_game instead.",
+			Parameters:  json.RawMessage(`{"type":"object","properties":{"game_id":{"type":"integer","description":"Game ID"}},"required":["game_id"]}`),
+		}},
+		{Type: "function", Function: llmFunction{
 			Name:        "admin_game_info",
 			Description: "Read game settings: title, authors, description, prize, dates",
 			Parameters:  json.RawMessage(`{"type":"object","properties":{"game_id":{"type":"integer","description":"Game ID"}},"required":["game_id"]}`),

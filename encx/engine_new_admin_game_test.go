@@ -536,3 +536,19 @@ func TestNewEngineAdminActionMonitor(t *testing.T) {
 		t.Errorf("entries[1] = %+v", entries[1])
 	}
 }
+
+// TestNewEngineAdminDeleteGame pins the route: an irreversible operation that
+// deletes the wrong resource is not recoverable, so the request is asserted
+// rather than trusted.
+func TestNewEngineAdminDeleteGame(t *testing.T) {
+	var calls []adminCall
+	c := newGameAdminClient(t, &calls)
+
+	if err := c.AdminDeleteGame(context.Background(), 82448); err != nil {
+		t.Fatalf("AdminDeleteGame: %v", err)
+	}
+	call := lastCall(t, calls)
+	if call.method != http.MethodDelete || call.path != "/admin/games/82448" {
+		t.Errorf("request = %s %s, want DELETE /admin/games/82448", call.method, call.path)
+	}
+}

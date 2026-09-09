@@ -1100,6 +1100,17 @@ func (c *Client) legacyAdminNotDeliverGame(ctx context.Context, gameId int) erro
 	return nil
 }
 
+// AdminDeleteGame deletes the game itself. The manager renders its delete link
+// with page=1 alongside the action, so the request repeats both verbatim.
+func (c *Client) legacyAdminDeleteGame(ctx context.Context, gameId int) error {
+	u := fmt.Sprintf("%s/Administration/GamesManager.aspx?gid=%d&page=1&action=Delete", c.baseURL(), gameId)
+	_, err := c.doGet(ctx, u)
+	if err != nil {
+		return fmt.Errorf("encx: admin delete game: %w", err)
+	}
+	return nil
+}
+
 // --- Level Reordering ---
 
 // AdminSwapLevels swaps two levels by their numbers.

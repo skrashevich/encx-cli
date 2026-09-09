@@ -121,3 +121,28 @@ func TestParsePendingAdminFixInjectsGameID(t *testing.T) {
 		t.Fatalf("expected injected game_id 82034, got %d", got)
 	}
 }
+
+// TestAdminDeleteGameIsExposedAndGuarded pins the two halves of the delete
+// tool: the model can see it, and read-only mode withholds it the way it
+// withholds every other tool that destroys state.
+func TestAdminDeleteGameIsExposedAndGuarded(t *testing.T) {
+	t.Parallel()
+
+	exposed := false
+	for _, tool := range getTools() {
+		if tool.Function.Name == "admin_delete_game" {
+			exposed = true
+		}
+	}
+	if !exposed {
+		t.Fatal("tool \"admin_delete_game\" is not exposed")
+	}
+	if !isMutationTool("admin_delete_game") {
+		t.Error("admin_delete_game is not classified as a mutation")
+	}
+	for _, tool := range getToolsForSession(&llmSession{securityMode: SecurityModeReadonly}) {
+		if tool.Function.Name == "admin_delete_game" {
+			t.Error("admin_delete_game is offered in read-only mode")
+		}
+	}
+}

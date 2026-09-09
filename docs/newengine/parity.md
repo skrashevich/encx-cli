@@ -155,6 +155,7 @@ ENCX_LIVE_DOMAIN=demo.en.cx ENCX_LIVE_LOGIN=… ENCX_LIVE_PASSWORD=… \
 |---|---|---|
 | `AdminGetGameInfo` | GET /Administration/Games/GameEditor.aspx | GET /admin/games/{id} |
 | `AdminUpdateGameInfo` | POST GameEditor.aspx | PATCH /admin/games/{id} (частичное обновление) |
+| `AdminDeleteGame` | GamesManager.aspx?page=1&action=Delete | DELETE /admin/games/{id} |
 | `AdminDeliverGame` | ?action=Deliver | PUT /admin/games/{id}/status — **требуется код status_id** |
 | `AdminNotDeliverGame` | ?action=NotDeliver | PUT /admin/games/{id}/status — **требуется код status_id** |
 | `AdminAwardPoints` | ?action=AwardPoints | POST /admin/games/{id}/points/calculate |

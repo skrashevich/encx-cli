@@ -298,6 +298,12 @@ func (c *Client) AdminCreateGame(ctx context.Context, params AdminCreateGamePara
 	return c.engine(ctx).AdminCreateGame(ctx, params)
 }
 
+// AdminDeleteGame deletes the game and everything in it. There is no undo, and
+// no engine asks for a confirmation: the caller owns that decision.
+func (c *Client) AdminDeleteGame(ctx context.Context, gameId int) error {
+	return c.engine(ctx).AdminDeleteGame(ctx, gameId)
+}
+
 func (c *Client) AdminGetGameInfo(ctx context.Context, gameId int) (*AdminGameInfo, error) {
 	return c.engine(ctx).AdminGetGameInfo(ctx, gameId)
 }
