@@ -13,7 +13,7 @@ require (
 	github.com/sipeed/picoclaw v0.3.1
 	golang.org/x/image v0.46.0
 	golang.org/x/mobile v0.0.0-20260821190718-4776eadac327
-	golang.org/x/term v0.45.0
+	golang.org/x/term v0.46.0
 )
 
 require (
