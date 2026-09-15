@@ -278,6 +278,19 @@ this way is between the account owner and OpenAI's terms.
 and asks for authorization through `AgentDelegate.OnConfirmationRequest`, which
 the host answers with `ResolveConfirmation(callID, approved)`.
 
+### Device location
+
+Setting `"location_tools": true` in the session config registers
+`enc_device_location`, a parameterless tool that asks the host app for the
+device's current GPS position. The Go side cannot reach CoreLocation, so the
+request goes through the delegate: `AgentDelegate.OnLocationRequest(requestID,
+turn)` fires, the tool call blocks, and the host answers exactly once with
+`ResolveLocation(requestID, locationJSON)` — the JSON is forwarded to the model
+verbatim — or `FailLocation(requestID, message)` when the permission is denied
+or no fix is available. An unanswered request fails after a minute; a cancelled
+turn fails it immediately. The OS permission prompt still gates the actual fix,
+so enabling the tool never reveals a location the player has not granted.
+
 Only the visible transcript survives between turns. Tool output is deliberately
 not replayed: game state changes while the player reads, so a cached level would
 be worse than a fresh read.

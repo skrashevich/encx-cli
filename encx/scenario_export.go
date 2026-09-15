@@ -45,7 +45,20 @@ func (e *newEngine) GetGameScenarioHTML(ctx context.Context, gameId int) (string
 		"encx: the new engine publishes no HTML scenario export; use GetGameScenario")
 }
 
+// GetAdminGameScenario reads an author's scenario with administrative details
+// omitted by the public export, notably the sign of bonus time.
+func (c *Client) GetAdminGameScenario(ctx context.Context, gameID int) (*scenario.Document, error) {
+	if e, ok := c.engine(ctx).(*newEngine); ok {
+		return e.getScenario(ctx, gameID, true)
+	}
+	return c.GetGameScenario(ctx, gameID)
+}
+
 func (e *newEngine) GetGameScenario(ctx context.Context, gameId int) (*scenario.Document, error) {
+	return e.getScenario(ctx, gameId, false)
+}
+
+func (e *newEngine) getScenario(ctx context.Context, gameId int, adminDetails bool) (*scenario.Document, error) {
 	var export enapi.GameScenario
 	path := fmt.Sprintf("/games/%d/scenario", gameId)
 	q := url.Values{"lang": {e.c.lang}}
@@ -55,7 +68,33 @@ func (e *newEngine) GetGameScenario(ctx context.Context, gameId int) (*scenario.
 	if export.Error != nil && strings.TrimSpace(export.Error.Message) != "" {
 		return nil, fmt.Errorf("encx: game scenario %d: %s", gameId, export.Error.Message)
 	}
-	return scenarioDocumentFromAPI(gameId, &export), nil
+	doc := scenarioDocumentFromAPI(gameId, &export)
+	if adminDetails {
+		for i, level := range export.Levels {
+			if len(level.Bonuses) == 0 {
+				continue
+			}
+			if level.LevelID <= 0 {
+				return nil, fmt.Errorf("scenario level %d: missing admin level ID", level.LevelNumber)
+			}
+			var editor enapi.AdminLevelEditorResponse
+			if err := e.c.api().GetJSON(ctx, adminLevelPath(gameId, level.LevelID, "/editor"), nil, &editor); err != nil {
+				return nil, err
+			}
+			signs := make(map[int]bool, len(editor.Bonuses))
+			for _, bonus := range editor.Bonuses {
+				signs[bonus.BonusID] = bonus.Negative
+			}
+			for j, bonus := range level.Bonuses {
+				negative, ok := signs[bonus.BonusID]
+				if !ok {
+					return nil, fmt.Errorf("scenario level %d: bonus %d missing from admin editor", level.LevelNumber, bonus.BonusID)
+				}
+				doc.Levels[i].Bonuses[j].Negative = negative
+			}
+		}
+	}
+	return doc, nil
 }
 
 // scenarioDocumentFromAPI maps the structured export onto the document the
@@ -133,13 +172,19 @@ func scenarioLevelFromAPI(level enapi.LevelScenario) scenario.Level {
 	}
 
 	for _, bonus := range level.Bonuses {
+		award := bonus.BonusTime
+		negative := award < 0 || strings.Contains(strings.ToLower(bonus.BonusTimeText), "штраф")
+		if award < 0 {
+			award = -award
+		}
 		out.Bonuses = append(out.Bonuses, scenario.Bonus{
 			Number:       len(out.Bonuses) + 1,
-			Name:         firstNonEmpty(bonus.BonusName, bonus.Title),
+			Name:         bonus.BonusName,
 			Task:         bonus.Task,
 			Hint:         bonus.BonusHelp,
 			Answers:      append([]string(nil), bonus.Answers...),
-			AwardSeconds: bonus.BonusTime,
+			AwardSeconds: award,
+			Negative:     negative,
 		})
 	}
 	return out

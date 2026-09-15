@@ -31,6 +31,7 @@ type Client struct {
 	antiSpamRecovery     atomic.Int32 // >0 suppresses handler during anti-spam recovery Login
 	adminDelayDuration   time.Duration
 	adminDelayConfigured bool
+	apiRequestInterval   time.Duration
 
 	// engineState selects between the legacy ASP.NET engine and the new
 	// Go backend REST API; see engine.go.

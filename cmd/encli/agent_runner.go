@@ -141,7 +141,8 @@ Rules:
 - When asked to CREATE a game/levels, make them INTERESTING and DIFFERENT: give unique names, add tasks with creative quest text, add sectors with answers, add hints. Don't just create empty shells.
 - SCOPE: the user's LATEST message defines the task. Do what it asks and nothing more. If it asks for one action (for example "wipe the game"), perform that action and report the result — do not also resume an earlier request that was interrupted, cancelled, or replaced by this one. Resume previous work only when the user asks you to continue it.
 - ALWAYS COMPLETE THE FULL TASK (within the scope above). If asked to create N levels, create ALL N levels with tasks, sectors (answers), and hints. Never stop partway through and offer to "continue if needed". You have up to 200 tool calls — use them. Do not summarize partial work as if it were complete.
-- SELF-VERIFICATION: After creating or modifying levels, verify your own work by calling admin_level_content for each affected level. Check that: (1) all sector codes/answers are present and correct, (2) timings (autopass, answer block) are set to non-zero values if the level is timed, (3) hints are present if needed and have correct text/delays, (4) task text matches the intended answers. If you discover errors, fix them immediately before reporting success.
+- SELF-VERIFICATION: After creating or modifying levels, verify your own work by calling admin_level_content for each affected level. Check that: (1) all sector codes/answers are present and correct, (2) timings (autopass, answer block) are set to non-zero values if the level is timed, (3) hints are present if needed and have correct text/delays, (4) task text matches the intended answers. If you discover errors, fix them immediately before reporting success. A successful admin_import_scenario result with verified=true already satisfies this requirement using a fresh full export; do not repeat all per-level reads after it.
+- HTML SCENARIO IMPORT: For an attached Encounter GameScenario HTML export, first call inspect_scenario_file, then create the target game if requested, then admin_import_scenario with the target game ID and file path. This imports the COMPLETE document and verifies it in Go; do not manually reconstruct it from read_local_file chunks or create hundreds of empty levels. Source game IDs belong to their original domain. Report completion only if verified=true; if interrupted use admin_verify_scenario before retrying.
 - LOCAL FILES: Use read_local_file, list_local_dir, and search_local_files to read scripts, notes, or scenario files on disk. Use read_pdf_file to extract text from a PDF (rulebook, uploaded document, scan) instead of read_local_file, which only handles text files. Paths are relative to LLM_FILES_ROOT (defaults to the current working directory). You cannot read files outside that root.
 - WIKIPEDIA: Use wikipedia_search to find articles and wikipedia_article to read summaries when you need to verify facts, dates, places, or historical details for quest content.
 - REVIEW/AUDIT REQUESTS: when the user asks to check, verify, audit, or review existing content WITHOUT explicitly asking for changes, do NOT call admin mutation tools directly. Call propose_admin_fix once per discovered issue (one proposal = one user approval decision), each with only the minimal admin mutation steps needed to resolve that one issue, then give a concise audit summary. Do not ask the user for confirmation in normal text; the interface handles approvals. When the user explicitly asks to create or modify content, use the admin mutation tools directly.
@@ -270,6 +271,10 @@ func (p *observedPicoProvider) Chat(
 	options map[string]any,
 ) (*providers.LLMResponse, error) {
 	p.seen = messages
+	requestMessages, err := boundedAgentMessages(messages, toolDefs)
+	if err != nil {
+		return nil, err
+	}
 	_, _, completedTurns, _, _, _ := p.stats.snapshot()
 	turn := completedTurns + 1
 	emitStatus(p.cb, "llm", p.session.reviewText(
@@ -297,7 +302,7 @@ func (p *observedPicoProvider) Chat(
 			}
 		}
 
-		response, lastErr = p.chatWithWait(ctx, messages, toolDefs, model, options)
+		response, lastErr = p.chatWithWait(ctx, requestMessages, toolDefs, model, options)
 		if lastErr == nil {
 			break
 		}
@@ -309,8 +314,8 @@ func (p *observedPicoProvider) Chat(
 	if lastErr != nil {
 		return nil, fmt.Errorf("LLM API error after 3 attempts: %w", lastErr)
 	}
-	if response == nil {
-		return nil, errors.New("LLM provider returned an empty response")
+	if err := validateAgentResponse(response); err != nil {
+		return nil, err
 	}
 
 	duration := time.Since(started)
@@ -778,8 +783,11 @@ func runAgentLoop(ctx context.Context, agentCfg AgentConfig, input *AgentRunInpu
 	if content != "" {
 		input.Messages = append(input.Messages, llmMessage{Role: "assistant", Content: content})
 		emitAgent(cb, AgentEvent{Type: agentEventAssistantText, Text: content})
-	} else if result.Iterations >= maxAgentTurns {
-		emitAgent(cb, AgentEvent{Type: agentEventWarning, Message: "Warning: agent reached maximum iterations"})
+	} else {
+		err := fmt.Errorf("агент достиг лимита итераций без итогового ответа; выполненные действия сохранены, задача не завершена")
+		input.Messages = append(input.Messages, llmMessage{Role: "assistant", Content: interruptedRunNote(err)})
+		emitAgent(cb, AgentEvent{Type: agentEventError, Err: err, Message: err.Error()})
+		return input.Messages, err
 	}
 
 	if len(input.Session.pendingFixes) > 0 {

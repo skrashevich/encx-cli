@@ -25,10 +25,11 @@ var engineIndependentMethods = map[string]string{
 	"APIToken":      "new-engine session accessor",
 	"SetAPIToken":   "new-engine session accessor",
 
-	"APIBaseURL": "engine selection",
-	"Engine":     "engine selection",
-	"EngineMode": "engine selection",
-	"SetEngine":  "engine selection",
+	"GetAdminGameScenario": "author scenario export plus administrative bonus flags",
+	"APIBaseURL":           "engine selection",
+	"Engine":               "engine selection",
+	"EngineMode":           "engine selection",
+	"SetEngine":            "engine selection",
 
 	"AdminDelay":             "ASP form pacing, not applicable to REST",
 	"SetAdminDelay":          "ASP form pacing, not applicable to REST",

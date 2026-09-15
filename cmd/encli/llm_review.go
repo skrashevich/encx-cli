@@ -33,7 +33,7 @@ type proposalOutcome struct {
 
 func isAdminMutationTool(name string) bool {
 	switch name {
-	case "admin_create_levels",
+	case "admin_import_scenario", "admin_create_levels",
 		"admin_delete_level",
 		"admin_rename_level",
 		"admin_set_autopass",

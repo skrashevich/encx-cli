@@ -132,3 +132,10 @@ func TestAppendUploadedFilesNote(t *testing.T) {
 		t.Fatalf("expected both tool hints: %q", got)
 	}
 }
+
+func TestHTMLUploadPointsToScenarioParser(t *testing.T) {
+	note := appendUploadedFilesNote("import", []uploadedFileRef{{Name: "scenario.html", Path: "/tmp/scenario.html"}})
+	if !strings.Contains(note, "inspect_scenario_file") {
+		t.Fatalf("HTML upload still starts a raw HTML reading loop: %s", note)
+	}
+}

@@ -113,8 +113,11 @@ func appendUploadedFilesNote(content string, files []uploadedFileRef) string {
 			name = filepath.Base(f.Path)
 		}
 		tool := "read_local_file"
-		if strings.EqualFold(filepath.Ext(f.Path), ".pdf") {
+		switch strings.ToLower(filepath.Ext(f.Path)) {
+		case ".pdf":
 			tool = "read_pdf_file"
+		case ".html", ".htm":
+			tool = "inspect_scenario_file; если это не экспорт GameScenario, используй read_local_file"
 		}
 		fmt.Fprintf(&b, "- %s: %s (прочитай через %s)\n", name, f.Path, tool)
 	}

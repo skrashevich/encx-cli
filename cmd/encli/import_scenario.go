@@ -145,6 +145,10 @@ func cmdImportScenario(ctx context.Context, cfg *config, client *encx.Client, ar
 	if opts.SyncMissing {
 		stats, err := syncMissingScenario(ctx, cfg, client, scenarioDoc, progress)
 		if err != nil {
+			// fatal exits the CLI without running main's deferred HAR export.
+			if cfg.harRecording {
+				exportClientHAR(client, cfg)
+			}
 			fatal("Failed to sync missing parts: %v", err)
 		}
 		if cfg.jsonOutput {
@@ -354,6 +358,9 @@ func runWithAntiSpamRetry(opName string, fn func() error) error {
 			return nil
 		}
 		if isTransientImportError(err) {
+			if agentMode {
+				return fmt.Errorf("%s: %w (check remote state before retrying)", opName, err)
+			}
 			if promptErr := waitForTransientRetry(opName, err); promptErr != nil {
 				return fmt.Errorf("%s: %w", opName, promptErr)
 			}
@@ -552,7 +559,7 @@ func scenarioBonusToAdminBonus(src scenario.Bonus, levelID int) (encx.AdminBonus
 	task := strings.TrimSpace(src.Task)
 	hint := strings.TrimSpace(src.Hint)
 	answers := dedupeKeepOrder(src.Answers)
-	if name == "" && task == "" && hint == "" && len(answers) == 0 {
+	if src.Number == 0 && src.AwardSeconds == 0 && name == "" && task == "" && hint == "" && len(answers) == 0 {
 		return encx.AdminBonus{}, false
 	}
 	h, m, s := splitSeconds(src.AwardSeconds)
@@ -674,9 +681,7 @@ func scenarioAdminSectors(src scenario.Level) []encx.AdminSector {
 		out := make([]encx.AdminSector, 0, len(src.Sectors))
 		for i, sector := range src.Sectors {
 			answers := dedupeKeepOrder(sector.Answers)
-			if len(answers) == 0 {
-				continue
-			}
+			// Empty sectors explicitly present in the export are part of the scenario.
 			// Kept verbatim: the engine stores sector names as typed, so
 			// trimming here would break scenario round-trip fidelity.
 			name := sector.Name
@@ -713,29 +718,6 @@ func answerSetKey(answers []string) string {
 	return strings.Join(norms, "\x00")
 }
 
-func gameSectorsAnomalous(sectors []encx.AdminSector) bool {
-	nameCount := map[string]int{}
-	answerKeys := map[string]int{}
-	for _, sec := range sectors {
-		if answerSetKey(sec.Answers) == "" {
-			continue
-		}
-		name := strings.ToLower(strings.TrimSpace(sec.Name))
-		if name != "" {
-			nameCount[name]++
-			if nameCount[name] > 1 {
-				return true
-			}
-		}
-		key := answerSetKey(sec.Answers)
-		answerKeys[key]++
-		if answerKeys[key] > 1 {
-			return true
-		}
-	}
-	return false
-}
-
 func gameSectorsWithAnswers(sectors []encx.AdminSector) []encx.AdminSector {
 	out := make([]encx.AdminSector, 0, len(sectors))
 	for _, sec := range sectors {
@@ -749,10 +731,16 @@ func gameSectorsWithAnswers(sectors []encx.AdminSector) []encx.AdminSector {
 
 func sectorGroupsMatch(src scenario.Level, gameSectors []encx.AdminSector) bool {
 	want := scenarioAdminSectors(src)
-	gameSectors = gameSectorsWithAnswers(gameSectors)
-	if gameSectorsAnomalous(gameSectors) {
-		return false
+	// Ignore empty runtime placeholders only when the source has no empty sectors.
+	hasEmpty := false
+	for _, sector := range want {
+		hasEmpty = hasEmpty || len(sector.Answers) == 0
 	}
+	if !hasEmpty {
+		gameSectors = gameSectorsWithAnswers(gameSectors)
+	}
+	// Repeated names/answers can be intentional. Compare against the source
+	// position by position instead of treating repetition itself as corruption.
 	if len(want) != len(gameSectors) {
 		return false
 	}
@@ -1230,7 +1218,7 @@ func readCurrentScenarioLevelsByNumber(ctx context.Context, client *encx.Client,
 	var doc *scenario.Document
 	err := runWithAntiSpamRetry("read current game scenario", func() error {
 		var callErr error
-		doc, callErr = client.GetGameScenario(ctx, gameID)
+		doc, callErr = client.GetAdminGameScenario(ctx, gameID)
 		return callErr
 	})
 	if err != nil {
@@ -1317,7 +1305,7 @@ func syncMissingScenario(ctx context.Context, cfg *config, client *encx.Client, 
 			stats.NamesUpdated++
 		}
 
-		if src.AutopassSecond > 0 {
+		{
 			var curSettings *encx.AdminLevelSettings
 			err := runWithAntiSpamRetry(fmt.Sprintf("read level %d settings", levelNum), func() error {
 				var callErr error
@@ -1346,6 +1334,24 @@ func syncMissingScenario(ctx context.Context, cfg *config, client *encx.Client, 
 			}
 		}
 
+		if err := syncLevelTasksToScenario(ctx, client, cfg.gameId, levelNum, src, current, &stats); err != nil {
+			return stats, err
+		}
+		if err := syncLevelHintsToScenario(ctx, client, cfg.gameId, levelNum, src, current, &stats); err != nil {
+			return stats, err
+		}
+		levelID := levelIDs[levelNum]
+		if len(src.Bonuses) > 0 && levelID == 0 {
+			return stats, fmt.Errorf("level %d: missing admin level ID for bonus import", levelNum)
+		}
+		if err := syncLevelBonusesToScenario(ctx, client, cfg.gameId, levelNum, levelID, src, current, &stats); err != nil {
+			return stats, err
+		}
+		if err := syncLevelSectorsToScenario(ctx, client, cfg.gameId, levelNum, src, &stats); err != nil {
+			return stats, err
+		}
+
+		// Completion limits refer to sectors that must already exist in the engine.
 		if len(src.Sectors) > 0 || len(src.SectorAnswers) > 0 {
 			var curSettings *encx.AdminLevelSettings
 			err := runWithAntiSpamRetry(fmt.Sprintf("read level %d sector completion", levelNum), func() error {
@@ -1365,23 +1371,6 @@ func syncMissingScenario(ctx context.Context, cfg *config, client *encx.Client, 
 				}
 				stats.SectorCompletionUpdated++
 			}
-		}
-
-		if err := syncLevelTasksToScenario(ctx, client, cfg.gameId, levelNum, src, current, &stats); err != nil {
-			return stats, err
-		}
-		if err := syncLevelHintsToScenario(ctx, client, cfg.gameId, levelNum, src, current, &stats); err != nil {
-			return stats, err
-		}
-		levelID := levelIDs[levelNum]
-		if len(src.Bonuses) > 0 && levelID == 0 {
-			return stats, fmt.Errorf("level %d: missing admin level ID for bonus import", levelNum)
-		}
-		if err := syncLevelBonusesToScenario(ctx, client, cfg.gameId, levelNum, levelID, src, current, &stats); err != nil {
-			return stats, err
-		}
-		if err := syncLevelSectorsToScenario(ctx, client, cfg.gameId, levelNum, src, &stats); err != nil {
-			return stats, err
 		}
 
 		progress(fmt.Sprintf("Synced level %d/%d: %s", levelNum, len(doc.Levels), levelName))

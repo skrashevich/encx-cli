@@ -35,6 +35,7 @@ const (
 func (s *server) registerAdminAPIRoutes(root *http.ServeMux) {
 	public := tolerantMux{root}
 	mux := guardedMux{mux: public, guard: s.requireAPISession}
+	mux.HandleFunc("GET /games/{id}/scenario", s.handleScenarioExport)
 	mux.HandleFunc("GET /admin/games", s.handleAdminGames)
 	mux.HandleFunc("GET /admin/games/{id}", s.handleAdminGameEditor)
 	mux.HandleFunc("PATCH /admin/games/{id}", s.handleAdminGamePatch)
@@ -598,6 +599,10 @@ func (s *server) handleAdminLevelSettings(w http.ResponseWriter, r *http.Request
 			level.blockTypeID = body.BlockTypeID
 		}
 	case "sectors":
+		if body.PassingConditionID == 1 && body.RequiredSectorsCount > len(level.sectors) {
+			writeJSON(w, http.StatusForbidden, map[string]any{"error": "required sectors exceed existing sectors"})
+			return
+		}
 		level.passingConditionID = body.PassingConditionID
 		level.requiredSectorsCount = body.RequiredSectorsCount
 	default:

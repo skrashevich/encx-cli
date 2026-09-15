@@ -31,6 +31,7 @@ import (
 	"net/url"
 	"strings"
 	"sync"
+	"time"
 )
 
 // DefaultBaseURL is the production host of the new engine.
@@ -47,11 +48,12 @@ const maxErrorBodyBytes = 4096
 //
 // The zero value is not usable — construct it with New.
 type Client struct {
-	baseURL    string
-	domain     string
-	httpClient *http.Client
-	userAgent  string
-	lang       string
+	baseURL         string
+	domain          string
+	httpClient      *http.Client
+	userAgent       string
+	lang            string
+	requestInterval time.Duration
 
 	mu    sync.RWMutex
 	token string
@@ -98,16 +100,26 @@ func New(httpClient *http.Client, baseURL, domain string, opts ...Option) *Clien
 	if httpClient == nil {
 		httpClient = http.DefaultClient
 	}
+	// Clone the client so API pacing does not change the caller's legacy transport.
+	pacedClient := *httpClient
+	transport := httpClient.Transport
+	if transport == nil {
+		transport = http.DefaultTransport
+	}
+
 	c := &Client{
-		baseURL:    strings.TrimRight(baseURL, "/"),
-		domain:     domain,
-		httpClient: httpClient,
-		userAgent:  "encx-cli",
-		lang:       "ru",
+		baseURL:         strings.TrimRight(baseURL, "/"),
+		domain:          domain,
+		httpClient:      &pacedClient,
+		userAgent:       "encx-cli",
+		lang:            "ru",
+		requestInterval: apiRequestInterval,
 	}
 	for _, opt := range opts {
 		opt(c)
 	}
+	pacedClient.Timeout = 0 // paced transport applies the network timeout after budget waits
+	pacedClient.Transport = pacedAPITransport{base: transport, interval: c.requestInterval, attemptTimeout: httpClient.Timeout}
 	return c
 }
 
@@ -288,5 +300,14 @@ func (c *Client) setHeaders(req *http.Request) {
 	}
 	if token := c.Token(); token != "" {
 		req.Header.Set("Authorization", "Bearer "+token)
+	}
+}
+
+// WithRequestInterval changes API pacing. Nonpositive values keep the default.
+func WithRequestInterval(interval time.Duration) Option {
+	return func(c *Client) {
+		if interval > 0 {
+			c.requestInterval = interval
+		}
 	}
 }

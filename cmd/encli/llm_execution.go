@@ -217,6 +217,14 @@ func executeLLMToolCall(ctx context.Context, cfg *config, client *encx.Client, s
 		requireAdminAuth(ctx, cfg, client)
 		cmdAdminLevelContent(ctx, cfg, client, []string{strconv.Itoa(getInt("level_number"))})
 
+	case "inspect_scenario_file":
+		toolInspectScenario(getString("path"))
+	case "admin_import_scenario":
+		requireAdminAuth(ctx, cfg, client)
+		toolImportScenario(ctx, cfg, client, getString("path"))
+	case "admin_verify_scenario":
+		requireAdminAuth(ctx, cfg, client)
+		toolVerifyScenario(ctx, cfg, client, getString("path"))
 	case "admin_create_levels":
 		requireAdminAuth(ctx, cfg, client)
 		cmdAdminCreateLevels(ctx, cfg, client, []string{strconv.Itoa(getInt("count"))})

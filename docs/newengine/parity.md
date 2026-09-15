@@ -102,6 +102,7 @@ ENCX_LIVE_DOMAIN=demo.en.cx ENCX_LIVE_LOGIN=… ENCX_LIVE_PASSWORD=… \
 |---|---|---|
 | `AdminCreateGame` | POST Administration/Games/GameCreate.aspx, id из редиректа (?gid=) | POST /admin/games, id из game_id ответа |
 | `AdminGetGames` | GET /Administration/GamesManager.aspx (Status не заполняется) | GET /admin/games, все страницы |
+| `GetAdminGameScenario` | GameScenario.aspx | GET /games/{id}/scenario + level editor bonus flags |
 | `AdminGetLevels` | GET /Administration/Games/LevelManager.aspx | GET /admin/games/{id}/levels |
 | `AdminCreateLevels` | LevelManager.aspx?levels=create | POST /admin/games/{id}/levels (по одному на уровень) |
 | `AdminDeleteLevel` | LevelManager.aspx?levels=delete | DELETE /admin/games/{id}/levels/{levelId} |

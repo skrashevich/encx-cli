@@ -101,3 +101,17 @@ func TestAPIBaseURLFlagOverridesTheDerivedHost(t *testing.T) {
 		t.Errorf("APIBaseURL = %q, want the override", got)
 	}
 }
+
+func TestEngineRequestIntervalFlag(t *testing.T) {
+	cfg := parseEngineFlag(t, "-api-request-interval", "200ms")
+	if cfg.apiRequestInterval.String() != "200ms" {
+		t.Fatalf("interval = %v", cfg.apiRequestInterval)
+	}
+	if _, err := engineOptions(cfg); err != nil {
+		t.Fatal(err)
+	}
+	cfg = parseEngineFlag(t, "-api-request-interval", "-1ms")
+	if _, err := engineOptions(cfg); err == nil {
+		t.Fatal("negative request interval accepted")
+	}
+}

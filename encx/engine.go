@@ -162,6 +162,7 @@ func (c *Client) api() *enapi.Client {
 			c.domain,
 			enapi.WithUserAgent(c.userAgent),
 			enapi.WithLang(c.lang),
+			enapi.WithRequestInterval(c.apiRequestInterval),
 		)
 	}
 	return c.apiClient
@@ -349,4 +350,10 @@ func (c *Client) setCaptchaToken(token string) {
 	c.captchaMu.Lock()
 	c.captchaTok = token
 	c.captchaMu.Unlock()
+}
+
+// WithAPIRequestInterval configures REST request pacing. Nonpositive values
+// keep the default. Clients sharing a host use the slowest configured pace.
+func WithAPIRequestInterval(interval time.Duration) Option {
+	return func(c *Client) { c.apiRequestInterval = interval }
 }

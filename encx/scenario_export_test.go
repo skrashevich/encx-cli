@@ -2,6 +2,8 @@ package encx
 
 import (
 	"context"
+	"fmt"
+	"github.com/skrashevich/encx-cli/encx/enapi"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -185,5 +187,65 @@ func TestLegacyGameScenarioParsesTheExportPage(t *testing.T) {
 	}
 	if !strings.Contains(body, "lnkLevelAnchorPoint") {
 		t.Errorf("HTML export = %q", body)
+	}
+}
+
+func TestScenarioExportPreservesPenaltyBonus(t *testing.T) {
+	for _, bonus := range []enapi.BonusScenario{{BonusTime: -120}, {BonusTime: 120, BonusTimeText: "Штрафное время: 2 минуты"}} {
+		got := scenarioLevelFromAPI(enapi.LevelScenario{Bonuses: []enapi.BonusScenario{bonus}}).Bonuses[0]
+		if !got.Negative || got.AwardSeconds != 120 {
+			t.Fatalf("penalty bonus misread: %+v", got)
+		}
+	}
+}
+
+func TestScenarioExportDoesNotUseGeneratedBonusTitleAsName(t *testing.T) {
+	c := newEngineClient(t, func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(`{"game":{"id":32055},"levels":[{"level_number":15,"bonuses":[{"title":"Бонус №1 для всех","bonus_time":1},{"bonus_name":"Named","title":"Бонус №2 Named для всех","bonus_time":1}]}]}`))
+	})
+	doc, err := c.GetGameScenario(t.Context(), 32055)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if doc.Levels[0].Bonuses[0].Name != "" {
+		t.Fatalf("generated title became authored name: %q", doc.Levels[0].Bonuses[0].Name)
+	}
+	if doc.Levels[0].Bonuses[1].Name != "Named" {
+		t.Fatal("lost authored bonus name")
+	}
+}
+
+func TestAdminScenarioReadsBonusSignByID(t *testing.T) {
+	for _, missing := range []bool{false, true} {
+		t.Run(fmt.Sprint(missing), func(t *testing.T) {
+			c := newEngineClient(t, func(w http.ResponseWriter, r *http.Request) {
+				switch r.URL.Path {
+				case "/games/82448/scenario":
+					_, _ = w.Write([]byte(scenarioExportFixture))
+				case "/admin/games/82448/levels/811/editor":
+					if missing {
+						_, _ = w.Write([]byte(`{"bonuses":[]}`))
+					} else {
+						_, _ = w.Write([]byte(`{"bonuses":[{"bonus_id":999,"negative":false},{"bonus_id":5,"negative":true}]}`))
+					}
+				default:
+					t.Errorf("unexpected request %s", r.URL.Path)
+					http.NotFound(w, r)
+				}
+			})
+			doc, err := c.GetAdminGameScenario(t.Context(), 82448)
+			if missing {
+				if err == nil {
+					t.Fatal("missing administrative bonus was accepted")
+				}
+				return
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !doc.Levels[0].Bonuses[0].Negative || doc.Levels[0].Bonuses[0].AwardSeconds != 120 {
+				t.Fatalf("lost bonus sign or duration: %+v", doc.Levels[0].Bonuses[0])
+			}
+		})
 	}
 }

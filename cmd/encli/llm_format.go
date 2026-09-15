@@ -76,6 +76,12 @@ func formatToolCallForDisplay(session *llmSession, name, argsJSON string) string
 		return format(rt("Fetching game stats", "Получаю статистику"))
 	case "profile":
 		return format(rt("Fetching profile", "Получаю профиль"))
+	case "inspect_scenario_file":
+		return format(rt("Parsing scenario file", "Разбираю файл сценария"))
+	case "admin_import_scenario":
+		return format(rt("Importing and verifying scenario", "Импортирую и проверяю сценарий"))
+	case "admin_verify_scenario":
+		return format(rt("Verifying scenario", "Сверяю сценарий с исходным файлом"))
 	case "admin_create_levels":
 		cnt := getAnyInt(args["count"])
 		return format(fmt.Sprintf(rt("Creating %d levels", "Создаю %d уровней"), cnt))

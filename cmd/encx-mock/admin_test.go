@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"errors"
+	"fmt"
 	"reflect"
 	"strings"
 	"testing"
@@ -413,6 +414,11 @@ func TestMockAdminLevelSettingsRoundTrip(t *testing.T) {
 	}
 
 	// required_sectors_count only means something under the counting condition.
+	for i := range 2 {
+		if err := c.AdminCreateSector(ctx, mockGameID, 1, encx.AdminSector{Name: fmt.Sprintf("Completion %d", i), Answers: []string{"code"}}); err != nil {
+			t.Fatal(err)
+		}
+	}
 	if err := c.AdminUpdateSectorCompletion(ctx, mockGameID, 1, 2); err != nil {
 		t.Fatalf("AdminUpdateSectorCompletion(2): %v", err)
 	}

@@ -105,6 +105,21 @@ func getTools() []llmTool {
 			Parameters:  json.RawMessage(`{"type":"object","properties":{"game_id":{"type":"integer","description":"Game ID"},"level_number":{"type":"integer","description":"Level number from admin_levels"}},"required":["game_id","level_number"]}`),
 		}},
 		{Type: "function", Function: llmFunction{
+			Name:        "inspect_scenario_file",
+			Description: "Parse an Encounter GameScenario HTML file locally and return exact counts and title without loading raw HTML into context. Use BEFORE creating a game from an attached HTML scenario. The source game ID belongs to the source domain; do not use it on the target domain.",
+			Parameters:  json.RawMessage(`{"type":"object","properties":{"path":{"type":"string"}},"required":["path"]}`),
+		}},
+		{Type: "function", Function: llmFunction{
+			Name:        "admin_import_scenario",
+			Description: "Import all levels, names, tasks, hints, bonuses, sector answers, comments and timers directly from an Encounter GameScenario HTML file. Aligns existing levels by position, replacing mismatched content and creating missing levels; never wipes the game or deletes extra levels. Verifies against a fresh full export and reports success only on a match. Use after admin_create_game instead of hundreds of manual tool calls. Requires a target game_id on the current domain.",
+			Parameters:  json.RawMessage(`{"type":"object","properties":{"game_id":{"type":"integer","minimum":1},"path":{"type":"string"}},"required":["game_id","path"]}`),
+		}},
+		{Type: "function", Function: llmFunction{
+			Name:        "admin_verify_scenario",
+			Description: "Compare every imported level against the source GameScenario HTML file; read-only. Reports missing or mismatched content, settings and extra levels.",
+			Parameters:  json.RawMessage(`{"type":"object","properties":{"game_id":{"type":"integer","minimum":1},"path":{"type":"string"}},"required":["game_id","path"]}`),
+		}},
+		{Type: "function", Function: llmFunction{
 			Name:        "admin_create_levels",
 			Description: "Create new levels in a game",
 			Parameters:  json.RawMessage(`{"type":"object","properties":{"game_id":{"type":"integer","description":"Game ID"},"count":{"type":"integer","description":"Number of levels to create"}},"required":["game_id","count"]}`),

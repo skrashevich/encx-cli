@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"strings"
+	"time"
 
 	"github.com/skrashevich/encx-cli/encx"
 )
@@ -14,6 +15,7 @@ import (
 // Encounter is migrating from the ASP.NET engine to a REST one; both are
 // implemented in encx, so the flag only chooses which of them answers.
 func registerEngineFlag(fs *flag.FlagSet, cfg *config) {
+	fs.DurationVar(&cfg.apiRequestInterval, "api-request-interval", 40*time.Millisecond, "Minimum interval between REST API requests (e.g. 200ms = 5 requests/s)")
 	fs.StringVar(&cfg.engine, "engine", os.Getenv(encx.EngineEnvVar),
 		"Encounter engine: legacy (default), new, or auto to probe the API host (env: "+encx.EngineEnvVar+")")
 	// Without an override the API host is derived from the domain
@@ -31,6 +33,12 @@ const apiBaseURLEnvVar = "ENCX_API_BASE_URL"
 // default engine while they believe they asked for another one.
 func engineOptions(cfg *config) ([]encx.Option, error) {
 	var opts []encx.Option
+	if cfg.apiRequestInterval < 0 {
+		return nil, fmt.Errorf("api-request-interval must not be negative")
+	}
+	if cfg.apiRequestInterval > 0 {
+		opts = append(opts, encx.WithAPIRequestInterval(cfg.apiRequestInterval))
+	}
 	if value := strings.TrimSpace(cfg.engine); value != "" {
 		mode, ok := encx.ParseEngineMode(value)
 		if !ok {

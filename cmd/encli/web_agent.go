@@ -107,13 +107,6 @@ func lastUserMessageContent(messages []llmMessage) string {
 }
 
 func runWebChatTurn(ctx context.Context, hub *webHub, chatID string) {
-	agentCfg, err := resolveAgentConfig(hub.cfg)
-	if err != nil {
-		hub.publishSSE(chatID, agentEventError, map[string]any{"message": err.Error()})
-		hub.publishSSE(chatID, agentEventDone, map[string]any{"chat_id": chatID})
-		return
-	}
-
 	t, unlock, ok := hub.store.LockThread(chatID)
 	if !ok {
 		hub.publishSSE(chatID, agentEventError, map[string]any{"message": "chat not found"})
@@ -121,6 +114,11 @@ func runWebChatTurn(ctx context.Context, hub *webHub, chatID string) {
 		return
 	}
 	defer unlock()
+	agentCfg, err := resolveAgentConfig(hub.cfg)
+	if err != nil {
+		hub.handleAgentEvent(chatID, t, AgentEvent{Type: agentEventError, Message: err.Error()})
+		return
+	}
 
 	chatCfg := chatConfigFromThread(hub.cfg, t)
 	if t.session == nil {
@@ -151,7 +149,9 @@ func runWebChatTurn(ctx context.Context, hub *webHub, chatID string) {
 	hub.registry.WithDomainLock(t.Domain, func() {
 		_, runErr = runAgentLoop(ctx, agentCfg, &loopIn, AgentCallbacks{
 			OnEvent: func(ev AgentEvent) {
-				hub.handleAgentEvent(chatID, t, ev)
+				if ev.Type != agentEventError {
+					hub.handleAgentEvent(chatID, t, ev)
+				}
 			},
 			OnStatus: func(phase, message string) {
 				hub.publishSSE(chatID, "status", map[string]any{
@@ -184,7 +184,7 @@ func runWebChatTurn(ctx context.Context, hub *webHub, chatID string) {
 	hub.store.Persist(chatID)
 
 	if runErr != nil {
-		hub.publishSSE(chatID, agentEventError, map[string]any{"message": runErr.Error()})
+		hub.handleAgentEvent(chatID, t, AgentEvent{Type: agentEventError, Message: runErr.Error()})
 	}
 }
 
@@ -226,6 +226,7 @@ func (h *webHub) handleAgentEvent(chatID string, t *ChatThread, ev AgentEvent) {
 		if msg == "" && ev.Err != nil {
 			msg = ev.Err.Error()
 		}
+		t.appendUIMessage(UIMessageRoleSystem, "Ошибка: "+msg, "")
 		h.publishSSE(chatID, agentEventError, map[string]any{"message": msg})
 	case agentEventDone:
 		h.publishSSE(chatID, agentEventDone, map[string]any{"chat_id": chatID})

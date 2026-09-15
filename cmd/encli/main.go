@@ -31,26 +31,27 @@ var (
 
 // Config holds parsed CLI configuration.
 type config struct {
-	domain            string
-	login             string
-	password          string
-	gameId            int
-	insecure          bool
-	useHTTP           bool
-	jsonOutput        bool
-	debug             bool
-	harRecording      bool
-	harOut            string
-	agentReadonly     bool
-	agentSecurity     AgentSecurityMode // default for new web chats
-	mcpSecurity       string            // engine access policy for the mcp subcommand
-	importDryRun      bool
-	importSyncMissing bool
-	engine            string // legacy | new | auto (env: ENCX_ENGINE)
-	apiBaseURL        string // new-engine API host (env: ENCX_API_BASE_URL)
-	llmAuth           string // agent transport: apikey (default) | codex | gigachat (env: LLM_AUTH)
-	codexDevice       bool   // codex-login: use the device-code flow
-	codexNoBrowser    bool   // codex-login: do not open a browser
+	domain             string
+	login              string
+	password           string
+	gameId             int
+	insecure           bool
+	useHTTP            bool
+	jsonOutput         bool
+	debug              bool
+	harRecording       bool
+	harOut             string
+	agentReadonly      bool
+	agentSecurity      AgentSecurityMode // default for new web chats
+	mcpSecurity        string            // engine access policy for the mcp subcommand
+	importDryRun       bool
+	importSyncMissing  bool
+	engine             string // legacy | new | auto (env: ENCX_ENGINE)
+	apiRequestInterval time.Duration
+	apiBaseURL         string // new-engine API host (env: ENCX_API_BASE_URL)
+	llmAuth            string // agent transport: apikey (default) | codex | gigachat (env: LLM_AUTH)
+	codexDevice        bool   // codex-login: use the device-code flow
+	codexNoBrowser     bool   // codex-login: do not open a browser
 }
 
 func main() {

@@ -697,13 +697,10 @@ func TestSectorGroupsMatchIgnoresEmptyStartedSectors(t *testing.T) {
 	}
 }
 
-func TestGameSectorsAnomalous(t *testing.T) {
+func TestSectorGroupsMatchRejectsUnexpectedDuplicates(t *testing.T) {
 	game := []encx.AdminSector{
 		{Name: "Сектор 1", Answers: []string{"поехалистрадать"}},
 		{Name: "Сектор 1", Answers: []string{"поехалистрадать66"}},
-	}
-	if !gameSectorsAnomalous(game) {
-		t.Fatal("duplicate sector names must be anomalous")
 	}
 	scenarioLevel := scenario.Level{Sectors: []scenario.Sector{{Name: "Сектор 1", Answers: []string{"поехалистрадать66"}}}}
 	if sectorGroupsMatch(scenarioLevel, game) {
