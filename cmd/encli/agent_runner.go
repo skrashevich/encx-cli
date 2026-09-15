@@ -376,7 +376,8 @@ func (p *observedPicoProvider) chatWithWait(
 			}
 		}
 	}()
-	return p.delegate.Chat(ctx, messages, toolDefs, model, options)
+	response, err := p.delegate.Chat(ctx, messages, toolDefs, model, options)
+	return response, withAPIErrorDetail(err)
 }
 
 type picoLegacyTool struct {

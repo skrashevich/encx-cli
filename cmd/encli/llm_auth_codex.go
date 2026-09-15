@@ -26,7 +26,7 @@ const authMethodAPIKey = "apikey"
 
 // defaultCodexModel is what the ChatGPT backend serves. The OpenRouter default
 // would be rejected by the Codex endpoint, so subscription runs need their own.
-const defaultCodexModel = "gpt-5.3-codex-spark"
+const defaultCodexModel = "gpt-5.5"
 
 // codexAuthFileEnvVar relocates the credential file; tests use it to stay out
 // of the developer's real home directory.

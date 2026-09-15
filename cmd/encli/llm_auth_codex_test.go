@@ -791,8 +791,8 @@ func TestCodexModelResolvesTheNameTheBackendWillServe(t *testing.T) {
 	for _, tc := range []struct {
 		configured, want, why string
 	}{
-		{"", defaultCodexModel, "unset"},
-		{"   ", defaultCodexModel, "blank"},
+		{"", "gpt-5.5", "unset"},
+		{"   ", "gpt-5.5", "blank"},
 		{"gpt-5.1-codex-mini", "gpt-5.1-codex-mini", "gpt- family passes"},
 		{"o3", "o3", "o3 family passes"},
 		{"o4-mini", "o4-mini", "o4 family passes"},
