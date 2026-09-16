@@ -44,7 +44,8 @@ jobs:
           done
 
       - name: Compress with UPX
-        if: (matrix.goos == 'linux' || matrix.goos == 'windows') && !(matrix.goos == 'windows' && matrix.goarch == 'arm64')
+        # Temporarily skip Windows: UPX-packed binaries trigger antivirus detections.
+        if: matrix.goos == 'linux'
         uses: crazy-max/ghaction-upx@v4
         with:
           version: latest
