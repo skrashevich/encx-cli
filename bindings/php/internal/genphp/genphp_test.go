@@ -131,8 +131,8 @@ func TestClientDeclaresEveryBoundSymbol(t *testing.T) {
 	}
 	// The surface of encxmobile as it stands today; a change here means the
 	// bound Go API changed and the PHP file must be regenerated.
-	if want != 47 {
-		t.Errorf("expected 47 public methods on Client, model now yields %d", want)
+	if want != 48 {
+		t.Errorf("expected 48 public methods on Client, model now yields %d", want)
 	}
 
 	names := map[string]bool{}

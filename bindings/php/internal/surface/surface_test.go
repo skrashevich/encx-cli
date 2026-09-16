@@ -204,12 +204,15 @@ func TestConstructors(t *testing.T) {
 			t.Errorf("%s: Result.Kind = %v, want KindHandle", f.Name, f.Result.Kind)
 		}
 	}
-	want := []string{"NewClient", "NewClientWithOptions"}
+	want := []string{"NewClient", "NewClientWithAPIOptions", "NewClientWithOptions"}
 	if !reflect.DeepEqual(names, want) {
 		t.Fatalf("Constructors = %v, want %v", names, want)
 	}
 	if c := funcByName(t, m.Constructors, "NewClient"); c.CName != "encx_new_client" {
 		t.Errorf("NewClient CName = %q", c.CName)
+	}
+	if c := funcByName(t, m.Constructors, "NewClientWithAPIOptions"); c.CName != "encx_new_client_with_api_options" {
+		t.Errorf("NewClientWithAPIOptions CName = %q", c.CName)
 	}
 	if c := funcByName(t, m.Constructors, "NewClientWithOptions"); c.CName != "encx_new_client_with_options" {
 		t.Errorf("NewClientWithOptions CName = %q", c.CName)
