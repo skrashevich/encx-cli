@@ -17,3 +17,4 @@ xcuserdata/
 /ios/encx-cli/
 docs/newengine/pdf/.cache/
 /bindings/php/lib/
+.tmp

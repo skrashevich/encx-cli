@@ -17,3 +17,4 @@ coverage
 .omc
 .github
 *.md
+.tmp
