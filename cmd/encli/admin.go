@@ -7,9 +7,44 @@ import (
 	"strconv"
 	"strings"
 	"text/tabwriter"
+	"time"
 
 	"github.com/skrashevich/encx-cli/encx"
 )
+
+// gameDateLayouts are the spellings a game date arrives in: the admin editor's
+// own, and the RFC3339 the CLI and the REST engine accept.
+// The minute-precision spellings are here because that is how a person writes a
+// game time: "start=07.06.2027 18:30". Without them the value parsed nowhere,
+// the accept-ratings date was left behind, and the engine refused the whole
+// update over a field the caller never mentioned.
+var gameDateLayouts = []string{
+	"02.01.2006 15:04:05",
+	"02.01.2006 15:04",
+	time.RFC3339,
+	"2006-01-02T15:04:05",
+	"2006-01-02T15:04",
+	"2006-01-02 15:04:05",
+	"2006-01-02 15:04",
+}
+
+// parseGameDateTime reads a game date as WALL-CLOCK time. The editor's dates
+// carry no zone at all, so an RFC3339 value is reduced to the clock its own
+// offset shows; comparing a zoned instant against a naive one would otherwise
+// shift every comparison by the domain's offset.
+func parseGameDateTime(value string) (time.Time, bool) {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return time.Time{}, false
+	}
+	for _, layout := range gameDateLayouts {
+		if t, err := time.Parse(layout, value); err == nil {
+			return time.Date(t.Year(), t.Month(), t.Day(),
+				t.Hour(), t.Minute(), t.Second(), 0, time.UTC), true
+		}
+	}
+	return time.Time{}, false
+}
 
 func cmdProfile(ctx context.Context, cfg *config, client *encx.Client) {
 	profile, err := client.GetProfile(ctx)
@@ -748,12 +783,17 @@ func cmdAdminUpdateGame(ctx context.Context, cfg *config, client *encx.Client, a
 	}
 
 	// Parse key=value args to override specific fields.
+	startMoved := false
+	acceptRateGiven := false
 	for _, arg := range args {
 		key, val, ok := strings.Cut(arg, "=")
 		if !ok {
 			fatal("Arguments must be in key=value format. Got: %s", arg)
 		}
 		switch strings.ToLower(key) {
+		case "accept_rate_from":
+			info.AcceptRateFrom = val
+			acceptRateGiven = true
 		case "title":
 			info.Title = val
 		case "authors":
@@ -764,6 +804,7 @@ func cmdAdminUpdateGame(ctx context.Context, cfg *config, client *encx.Client, a
 			info.Prize = val
 		case "start":
 			info.StartDateTime = val
+			startMoved = true
 		case "finish":
 			info.FinishDateTime = val
 		case "request_last_date":
@@ -775,7 +816,22 @@ func cmdAdminUpdateGame(ctx context.Context, cfg *config, client *encx.Client, a
 			}
 			info.IsModerated = b
 		default:
-			fatal("Unknown field: %s (supported: title, authors, description, prize, start, finish, request_last_date, moderated)", key)
+			fatal("Unknown field: %s (supported: title, authors, description, prize, start, finish, "+
+				"request_last_date, accept_rate_from, moderated)", key)
+		}
+	}
+
+	// The editor refuses a start later than the date it begins accepting ratings
+	// from, and answers only "Дата начала приема оценок за игру не должна быть
+	// раньше даты начала игры" — so moving a start forward fails on a field the
+	// caller never mentioned and probably does not care about. The engine sets
+	// the two equal when it creates a game; keep them that way unless the caller
+	// asked for a specific value.
+	if startMoved && !acceptRateGiven {
+		if newStart, ok := parseGameDateTime(info.StartDateTime); ok {
+			if acceptFrom, ok := parseGameDateTime(info.AcceptRateFrom); !ok || acceptFrom.Before(newStart) {
+				info.AcceptRateFrom = info.StartDateTime
+			}
 		}
 	}
 

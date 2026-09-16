@@ -77,6 +77,18 @@ type llmSession struct {
 	loadedLevelContent     map[int]struct{} // levels read via admin_level_content in this chat
 	enumeratedLevelNumbers []int            // from latest admin_levels in this agent run
 	levelCompletionNudges  int              // auto-nudges when model answers before loading all levels
+
+	// agentBytesPerToken is what this chat's traffic measured last time the
+	// provider priced it. It lives on the session because a fresh run is started
+	// for every user message: without it, the first turn of each message — the
+	// one carrying the whole transcript — would be bounded at the uncalibrated
+	// budget and would trim what the run is about to need.
+	agentBytesPerToken float64
+	// agentRequestCeiling is what this chat learned about the model's real
+	// window: the size of a request it refused, halved. Kept beside the rate for
+	// the same reason — without it every user message re-discovers the window by
+	// having two oversized requests refused.
+	agentRequestCeiling int
 }
 
 func cmdLLM(ctx context.Context, cfg *config, client *encx.Client, prompt string) {

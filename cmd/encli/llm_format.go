@@ -202,6 +202,12 @@ func formatToolCallForDisplay(session *llmSession, name, argsJSON string) string
 	case "wikipedia_article":
 		t := getAnyString(args["title"])
 		return format(rt("Wikipedia article: ", "Статья Википедии: ") + t)
+	case "fetch_url":
+		u := getAnyString(args["url"])
+		if u != "" {
+			return format(rt("Fetching: ", "Загружаю: ") + u)
+		}
+		return format(rt("Fetching a web page", "Загружаю веб-страницу"))
 	default:
 		return format(fmt.Sprintf("[%s] %s", name, argsJSON))
 	}

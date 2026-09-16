@@ -20,6 +20,7 @@ var contentToolFields = map[string]string{
 	"read_local_file":   "content",
 	"read_pdf_file":     "content",
 	"wikipedia_article": "extract",
+	"fetch_url":         "content",
 }
 
 func prepareToolResultForLLM(name, result string) string {
@@ -554,6 +555,9 @@ func truncateToolContent(result, field string) string {
 		if _, present := payload["read"]; present {
 			payload["read"] = len(delivered)
 		}
+		// fetch_url needs no branch here: it clamps max_bytes to this same
+		// ceiling and writes its own next_offset, so its results never arrive
+		// oversized. Only the local readers, which page up to 512 KiB, do.
 		if pages, present := payload["num_pages"]; present {
 			// A byte offset into the concatenated text of a multi-page document
 			// names no page, so there is nothing to resume from: the only way

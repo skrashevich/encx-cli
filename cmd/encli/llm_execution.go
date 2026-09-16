@@ -328,6 +328,21 @@ func executeLLMToolCall(ctx context.Context, cfg *config, client *encx.Client, s
 			getString("text"),
 		})
 
+	case "admin_update_task":
+		requireAdminAuth(ctx, cfg, client)
+		cmdAdminUpdateTask(ctx, cfg, client, []string{
+			strconv.Itoa(getInt("level_number")),
+			strconv.Itoa(getInt("task_id")),
+			getString("text"),
+		})
+
+	case "admin_delete_task":
+		requireAdminAuth(ctx, cfg, client)
+		cmdAdminDeleteTask(ctx, cfg, client, []string{
+			strconv.Itoa(getInt("level_number")),
+			strconv.Itoa(getInt("task_id")),
+		})
+
 	case "admin_set_comment":
 		requireAdminAuth(ctx, cfg, client)
 		positional := []string{strconv.Itoa(getInt("level_number")), getString("name")}
@@ -446,6 +461,9 @@ func executeLLMToolCall(ctx context.Context, cfg *config, client *encx.Client, s
 		if r := getString("request_last_date"); r != "" {
 			positional = append(positional, "request_last_date="+r)
 		}
+		if a := getString("accept_rate_from"); a != "" {
+			positional = append(positional, "accept_rate_from="+a)
+		}
 		// An absent moderated flag leaves the game's current setting alone;
 		// cmdAdminUpdateGame reads the game before writing it back.
 		if moderated, ok := moderatedArg(args["moderated"]); ok {
@@ -488,6 +506,9 @@ func executeLLMToolCall(ctx context.Context, cfg *config, client *encx.Client, s
 
 	case "wikipedia_article":
 		toolWikipediaArticle(ctx, getString("title"), getString("lang"))
+
+	case "fetch_url":
+		toolFetchURL(ctx, getString("url"), getInt("max_bytes"), getInt("offset"))
 
 	default:
 		fatal("Unknown tool call: %s", name)

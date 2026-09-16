@@ -29,6 +29,10 @@ type persistedSess struct {
 	PreferRussian      bool              `json:"prefer_russian"`
 	PendingFixes       []pendingAdminFix `json:"pending_fixes,omitempty"`
 	LoadedLevelContent []int             `json:"loaded_level_content,omitempty"`
+	// AgentBytesPerToken survives a restart so the first turn of the first
+	// message after it is bounded at the rate this chat already measured.
+	AgentBytesPerToken  float64 `json:"agent_bytes_per_token,omitempty"`
+	AgentRequestCeiling int     `json:"agent_request_ceiling,omitempty"`
 }
 
 func (s *ChatStore) LoadFromDisk() error {
@@ -73,6 +77,8 @@ func (s *ChatStore) LoadFromDisk() error {
 		if t.session == nil {
 			t.session = &llmSession{}
 		}
+		t.session.agentBytesPerToken = pc.Session.AgentBytesPerToken
+		t.session.agentRequestCeiling = pc.Session.AgentRequestCeiling
 		if len(pc.Session.LoadedLevelContent) > 0 {
 			applyLoadedLevels(t.session, pc.Session.LoadedLevelContent)
 		} else {
@@ -102,10 +108,12 @@ func (s *ChatStore) Persist(id string) {
 	}
 	if t.session != nil {
 		pc.Session = persistedSess{
-			SecurityMode:       t.session.securityMode.effective(),
-			PreferRussian:      t.session.preferRussian,
-			PendingFixes:       append([]pendingAdminFix(nil), t.session.pendingFixes...),
-			LoadedLevelContent: loadedLevelsSlice(t.session.loadedLevelContent),
+			SecurityMode:        t.session.securityMode.effective(),
+			PreferRussian:       t.session.preferRussian,
+			PendingFixes:        append([]pendingAdminFix(nil), t.session.pendingFixes...),
+			LoadedLevelContent:  loadedLevelsSlice(t.session.loadedLevelContent),
+			AgentBytesPerToken:  t.session.agentBytesPerToken,
+			AgentRequestCeiling: t.session.agentRequestCeiling,
 		}
 	}
 	s.mu.Unlock()

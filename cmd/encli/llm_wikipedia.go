@@ -11,7 +11,9 @@ import (
 	"time"
 )
 
-const wikipediaUserAgent = "encx-cli/1.0 (https://github.com/skrashevich/encx-cli; LLM agent)"
+// agentUserAgent identifies every outbound request the agent makes on the
+// user's behalf, so a site operator sees one name rather than one per tool.
+const agentUserAgent = "encx-cli/1.0 (https://github.com/skrashevich/encx-cli; LLM agent)"
 
 var wikipediaHTTPClient = &http.Client{Timeout: 15 * time.Second}
 
@@ -41,7 +43,7 @@ func wikipediaFetch(ctx context.Context, lang string, params url.Values) ([]byte
 	if err != nil {
 		return nil, err
 	}
-	req.Header.Set("User-Agent", wikipediaUserAgent)
+	req.Header.Set("User-Agent", agentUserAgent)
 
 	resp, err := wikipediaHTTPClient.Do(req)
 	if err != nil {

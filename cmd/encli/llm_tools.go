@@ -181,8 +181,18 @@ func getTools() []llmTool {
 		}},
 		{Type: "function", Function: llmFunction{
 			Name:        "admin_create_task",
-			Description: "Create a task (assignment text) on a level",
+			Description: "Add a task (assignment text) to a level that has none. A level holds one task: if it already has one this fails — read the task id with admin_level_content and call admin_update_task to replace the text.",
 			Parameters:  json.RawMessage(`{"type":"object","properties":{"game_id":{"type":"integer","description":"Game ID"},"level_number":{"type":"integer","description":"Level number"},"text":{"type":"string","description":"Task text"}},"required":["game_id","level_number","text"]}`),
+		}},
+		{Type: "function", Function: llmFunction{
+			Name:        "admin_update_task",
+			Description: "Replace the text of an existing task. This is how a level's assignment is rewritten; admin_create_task only adds a task to a level that has none. Task ids come from admin_level_content. Works even while the game is running.",
+			Parameters:  json.RawMessage(`{"type":"object","properties":{"game_id":{"type":"integer","description":"Game ID"},"level_number":{"type":"integer","description":"Level number"},"task_id":{"type":"integer","description":"Task ID from admin_level_content"},"text":{"type":"string","description":"New task text"}},"required":["game_id","level_number","task_id","text"]}`),
+		}},
+		{Type: "function", Function: llmFunction{
+			Name:        "admin_delete_task",
+			Description: "Delete a task from a level by its ID (from admin_level_content). Use admin_update_task to rewrite a task; delete only when the level should have no task at all.",
+			Parameters:  json.RawMessage(`{"type":"object","properties":{"game_id":{"type":"integer","description":"Game ID"},"level_number":{"type":"integer","description":"Level number"},"task_id":{"type":"integer","description":"Task ID from admin_level_content"}},"required":["game_id","level_number","task_id"]}`),
 		}},
 		{Type: "function", Function: llmFunction{
 			Name:        "admin_set_comment",
@@ -237,7 +247,7 @@ func getTools() []llmTool {
 		{Type: "function", Function: llmFunction{
 			Name:        "admin_update_game",
 			Description: "Update game settings (title, description, authors, prize, start/finish dates, request deadline, request moderation). Only specified fields are changed; others are preserved.",
-			Parameters:  json.RawMessage(`{"type":"object","properties":{"game_id":{"type":"integer","description":"Game ID"},"title":{"type":"string","description":"Game title"},"authors":{"type":"string","description":"Game authors"},"description":{"type":"string","description":"Game description (HTML)"},"prize":{"type":"string","description":"Prize value"},"start":{"type":"string","description":"Start datetime, RFC3339 (e.g. 2026-09-10T18:00:00+03:00). Cannot be changed once the game has started."},"finish":{"type":"string","description":"Finish datetime, RFC3339"},"request_last_date":{"type":"string","description":"Last date to request participation, RFC3339"},"moderated":{"type":"boolean","description":"Participation requests need the organizer's approval; false accepts them automatically"}},"required":["game_id"]}`),
+			Parameters:  json.RawMessage(`{"type":"object","properties":{"game_id":{"type":"integer","description":"Game ID"},"title":{"type":"string","description":"Game title"},"authors":{"type":"string","description":"Game authors"},"description":{"type":"string","description":"Game description (HTML)"},"prize":{"type":"string","description":"Prize value"},"start":{"type":"string","description":"Start datetime, RFC3339 (e.g. 2026-09-10T18:00:00+03:00). Cannot be changed once the game has started."},"finish":{"type":"string","description":"Finish datetime, RFC3339"},"request_last_date":{"type":"string","description":"Last date to request participation, RFC3339"},"accept_rate_from":{"type":"string","description":"Date the game starts accepting ratings, RFC3339. The engine refuses a start later than this, so moving start forward moves it along unless you set it here."},"moderated":{"type":"boolean","description":"Participation requests need the organizer's approval; false accepts them automatically"}},"required":["game_id"]}`),
 		}},
 		{Type: "function", Function: llmFunction{
 			Name:        "admin_not_deliver",
@@ -273,6 +283,11 @@ func getTools() []llmTool {
 			Name:        "wikipedia_article",
 			Description: "Fetch a Wikipedia article summary (plain-text intro extract) by title. Use to verify facts from a known article title.",
 			Parameters:  json.RawMessage(`{"type":"object","properties":{"title":{"type":"string","description":"Article title"},"lang":{"type":"string","description":"Wikipedia language code (default: ru)"}},"required":["title"]}`),
+		}},
+		{Type: "function", Function: llmFunction{
+			Name:        "fetch_url",
+			Description: "Fetch an external web page or text document by URL and return it as plain text (HTML is converted to readable text). Use this whenever the user gives a link — question packs, rules, articles, any public page. Do not tell the user a link cannot be opened; call this tool.",
+			Parameters:  json.RawMessage(`{"type":"object","properties":{"url":{"type":"string","description":"Absolute http or https URL"},"max_bytes":{"type":"integer","description":"Max bytes of text to return (default 65536, max 524288)"},"offset":{"type":"integer","description":"Byte offset into the extracted text; use to page through a long document"}},"required":["url"]}`),
 		}},
 		{Type: "function", Function: llmFunction{
 			Name:        "propose_admin_fix",

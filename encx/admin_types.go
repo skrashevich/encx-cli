@@ -141,6 +141,12 @@ type AdminGameInfo struct {
 	MaxPlayers     string `json:"max_players,omitempty"`
 	MaxTeamPlayers string `json:"max_team_players,omitempty"`
 
+	// Fee is the participation fee the editor refuses to save the form without,
+	// and FeeCurrency the currency it is charged in; both travel on every
+	// update so one that does not mention them leaves them as they were.
+	Fee         string `json:"fee,omitempty"`
+	FeeCurrency string `json:"fee_currency,omitempty"`
+
 	// Rating/certificates
 	ShowFee          string `json:"show_fee,omitempty"`
 	CertificateMode  string `json:"certificate_mode,omitempty"`

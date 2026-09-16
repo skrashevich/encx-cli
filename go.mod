@@ -14,6 +14,7 @@ require (
 	github.com/sipeed/picoclaw v0.3.1
 	golang.org/x/image v0.46.0
 	golang.org/x/mobile v0.0.0-20260908204917-8b95e45f8d3e
+	golang.org/x/net v0.59.0
 	golang.org/x/term v0.46.0
 )
 
@@ -103,7 +104,6 @@ require (
 	go.yaml.in/yaml/v4 v4.0.0-rc.6 // indirect
 	golang.org/x/crypto v0.57.0 // indirect
 	golang.org/x/mod v0.41.0 // indirect
-	golang.org/x/net v0.59.0 // indirect
 	golang.org/x/oauth2 v0.36.0 // indirect
 	golang.org/x/sync v0.23.0 // indirect
 	golang.org/x/sys v0.48.0 // indirect

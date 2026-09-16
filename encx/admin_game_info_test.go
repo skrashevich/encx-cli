@@ -13,9 +13,13 @@ import (
 // an ordinary input on a game that has not begun and a disabled one afterwards,
 // which is how the editor itself renders it.
 func gameEditorPage(startDisabled bool) string {
-	start := `<input name="StartDateTime" value="10.09.2026 18:00:00">`
+	return gameEditorPageWithStart(startDisabled, "10.09.2026 18:00:00")
+}
+
+func gameEditorPageWithStart(startDisabled bool, startValue string) string {
+	start := `<input name="StartDateTime" value="` + startValue + `">`
 	if startDisabled {
-		start = `<input name="StartDateTime" value="10.09.2026 18:00:00" disabled="disabled">`
+		start = `<input name="StartDateTime" value="` + startValue + `" disabled="disabled">`
 	}
 	return `<form>` + start + `
 	<input name="GameTitle" value="Игра">
@@ -28,7 +32,8 @@ func gameEditorPage(startDisabled bool) string {
 	<input name="FirstPlaces" value="3">
 	<input name="NotFirstPlaces" value="3">
 	<input name="txtAcceptRateFrom" value="11.09.2026 18:00:00">
-	<input type="checkbox" name="IsModerated" checked>
+	<input type="radio" id="IsModeratedYes" name="IsModerated" value="true" checked="checked"/>
+	<input type="radio" id="IsModeratedNo" name="IsModerated" value="false"/>
 	<textarea name="Descr">Описание</textarea>
 	</form>`
 }
@@ -37,16 +42,22 @@ func gameEditorPage(startDisabled bool) string {
 // update posts back to it.
 func legacyGameEditorClient(t *testing.T, startDisabled bool, posted *url.Values) *Client {
 	t.Helper()
+	// The editor serves back what it saved, which is what lets an update verify
+	// its own start; a started game keeps the old one however it is posted.
+	savedStart := "10.09.2026 18:00:00"
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method == http.MethodPost {
 			if err := r.ParseForm(); err != nil {
 				t.Errorf("ParseForm: %v", err)
 			}
 			*posted = r.Form
+			if start := r.Form.Get("StartDateTime"); start != "" && !startDisabled {
+				savedStart = start
+			}
 			_, _ = w.Write([]byte("ok"))
 			return
 		}
-		_, _ = w.Write([]byte(gameEditorPage(startDisabled)))
+		_, _ = w.Write([]byte(gameEditorPageWithStart(startDisabled, savedStart)))
 	}))
 	t.Cleanup(server.Close)
 	return New(strings.TrimPrefix(server.URL, "http://"),

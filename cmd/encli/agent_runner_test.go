@@ -336,6 +336,7 @@ func TestRuntimeAnswersARepeatedContentReadFromTheEarlierResult(t *testing.T) {
 	if runtime.repeatedContentRead("read_pdf_file", args) {
 		t.Fatal("the first read was treated as a repeat")
 	}
+	runtime.afterToolResult("read_pdf_file", args, `{"content":"страница"}`)
 	if !runtime.repeatedContentRead("read_pdf_file", args) {
 		t.Fatal("the second identical read was not recognised as a repeat")
 	}
@@ -345,9 +346,109 @@ func TestRuntimeAnswersARepeatedContentReadFromTheEarlierResult(t *testing.T) {
 	}
 	// Tools that do not carry documents are never deduplicated: calling them
 	// again is how the agent observes a change it just made.
-	if runtime.repeatedContentRead("admin_levels", `{"game_id":1}`) ||
-		runtime.repeatedContentRead("admin_levels", `{"game_id":1}`) {
+	args = `{"game_id":1}`
+	runtime.afterToolResult("admin_levels", args, `{"count":1,"levels":[{"number":1}]}`)
+	if runtime.repeatedContentRead("admin_levels", args) {
 		t.Fatal("a non-content tool was deduplicated")
+	}
+}
+
+// Level content is a document too. A review of thirty levels re-read all thirty
+// every time the transcript was trimmed, and re-reading them is what trimmed it
+// again; the run never got past the first pass.
+func TestRuntimeRefusesARepeatedLevelContentRead(t *testing.T) {
+	t.Parallel()
+	runtime := &picoLegacyToolRuntime{delivered: map[string]struct{}{}}
+
+	args := `{"game_id":82856,"level_number":1}`
+	if runtime.repeatedContentRead("admin_level_content", args) {
+		t.Fatal("the first read was treated as a repeat")
+	}
+	runtime.afterToolResult("admin_level_content", args, `{"level":1,"tasks":[]}`)
+	if !runtime.repeatedContentRead("admin_level_content", args) {
+		t.Fatal("the second identical read was not recognised as a repeat")
+	}
+	if runtime.repeatedContentRead("admin_level_content", `{"game_id":82856,"level_number":2}`) {
+		t.Fatal("another level was treated as a repeat")
+	}
+	// The refusal is told to a model that has no page or offset to change, so it
+	// must not demand different arguments it cannot supply.
+	refusal := repeatedReadRefusal("admin_level_content")
+	if strings.Contains(refusal, "offset=N") || strings.Contains(refusal, "page=N") {
+		t.Fatalf("a level read cannot be paged: %s", refusal)
+	}
+}
+
+// A level that failed is not a level that was delivered. Recording the memo at
+// the point of the call meant a 429 on level 17 could never be retried, while
+// the nudge that counts unread levels kept asking for it — the same loop this
+// guard exists to break, in miniature.
+func TestAFailedReadIsNotRememberedAsDelivered(t *testing.T) {
+	t.Parallel()
+	runtime := &picoLegacyToolRuntime{delivered: map[string]struct{}{}}
+
+	args := `{"game_id":82856,"level_number":17}`
+	runtime.afterToolResult("admin_level_content", args, `{"error":"HTTP 429: too many requests"}`)
+	if runtime.repeatedContentRead("admin_level_content", args) {
+		t.Fatal("a level that answered with an error cannot be asked for again")
+	}
+}
+
+// The schema requires game_id and level_number, but models break schemas. Keying
+// the memo on the raw argument string gave every spelling of one read — the game
+// id dropped, a field invented — its own free pass through the guard.
+func TestRepeatedLevelReadIsKeyedByWhatItAddresses(t *testing.T) {
+	t.Parallel()
+	runtime := &picoLegacyToolRuntime{
+		input:     &AgentRunInput{Cfg: &config{gameId: 82856}},
+		delivered: map[string]struct{}{},
+	}
+
+	runtime.afterToolResult("admin_level_content", `{"game_id":82856,"level_number":1}`, `{"level":1}`)
+	if !runtime.repeatedContentRead("admin_level_content", `{"level_number":1}`) {
+		t.Fatal("dropping the game id the session already knows slipped past the guard")
+	}
+	if !runtime.repeatedContentRead("admin_level_content", `{"game_id":82856,"level_number":1,"format":"full"}`) {
+		t.Fatal("an argument the tool does not have slipped past the guard")
+	}
+}
+
+// Reading a level back after editing it is how the agent checks its own work,
+// so a mutation has to clear the memo. Documents read from disk or the web did
+// not change because a game did, and forgetting those would disarm the guard
+// where it is needed most: a build session is one long series of mutations.
+func TestMutationReopensGameReadsButNotDocuments(t *testing.T) {
+	t.Parallel()
+	runtime := &picoLegacyToolRuntime{delivered: map[string]struct{}{}}
+
+	level := `{"game_id":82856,"level_number":1}`
+	pdf := `{"path":"scenario.pdf"}`
+	runtime.afterToolResult("admin_level_content", level, `{"level":1}`)
+	runtime.afterToolResult("read_pdf_file", pdf, `{"content":"страница"}`)
+
+	// Through the same seam execute uses, so the wiring is covered too.
+	runtime.afterToolResult("admin_set_comment", `{"game_id":82856,"level_number":1}`, `{"success":true}`)
+
+	if runtime.repeatedContentRead("admin_level_content", level) {
+		t.Fatal("a level edited in this run cannot be read back")
+	}
+	if !runtime.repeatedContentRead("read_pdf_file", pdf) {
+		t.Fatal("writing to a game re-opened an unrelated document for re-reading")
+	}
+}
+
+// A mutation that failed changed nothing, so it must not throw away reads that
+// are still valid — and pay for them again.
+func TestAFailedMutationKeepsTheMemo(t *testing.T) {
+	t.Parallel()
+	runtime := &picoLegacyToolRuntime{delivered: map[string]struct{}{}}
+
+	level := `{"game_id":82856,"level_number":1}`
+	runtime.afterToolResult("admin_level_content", level, `{"level":1}`)
+	runtime.afterToolResult("admin_set_comment", level, `{"error":"Взнос не корректен"}`)
+
+	if !runtime.repeatedContentRead("admin_level_content", level) {
+		t.Fatal("a mutation that failed dropped a read that is still valid")
 	}
 }
 

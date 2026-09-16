@@ -33,19 +33,28 @@ var (
 
 // doPost performs a POST request with form-encoded payload and returns the response body.
 func (c *Client) doPost(ctx context.Context, rawURL string, form url.Values) (string, error) {
+	_, body, err := c.doPostStatus(ctx, rawURL, form)
+	return body, err
+}
+
+// doPostStatus is doPost with the status code kept. The legacy editor answers an
+// accepted edit with a redirect and a refused one with the same form again, and
+// both are "200 OK" as far as the transport is concerned, so callers that verify
+// their own writes need to see which one they got.
+func (c *Client) doPostStatus(ctx context.Context, rawURL string, form url.Values) (int, string, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, rawURL, strings.NewReader(form.Encode()))
 	if err != nil {
-		return "", fmt.Errorf("encx: create POST request: %w", err)
+		return 0, "", fmt.Errorf("encx: create POST request: %w", err)
 	}
 	c.setHeaders(req)
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 
-	_, _, body, err := c.doRequestAndRead(req)
+	status, _, body, err := c.doRequestAndRead(req)
 	if err != nil {
-		return "", fmt.Errorf("encx: POST %s: %w", rawURL, err)
+		return status, "", fmt.Errorf("encx: POST %s: %w", rawURL, err)
 	}
 
-	return string(body), nil
+	return status, string(body), nil
 }
 
 // IsPlausibleEncounterLogin reports whether s looks like an Encounter username.
@@ -297,11 +306,26 @@ func (c *Client) legacyAdminUpdateAutopass(ctx context.Context, gameId, levelNum
 		form.Set("chkTimeoutPenalty", "on")
 	}
 
-	_, err := c.doPost(ctx, u, form)
+	body, err := c.doPost(ctx, u, form)
 	if err != nil {
 		return fmt.Errorf("encx: admin update autopass: %w", err)
 	}
 	c.adminDelay()
+
+	// The engine freezes level settings once the game has a participant: it
+	// answers 200 with the level editor rendered from the OLD values and says
+	// nothing. Reporting that as success cost a real game its start delay — the
+	// agent set the autopass three times, was told "success" three times, and the
+	// level kept its five minutes. The answer already carries the current value,
+	// so this costs no extra request.
+	if strings.Contains(body, "lnkAdjustAutopass") {
+		if h, m, sec := parseAutopassText(body); h != s.AutopassHours || m != s.AutopassMinutes || sec != s.AutopassSeconds {
+			return fmt.Errorf(
+				"encx: admin update autopass: движок не применил изменение — на уровне осталось %d:%02d:%02d вместо запрошенных %d:%02d:%02d; "+
+					"настройки уровня замораживаются, когда в игре уже есть участники (заявки или начатая игра)",
+				h, m, sec, s.AutopassHours, s.AutopassMinutes, s.AutopassSeconds)
+		}
+	}
 	return nil
 }
 
@@ -697,11 +721,21 @@ func (c *Client) legacyAdminCreateTask(ctx context.Context, gameId, levelNum int
 		form.Set("chkReplaceNlToBr", "on")
 	}
 
-	_, err := c.doPost(ctx, u, form)
+	status, body, err := c.doPostStatus(ctx, u, form)
 	if err != nil {
 		return fmt.Errorf("encx: admin create task: %w", err)
 	}
 	c.adminDelay()
+
+	// A level holds one general task, and the editor answers a second one by
+	// re-rendering its own "add task" form with status 200; an accepted add
+	// redirects. Without this check the caller is told the text was replaced
+	// while the level still shows the old task.
+	if status != http.StatusFound && strings.Contains(body, `name="inputTask"`) {
+		return fmt.Errorf("encx: admin create task: движок не создал задание и вернул форму добавления — " +
+			"скорее всего на уровне уже есть задание; чтобы заменить его текст, используйте AdminUpdateTask " +
+			"с id задания (admin-update-task <уровень> <id> <текст>)")
+	}
 	return nil
 }
 
@@ -1014,6 +1048,7 @@ func (c *Client) legacyAdminGetGameInfo(ctx context.Context, gameId int) (*Admin
 	info.FirstPlaces = inputs["FirstPlaces"]
 	info.NotFirstPlaces = inputs["NotFirstPlaces"]
 	info.AcceptRateFrom = inputs["txtAcceptRateFrom"]
+	info.Fee = inputs["Fee"]
 
 	// Description from textarea
 	descrRe := regexp.MustCompile(`(?i)<textarea[^>]*name="Descr"[^>]*>([\s\S]*?)</textarea>`)
@@ -1023,7 +1058,9 @@ func (c *Client) legacyAdminGetGameInfo(ctx context.Context, gameId int) (*Admin
 
 	// Checkboxes
 	checked := parseCheckedInputs(body)
-	info.IsModerated = checked["IsModerated"]
+	// IsModerated is a two-button radio group, not a checkbox: which button
+	// carries `checked` is the answer, and merely having one is not.
+	info.IsModerated = parseCheckedRadioBool(body, "IsModerated")
 	info.ShowFinishPlace = checked["chkShowFinishPlace"]
 
 	// Radio/select values from hidden or selected options
@@ -1033,6 +1070,10 @@ func (c *Client) legacyAdminGetGameInfo(ctx context.Context, gameId int) (*Admin
 	info.CertificateMode = parseSelectedRadioOrValue(body, "CertificateMode", inputs)
 	info.AcceptRateMode = parseSelectedRadioOrValue(body, "radioAcceptRateMode", inputs)
 	info.AuthorComplexity = parseSelectedRadioOrValue(body, "ddlAuthorsCompexity", inputs)
+	// The currency dropdown spells the selected option value-first, which
+	// parseSelectedRadioOrValue does not match, and guessing it wrong would
+	// rewrite the fee of a paid game into another currency.
+	info.FeeCurrency = parseFeeCurrency(body)
 
 	return info, nil
 }
@@ -1078,16 +1119,61 @@ func (c *Client) legacyAdminUpdateGameInfo(ctx context.Context, gameId int, info
 	form.Set("FirstPlaces", cmpOr(info.FirstPlaces, "3"))
 	form.Set("NotFirstPlaces", cmpOr(info.NotFirstPlaces, "3"))
 	form.Set("radioAcceptRateMode", cmpOr(info.AcceptRateMode, "1"))
-	form.Set("txtAcceptRateFrom", info.AcceptRateFrom)
+	form.Set("txtAcceptRateFrom", legacyDateTime(info.AcceptRateFrom))
 	form.Set("ddlAuthorsCompexity", cmpOr(info.AuthorComplexity, "10"))
 	form.Set("btnUpdate.x", "1")
 	form.Set("btnUpdate.y", "1")
+	// The editor validates the fee on every post and answers "Взнос не
+	// корректен" when it arrives empty, saving nothing. The whole form has to
+	// carry it back, so an update that never mentions the fee still keeps it.
+	form.Set("Fee", cmpOr(info.Fee, "0"))
+	form.Set("FeeCurrency", cmpOr(info.FeeCurrency, "1"))
 
-	_, err := c.doPost(ctx, u, form)
+	body, err := c.doPost(ctx, u, form)
 	if err != nil {
 		return fmt.Errorf("encx: admin update game info: %w", err)
 	}
+	if m := legacyFormErrorRe.FindStringSubmatch(body); m != nil {
+		if reason := strings.TrimSpace(stripTags(m[1])); reason != "" {
+			return fmt.Errorf("encx: admin update game info: %s", reason)
+		}
+	}
+
+	// A start the engine will not move is not refused, it is dropped: the editor
+	// freezes the start once the game has begun, saves every other field and
+	// answers with the same redirect as a full success. The answer is a redirect
+	// with nothing to read, so the only way to tell is to look at the game again.
+	if strings.TrimSpace(info.StartDateTime) != "" {
+		saved, err := c.legacyAdminGetGameInfo(ctx, gameId)
+		if err != nil {
+			return fmt.Errorf("encx: admin update game info: сохранено, но проверить старт не удалось: %w", err)
+		}
+		if strings.TrimSpace(saved.StartDateTime) == "" {
+			return fmt.Errorf("encx: admin update game info: остальные поля сохранены, но старт не перенесён на %s — "+
+				"движок не меняет время начала уже начавшейся игры", info.StartDateTime)
+		}
+		if !legacyDateEqual(saved.StartDateTime, info.StartDateTime) {
+			return fmt.Errorf("encx: admin update game info: остальные поля сохранены, но старт остался %s вместо запрошенного %s",
+				saved.StartDateTime, info.StartDateTime)
+		}
+	}
 	return nil
+}
+
+// legacyDateEqual compares two legacy timestamps, tolerating the seconds the
+// editor prints for a value the caller typed without them.
+func legacyDateEqual(a, b string) bool {
+	return normalizeLegacyDate(a) == normalizeLegacyDate(b)
+}
+
+func normalizeLegacyDate(value string) string {
+	value = strings.TrimSpace(legacyDateTime(value))
+	for _, layout := range []string{legacyCreateDateLayout, "02.01.2006 15:04"} {
+		if parsed, err := time.Parse(layout, value); err == nil {
+			return parsed.Format(legacyCreateDateLayout)
+		}
+	}
+	return value
 }
 
 // AdminNotDeliverGame marks a game as "not delivered" (несостоявшаяся).
@@ -1104,11 +1190,33 @@ func (c *Client) legacyAdminNotDeliverGame(ctx context.Context, gameId int) erro
 // with page=1 alongside the action, so the request repeats both verbatim.
 func (c *Client) legacyAdminDeleteGame(ctx context.Context, gameId int) error {
 	u := fmt.Sprintf("%s/Administration/GamesManager.aspx?gid=%d&page=1&action=Delete", c.baseURL(), gameId)
-	_, err := c.doGet(ctx, u)
+	body, err := c.doGet(ctx, u)
 	if err != nil {
 		return fmt.Errorf("encx: admin delete game: %w", err)
 	}
+	// The answer is the games list, and a game the engine kept is still on it:
+	// a game that has applications or players cannot be deleted, and saying so
+	// is the only thing that distinguishes that from a deletion.
+	if gameManagerListsGame(body, gameId) {
+		return fmt.Errorf("encx: admin delete game: игра %d осталась в списке после удаления — "+
+			"движок не удаляет игру, в которой есть заявки или участники", gameId)
+	}
 	return nil
+}
+
+// gameManagerListsGame reports whether the games manager page still offers this
+// game. Only the editor links count: the page carries the id in unrelated places
+// (rating forms, the game that was just rated) even when the game is gone.
+func gameManagerListsGame(body string, gameId int) bool {
+	if !strings.Contains(body, "GamesManager") && !strings.Contains(body, "GameEditor") {
+		return false // not the games list; nothing to conclude
+	}
+	for _, page := range []string{"GameEditor.aspx", "LevelManager.aspx", "LevelEditor.aspx"} {
+		if strings.Contains(body, fmt.Sprintf("%s?gid=%d", page, gameId)) {
+			return true
+		}
+	}
+	return false
 }
 
 // --- Level Reordering ---
@@ -1461,6 +1569,26 @@ func parseSelectedRadioOrValue(body, name string, inputs map[string]string) stri
 	// Try selected option in a select
 	re3 := regexp.MustCompile(`(?i)<select[^>]*name="` + regexp.QuoteMeta(name) + `"[^>]*>[\s\S]*?<option[^>]*selected[^>]*value="([^"]*)"`)
 	if m := re3.FindStringSubmatch(body); m != nil {
+		return m[1]
+	}
+	return ""
+}
+
+// feeCurrencySelectRe isolates the currency dropdown, feeCurrencyOptionRe the
+// option inside it the editor marks as selected.
+var (
+	feeCurrencySelectRe = regexp.MustCompile(`(?is)<select[^>]*name="FeeCurrency"[^>]*>(.*?)</select>`)
+	feeCurrencyOptionRe = regexp.MustCompile(`(?i)<option[^>]*value="([^"]*)"[^>]*selected`)
+)
+
+// parseFeeCurrency returns the currency the game editor has selected, or "" when
+// the page does not render the dropdown.
+func parseFeeCurrency(body string) string {
+	sel := feeCurrencySelectRe.FindStringSubmatch(body)
+	if sel == nil {
+		return ""
+	}
+	if m := feeCurrencyOptionRe.FindStringSubmatch(sel[1]); m != nil {
 		return m[1]
 	}
 	return ""

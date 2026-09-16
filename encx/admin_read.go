@@ -42,6 +42,39 @@ func parseEnabledInputs(body string) map[string]string {
 	return result
 }
 
+// parseCheckedRadioBool reads a two-button radio group whose options spell
+// themselves "true" and "false", returning which one the page has selected.
+//
+// parseCheckedInputs cannot answer this: a radio group always has exactly one
+// button carrying `checked`, so "a checked input named IsModerated exists" is
+// true whichever way the setting stands. Reading the group that way reported
+// every game as moderated — including one that had just been switched to
+// automatic acceptance, which made a successful write look like a silent
+// failure.
+func parseCheckedRadioBool(body, name string) bool {
+	inputTagRe := regexp.MustCompile(`(?i)<input[^>]*>`)
+	nameRe := regexp.MustCompile(`(?i)name="` + regexp.QuoteMeta(name) + `"`)
+	checkedRe := regexp.MustCompile(`(?i)checked`)
+	valueRe := regexp.MustCompile(`(?i)value="([^"]*)"`)
+
+	for _, tag := range inputTagRe.FindAllString(body, -1) {
+		if adminInputDisabledRe.MatchString(tag) {
+			continue
+		}
+		if !nameRe.MatchString(tag) || !checkedRe.MatchString(tag) {
+			continue
+		}
+		m := valueRe.FindStringSubmatch(tag)
+		if m == nil {
+			// A checked input with no value is a plain checkbox, where being
+			// checked is itself the answer.
+			return true
+		}
+		return strings.EqualFold(strings.TrimSpace(m[1]), "true")
+	}
+	return false
+}
+
 // parseCheckedInputs returns names of checked (but not disabled) inputs.
 func parseCheckedInputs(body string) map[string]bool {
 	result := make(map[string]bool)
