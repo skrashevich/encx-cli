@@ -70,6 +70,23 @@ func (r *AuthRegistry) Get(domain string, opts []encx.Option) *encx.Client {
 	return c
 }
 
+// DropClients discards every cached client so the next Get rebuilds one from
+// the current configuration.
+//
+// Engine options are fixed at encx.New and cannot be changed afterwards, so a
+// client cached before a settings change would keep the old engine and API host
+// for the lifetime of the process. Dropping costs nothing durable: Get re-runs
+// loadSession on a miss, so cookies come back from disk.
+//
+// The per-domain mutexes are deliberately kept. They serialize requests that
+// share one cookie jar on disk, which a replacement client for the same domain
+// still shares.
+func (r *AuthRegistry) DropClients() {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.clients = make(map[string]*encx.Client)
+}
+
 // ForEachClient invokes fn for every cached client under read lock.
 func (r *AuthRegistry) ForEachClient(fn func(domain string, client *encx.Client)) {
 	r.mu.RLock()

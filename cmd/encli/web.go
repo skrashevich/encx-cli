@@ -101,6 +101,13 @@ func (h *webHub) mount(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/v1/llm/codex/login/{id}/code", h.httpCodexLoginCode)
 	mux.HandleFunc("DELETE /api/v1/llm/codex/login/{id}", h.httpCodexLoginCancel)
 
+	mux.HandleFunc("/api/v1/engine/settings", h.httpEngineSettings)
+	mux.HandleFunc("GET /api/v1/engine/probe", h.httpEngineProbe)
+
+	mux.HandleFunc("GET /api/v1/onboarding", h.httpOnboardingStatus)
+	mux.HandleFunc("POST /api/v1/onboarding/complete", h.httpOnboardingComplete)
+	mux.HandleFunc("POST /api/v1/onboarding/reset", h.httpOnboardingReset)
+
 	sub, err := fs.Sub(webUIFiles, "webui")
 	if err != nil {
 		panic("webui embed: " + err.Error())

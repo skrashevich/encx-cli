@@ -332,6 +332,11 @@ func TestWebStaticRoot(t *testing.T) {
 }
 
 func TestWebAgentConfig(t *testing.T) {
+	// Without this the endpoint resolves against the developer's own
+	// ~/.config/encli: a real `encli codex-login` there wins over LLM_MODEL,
+	// resolveAgentConfig takes the ChatGPT branch, and the answer is that
+	// backend's model instead of the one this test exported.
+	isolateLLMEnv(t)
 	t.Setenv("LLM_MODEL", "test/model-xyz")
 	t.Setenv("LLM_API_KEY", "sk-test")
 	hub := &webHub{cfg: &config{}, registry: NewAuthRegistry(), store: NewChatStore(), sse: newSSEHub()}

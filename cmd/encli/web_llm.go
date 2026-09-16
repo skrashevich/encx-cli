@@ -55,6 +55,35 @@ type llmEnvOverride struct {
 	ShadowsStored bool `json:"shadows_stored"`
 }
 
+// envOverrideField pairs one resolved field with what the settings file holds
+// for it, which is all collectEnvOverrides needs in order to judge it.
+type envOverrideField struct {
+	Field  string
+	Source llmFieldSource
+	Stored string
+}
+
+// collectEnvOverrides picks out the fields a settings panel cannot change from
+// where it is. Both the LLM and the engine panel ask this same question, so it
+// is answered once: a panel may only offer to edit what it stores, and a value
+// that arrived from a flag or the environment therefore has to be explained
+// rather than silently lost to the form.
+func collectEnvOverrides(fields []envOverrideField) []llmEnvOverride {
+	var out []llmEnvOverride
+	for _, f := range fields {
+		if !llmSourceIsAmbient(f.Source.Source) {
+			continue
+		}
+		out = append(out, llmEnvOverride{
+			Field:         f.Field,
+			Source:        f.Source.Source,
+			EnvVar:        f.Source.EnvVar,
+			ShadowsStored: strings.TrimSpace(f.Stored) != "",
+		})
+	}
+	return out
+}
+
 type llmCodexStatus struct {
 	SignedIn  bool   `json:"signed_in"`
 	AccountID string `json:"account_id,omitempty"`
@@ -225,26 +254,12 @@ func (h *webHub) llmSettingsPayload() (llmSettingsPayload, error) {
 		SettingsPath: llmSettingsFile(),
 	}
 
-	for _, o := range []struct {
-		field  string
-		source llmFieldSource
-		stored string
-	}{
+	payload.EnvOverrides = collectEnvOverrides([]envOverrideField{
 		{"auth_method", authField, stored.AuthMethod},
 		{"base_url", baseField, stored.BaseURL},
 		{"model", modelField, stored.Model},
 		{"api_key", keyField, stored.APIKey},
-	} {
-		if !llmSourceIsAmbient(o.source.Source) {
-			continue
-		}
-		payload.EnvOverrides = append(payload.EnvOverrides, llmEnvOverride{
-			Field:         o.field,
-			Source:        o.source.Source,
-			EnvVar:        o.source.EnvVar,
-			ShadowsStored: strings.TrimSpace(o.stored) != "",
-		})
-	}
+	})
 
 	agentCfg, agentErr := resolveAgentConfig(h.cfg)
 	payload.Agent = llmAgentSummary{

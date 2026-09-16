@@ -24,6 +24,7 @@ const state = {
   llmEdited: { base_url: false, model: false },
   codexFlow: null,
   codexPoll: null,
+  onboarding: { step: 'welcome', status: null, llmAuth: 'codex', engine: null, busy: false },
 };
 
 const ROLE_RU = {
@@ -1421,6 +1422,21 @@ const LLM_TRANSPORT_RU = {
 const CODEX_POLL_MS = 2000;
 const CODEX_LOGIN_TTL_MS = 5 * 60 * 1000;
 
+/** Вход через ChatGPT нарисован дважды: в модалке настроек и в мастере первого
+ * запуска. Оба набора элементов всегда лежат в DOM, виден только один, а поток
+ * входа на всё приложение один — поэтому каждая отрисовка обновляет обе
+ * площадки, вместо второго поллера и второго state.codexFlow. */
+const CODEX_TARGETS = [
+  { status: 'llm-codex-status', progress: 'llm-codex-progress', manual: 'llm-codex-manual', code: 'llm-codex-code', login: 'btn-codex-login' },
+  {
+    status: 'onboarding-codex-status',
+    progress: 'onboarding-codex-progress',
+    manual: 'onboarding-codex-manual',
+    code: 'onboarding-codex-code',
+    login: 'btn-onboarding-codex-login',
+  },
+];
+
 let llmLastFocus = null;
 
 function transportLabel(method) {
@@ -1442,16 +1458,24 @@ function isModalOpen() {
   return !!modal && !modal.hidden;
 }
 
-function llmFocusable() {
-  const dialog = $('llm-modal-dialog');
-  if (!dialog) return [];
-  const sel =
-    'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), summary, [tabindex]:not([tabindex="-1"])';
-  return [...dialog.querySelectorAll(sel)].filter((el) => el.getClientRects().length > 0);
+/** Виден ли элемент оператору. У скрытого поддерева нет прямоугольников — чем
+ * бы его ни прятали: атрибутом hidden, display:none или закрытым <details>. */
+function isElementVisible(el) {
+  return !!el && el.getClientRects().length > 0;
 }
 
-function trapLLMFocus(e) {
-  const items = llmFocusable();
+/** Видимые фокусируемые элементы контейнера. Ловушка фокуса нужна и модалке
+ * настроек LLM, и мастеру первого запуска, поэтому контейнер приходит
+ * аргументом, а не прибит к одному диалогу. */
+function modalFocusable(container) {
+  if (!container) return [];
+  const sel =
+    'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), summary, [tabindex]:not([tabindex="-1"])';
+  return [...container.querySelectorAll(sel)].filter(isElementVisible);
+}
+
+function trapModalFocus(e, container) {
+  const items = modalFocusable(container);
   if (!items.length) return;
   const first = items[0];
   const last = items[items.length - 1];
@@ -1475,7 +1499,7 @@ function onLLMModalKeydown(e) {
   }
   if (e.key === 'Tab') {
     e.stopPropagation();
-    trapLLMFocus(e);
+    trapModalFocus(e, $('llm-modal-dialog'));
   }
 }
 
@@ -1493,7 +1517,7 @@ async function openLLMModal() {
   } catch (e) {
     toast(`Настройки LLM: ${e.message || String(e)}`, true);
   }
-  const items = llmFocusable();
+  const items = modalFocusable($('llm-modal-dialog'));
   (items[0] || modal).focus?.();
 }
 
@@ -1501,7 +1525,9 @@ function closeLLMModal() {
   const modal = $('llm-modal');
   if (!modal || modal.hidden) return;
   modal.hidden = true;
-  document.body.classList.remove('is-modal-open');
+  // Мастер первого запуска мог остаться открытым под модалкой: прокрутку
+  // возвращает тот, кто закрывается последним.
+  if (!isOnboardingOpen()) document.body.classList.remove('is-modal-open');
   document.removeEventListener('keydown', onLLMModalKeydown, true);
   llmLastFocus?.focus?.();
   llmLastFocus = null;
@@ -1534,6 +1560,30 @@ function selectLLMTab(method) {
   pane?.focus?.();
 }
 
+/** Узлы плашки «значение задано снаружи». Одна и та же лексика нужна и модалке
+ * настроек (по слоту на поле, без подписи), и мастеру (общий слот, поэтому
+ * каждая плашка называет своё поле). */
+function overrideBadgeNodes(o, flags, fieldLabel) {
+  const flag = flags[o.field];
+  const source =
+    o.source === 'flag'
+      ? flag
+        ? `флагом ${flag}`
+        : 'флагом командной строки'
+      : `переменной ${o.env_var || 'окружения'}`;
+  const badge = document.createElement('span');
+  badge.className = 'llm-override' + (o.shadows_stored ? ' is-shadowing' : '');
+  badge.textContent = fieldLabel ? `${fieldLabel}: переопределено ${source}` : `переопределено ${source}`;
+  const nodes = [badge];
+  if (o.shadows_stored) {
+    const note = document.createElement('span');
+    note.className = 'llm-override-note';
+    note.textContent = 'сохранённое здесь значение не применяется';
+    nodes.push(note);
+  }
+  return nodes;
+}
+
 function renderLLMOverrides(list) {
   for (const field of LLM_OVERRIDE_FIELDS) {
     const slot = $(`llm-override-${field}`);
@@ -1542,23 +1592,7 @@ function renderLLMOverrides(list) {
   for (const o of Array.isArray(list) ? list : []) {
     const slot = $(`llm-override-${o.field}`);
     if (!slot) continue;
-    const flag = LLM_OVERRIDE_FLAGS[o.field];
-    const source =
-      o.source === 'flag'
-        ? flag
-          ? `флагом ${flag}`
-          : 'флагом командной строки'
-        : `переменной ${o.env_var || 'окружения'}`;
-    const badge = document.createElement('span');
-    badge.className = 'llm-override' + (o.shadows_stored ? ' is-shadowing' : '');
-    badge.textContent = `переопределено ${source}`;
-    slot.appendChild(badge);
-    if (o.shadows_stored) {
-      const note = document.createElement('span');
-      note.className = 'llm-override-note';
-      note.textContent = 'сохранённое здесь значение не применяется';
-      slot.appendChild(note);
-    }
+    slot.append(...overrideBadgeNodes(o, LLM_OVERRIDE_FLAGS, ''));
   }
 }
 
@@ -1569,8 +1603,6 @@ function formatCodexExpiry(raw) {
 }
 
 function renderCodexStatus(codex) {
-  const box = $('llm-codex-status');
-  if (!box) return;
   const c = codex || {};
   const rows = [];
   let cls = 'llm-codex-status';
@@ -1588,10 +1620,15 @@ function renderCodexStatus(codex) {
     rows.push(`Ошибка: ${c.error}`);
   }
   if (c.path) rows.push(`Файл: ${c.path}`);
-  box.className = cls;
-  box.innerHTML = `<p class="llm-codex-title">${escapeHtml(title)}</p>${
+  const html = `<p class="llm-codex-title">${escapeHtml(title)}</p>${
     rows.length ? `<ul class="llm-codex-rows">${rows.map((r) => `<li>${escapeHtml(r)}</li>`).join('')}</ul>` : ''
   }`;
+  for (const target of CODEX_TARGETS) {
+    const box = $(target.status);
+    if (!box) continue;
+    box.className = cls;
+    box.innerHTML = html;
+  }
 }
 
 function renderLLMSettings() {
@@ -1644,8 +1681,10 @@ function renderLLMSettings() {
   renderCodexStatus(data?.codex);
 
   const pending = !!state.codexFlow;
-  const loginBtn = $('btn-codex-login');
-  if (loginBtn) loginBtn.disabled = pending;
+  for (const target of CODEX_TARGETS) {
+    const loginBtn = $(target.login);
+    if (loginBtn) loginBtn.disabled = pending;
+  }
   const logoutBtn = $('btn-codex-logout');
   if (logoutBtn) logoutBtn.disabled = !data?.codex?.signed_in;
   const cancelBtn = $('btn-codex-cancel');
@@ -1733,13 +1772,15 @@ async function resetLLMSettings() {
 /** Ссылка собирается через DOM, а не через innerHTML: escapeHtml не экранирует
  * кавычки, а здесь значение попало бы в атрибут href. */
 function setCodexProgress(text, linkURL) {
-  const el = $('llm-codex-progress');
-  if (!el) return;
-  el.textContent = '';
-  el.hidden = !text;
-  if (!text) return;
-  el.append(text);
-  if (/^https?:\/\//i.test(String(linkURL || ''))) {
+  const withLink = /^https?:\/\//i.test(String(linkURL || ''));
+  for (const target of CODEX_TARGETS) {
+    const el = $(target.progress);
+    if (!el) continue;
+    el.textContent = '';
+    el.hidden = !text;
+    if (!text) continue;
+    el.append(text);
+    if (!withLink) continue;
     el.append(' Если вкладка не открылась — ');
     const a = document.createElement('a');
     a.href = linkURL;
@@ -1761,6 +1802,9 @@ async function refreshLLMAfterAuth() {
   try {
     const data = await api('/llm/settings');
     applyLLMSnapshot(data, { keepEdits: true });
+    // Вход мог быть начат изнутри мастера: тогда его плашки и подсказки описывают
+    // состояние до входа. Снимок уже здесь — второй запрос за тем же не нужен.
+    if (isOnboardingOpen()) fillOnboardingLLM(data, { keepEdits: true });
   } catch (e) {
     toast(`Настройки LLM: ${e.message || String(e)}`, true);
   }
@@ -1814,8 +1858,10 @@ async function startCodexLogin(noBrowser) {
     const url = String(flow.authorize_url || '');
     if (!noBrowser && url) window.open(url, '_blank', 'noopener');
     if (noBrowser) {
-      const manual = $('llm-codex-manual');
-      if (manual) manual.open = true;
+      for (const target of CODEX_TARGETS) {
+        const manual = $(target.manual);
+        if (manual) manual.open = true;
+      }
       setCodexProgress('Откройте ссылку, завершите вход и вставьте redirect URL ниже.', url);
     } else {
       setCodexProgress('Ожидаем завершения входа в браузере…', url);
@@ -1832,7 +1878,10 @@ async function startCodexLogin(noBrowser) {
 }
 
 async function submitCodexCode() {
-  const input = $('llm-codex-code');
+  // Полей ввода кода два — в модалке и в мастере; отправляем то, которое видит
+  // оператор. «Первое непустое» отправило бы текст, оставшийся на закрытой
+  // площадке от прошлой неудачной попытки, вместо только что вставленного.
+  const input = CODEX_TARGETS.map((t) => $(t.code)).find(isElementVisible) || $(CODEX_TARGETS[0].code);
   const code = (input?.value || '').trim();
   if (!state.codexFlow) {
     toast('Сначала нажмите «Войти через ChatGPT».', true);
@@ -1845,10 +1894,13 @@ async function submitCodexCode() {
   const id = state.codexFlow.id;
   try {
     await api(`/llm/codex/login/${encodeURIComponent(id)}/code`, { method: 'POST', body: { code } });
-    if (input) input.value = '';
     await finishCodexFlow(true);
   } catch (e) {
     toast(e.message || String(e), true);
+  } finally {
+    // Поле очищается и после отказа: иначе отклонённое значение осталось бы
+    // лежать и ушло бы снова, откуда бы следующую отправку ни начали.
+    if (input) input.value = '';
   }
 }
 
@@ -1918,6 +1970,553 @@ function bindLLMSettings() {
   });
 }
 
+/* —— Мастер первого запуска —— */
+
+const ONBOARDING_STEPS = ['welcome', 'llm', 'engine', 'auth'];
+
+const ONBOARDING_COPY = {
+  welcome: { title: 'Настройка encli', subtitle: 'Три шага до первого запроса агенту' },
+  llm: { title: 'Подключение к модели', subtitle: 'Шаг 1 из 3 — как агент обращается к языковой модели' },
+  engine: { title: 'Движок домена', subtitle: 'Шаг 2 из 3 — с каким API en.cx работать' },
+  auth: { title: 'Вход в en.cx', subtitle: 'Шаг 3 из 3 — учётная запись для доступа к играм' },
+};
+
+/** В мастере плашки «задано снаружи» лежат в одном слоте на шаг, поэтому каждая
+ * называет своё поле — в модалке слот отдельный на поле, и подпись не нужна. */
+const LLM_OVERRIDE_FIELD_RU = {
+  auth_method: 'способ подключения',
+  base_url: 'base URL',
+  model: 'модель',
+  api_key: 'API-ключ',
+};
+
+const ENGINE_OVERRIDE_FLAGS = {
+  engine: '-engine',
+  api_base_url: '-api-base-url',
+};
+
+const ENGINE_OVERRIDE_FIELD_RU = {
+  engine: 'движок',
+  api_base_url: 'адрес API',
+};
+
+const ENGINE_MODE_RU = {
+  auto: 'автоопределение',
+  legacy: 'старый движок',
+  new: 'новый движок',
+};
+
+let onboardingLastFocus = null;
+
+function isOnboardingOpen() {
+  const overlay = $('onboarding');
+  return !!overlay && !overlay.hidden;
+}
+
+/** Ошибка мастера живёт в подвале диалога, а не в тосте: мастер модальный, и
+ * тост за ним легко пропустить. Пустой текст прячет плашку. Ссылка собирается
+ * через DOM: escapeHtml не экранирует кавычки, а значение попало бы в href. */
+function setOnboardingError(text, linkURL) {
+  const box = $('onboarding-error');
+  if (!box) return;
+  box.textContent = '';
+  const msg = String(text || '').trim();
+  box.hidden = !msg;
+  if (!msg) return;
+  const p = document.createElement('p');
+  p.append(msg);
+  if (/^https?:\/\//i.test(String(linkURL || ''))) {
+    p.append(' ');
+    const a = document.createElement('a');
+    a.href = linkURL;
+    a.target = '_blank';
+    a.rel = 'noopener';
+    a.textContent = 'Открыть страницу проверки';
+    p.append(a);
+  }
+  box.appendChild(p);
+}
+
+/** Блок .onboarding-result скрыт, пока пуст, поэтому очистка — это пустой текст. */
+function setOnboardingResult(id, text, tone) {
+  const box = $(id);
+  if (!box) return;
+  box.className = 'onboarding-result' + (tone ? ` is-${tone}` : '');
+  box.textContent = String(text || '');
+}
+
+function renderOverridesInto(slotId, list, flags, labels) {
+  const slot = $(slotId);
+  if (!slot) return;
+  slot.textContent = '';
+  for (const o of Array.isArray(list) ? list : []) {
+    slot.append(...overrideBadgeNodes(o, flags, labels[o.field] || o.field));
+  }
+}
+
+function onboardingStepIndex(step) {
+  const idx = ONBOARDING_STEPS.indexOf(step);
+  return idx < 0 ? 0 : idx;
+}
+
+/** Рисует всё, что не зависит от данных шага: индикатор, панели, заголовки и
+ * кнопки подвала. Состояние шага в индикаторе — ровно два класса. */
+function renderOnboardingChrome() {
+  const step = state.onboarding.step;
+  const idx = onboardingStepIndex(step);
+  const busy = state.onboarding.busy;
+
+  for (const li of document.querySelectorAll('#onboarding-steps li[data-step]')) {
+    const at = onboardingStepIndex(li.dataset.step);
+    li.classList.toggle('is-active', at === idx);
+    li.classList.toggle('is-done', at < idx);
+  }
+  for (const name of ONBOARDING_STEPS) {
+    const pane = $(`onboarding-pane-${name}`);
+    if (pane) pane.hidden = name !== step;
+  }
+
+  const copy = ONBOARDING_COPY[step] || ONBOARDING_COPY.welcome;
+  const title = $('onboarding-title');
+  if (title) title.textContent = copy.title;
+  const subtitle = $('onboarding-subtitle');
+  if (subtitle) subtitle.textContent = copy.subtitle;
+
+  const back = $('btn-onboarding-back');
+  if (back) back.disabled = busy || idx === 0;
+  const next = $('btn-onboarding-next');
+  if (next) next.disabled = busy;
+  const nextLabel = $('onboarding-next-label');
+  if (nextLabel) nextLabel.textContent = idx === ONBOARDING_STEPS.length - 1 ? 'Готово' : 'Далее';
+  const skipAll = $('btn-onboarding-skip-all');
+  if (skipAll) skipAll.disabled = busy;
+}
+
+function setOnboardingBusy(busy) {
+  state.onboarding.busy = !!busy;
+  renderOnboardingChrome();
+}
+
+async function goToOnboardingStep(step) {
+  state.onboarding.step = step;
+  setOnboardingError('');
+  renderOnboardingChrome();
+  $(`onboarding-pane-${step}`)?.focus?.();
+  if (step === 'llm') {
+    await loadOnboardingLLM();
+  } else if (step === 'engine') {
+    await loadOnboardingEngine();
+  } else if (step === 'auth') {
+    prefillOnboardingAuth();
+  }
+}
+
+/* —— Шаг «Модель» —— */
+
+function onboardingLLMTab() {
+  return state.onboarding.llmAuth === 'apikey' ? 'apikey' : 'codex';
+}
+
+function renderOnboardingLLMTabs() {
+  const isCodex = onboardingLLMTab() === 'codex';
+  setTabState($('onboarding-llm-tab-codex'), isCodex, false);
+  setTabState($('onboarding-llm-tab-apikey'), !isCodex, false);
+  const codexPane = $('onboarding-llm-pane-codex');
+  if (codexPane) codexPane.hidden = !isCodex;
+  const apikeyPane = $('onboarding-llm-pane-apikey');
+  if (apikeyPane) apikeyPane.hidden = isCodex;
+}
+
+function selectOnboardingLLMTab(method) {
+  state.onboarding.llmAuth = method;
+  renderOnboardingLLMTabs();
+  $(method === 'codex' ? 'onboarding-llm-pane-codex' : 'onboarding-llm-pane-apikey')?.focus?.();
+}
+
+function onboardingKeyHint(keyStatus) {
+  const c = keyStatus || {};
+  if (!c.has_value) {
+    return 'Ключ пока не сохранён. Подойдёт любой провайдер с OpenAI-совместимым API — ключ остаётся на этой машине.';
+  }
+  const masked = String(c.masked || '').trim() || '••••';
+  if (c.source === 'flag') return `Ключ ${masked} задан флагом командной строки — поле ниже его не перебьёт.`;
+  if (c.source === 'env') {
+    return `Ключ ${masked} задан переменной ${c.env_var || 'окружения'} — поле ниже его не перебьёт.`;
+  }
+  return `Ключ ${masked} уже сохранён. Пустое поле его не затирает.`;
+}
+
+/** Поля заполняются сохранённым (stored), как и модалка настроек: мастер
+ * сохраняет ровно то, что в полях, и не должен вписывать в файл значение,
+ * пришедшее из окружения или из умолчания, — иначе оно окажется прибитым
+ * навсегда и переживёт и контейнер, и смену умолчания. Действующее значение
+ * остаётся видимым как подсказка поля: пустое поле показывает то, что будет
+ * использовано, и пустым же уходит на сервер — выбор возвращается окружению. */
+function fillOnboardingLLM(data, opts = {}) {
+  const effective = data?.effective || {};
+  const stored = data?.stored || {};
+  const defaults = data?.defaults || {};
+  const keyStatus = effective.api_key || {};
+  if (!opts.keepEdits) {
+    const method = initialAuthMethod(data);
+    state.onboarding.llmAuth = method === 'apikey' || (!method && keyStatus.has_value) ? 'apikey' : 'codex';
+  }
+
+  const base = $('onboarding-llm-base-url');
+  if (base) {
+    const shown = String(effective.base_url?.value || defaults.base_url || '').trim();
+    if (shown) base.placeholder = shown;
+    if (!opts.keepEdits) base.value = String(stored.base_url || '');
+  }
+  const model = $('onboarding-llm-model');
+  if (model) {
+    const shown = String(effective.model?.value || defaults.model || '').trim();
+    if (shown) model.placeholder = shown;
+    if (!opts.keepEdits) model.value = String(stored.model || '');
+  }
+  const key = $('onboarding-llm-api-key');
+  if (key) {
+    if (!opts.keepEdits) key.value = '';
+    key.placeholder = keyStatus.has_value ? String(keyStatus.masked || '••••') : 'sk-…';
+  }
+  const hint = $('onboarding-llm-hint');
+  if (hint) hint.textContent = onboardingKeyHint(keyStatus);
+
+  renderOverridesInto('onboarding-llm-overrides', data?.env_overrides, LLM_OVERRIDE_FLAGS, LLM_OVERRIDE_FIELD_RU);
+  renderOnboardingLLMTabs();
+}
+
+async function loadOnboardingLLM() {
+  try {
+    const data = await api('/llm/settings');
+    // Снимок один на приложение: applyLLMSnapshot заодно рисует статус входа
+    // через ChatGPT — и в модалке, и здесь.
+    applyLLMSnapshot(data);
+    fillOnboardingLLM(data);
+  } catch (e) {
+    setOnboardingError(`Настройки LLM: ${e.message || String(e)}`);
+  }
+}
+
+/** Шаг обязан оставить настройку записанной, а не только показанной, поэтому
+ * переход дальше начинается с сохранения. Для вкладки подписки поля
+ * OpenAI-провайдера очищаются: подписка их не использует, а сохранённая модель
+ * провайдера подменила бы модель подписки. */
+async function saveOnboardingLLM() {
+  const isCodex = onboardingLLMTab() === 'codex';
+  try {
+    const data = await api('/llm/settings', {
+      method: 'PUT',
+      body: {
+        auth_method: isCodex ? 'codex' : 'apikey',
+        base_url: isCodex ? '' : ($('onboarding-llm-base-url')?.value || '').trim(),
+        model: isCodex ? '' : ($('onboarding-llm-model')?.value || '').trim(),
+        api_key: isCodex ? '' : ($('onboarding-llm-api-key')?.value || '').trim(),
+        clear_api_key: false,
+      },
+    });
+    applyLLMSnapshot(data);
+    fillOnboardingLLM(data);
+    void loadAgentConfig();
+    return true;
+  } catch (e) {
+    setOnboardingError(e.message || String(e));
+    return false;
+  }
+}
+
+/** Проверка ничего не сохраняет: она показывает, что резолвится из уже
+ * сохранённого и окружения, поэтому введённое, но не сохранённое сюда не
+ * попадёт — и поля не затираются, чтобы ввод не пропал. */
+async function testOnboardingLLM() {
+  setOnboardingResult('onboarding-llm-result', 'Проверяем подключение…', '');
+  try {
+    const data = await api('/llm/settings');
+    applyLLMSnapshot(data, { keepEdits: true });
+    const agent = data?.agent || {};
+    const err = String(agent.error || '').trim();
+    if (err) {
+      setOnboardingResult('onboarding-llm-result', err, 'err');
+      return;
+    }
+    const where = String(agent.base_url || '').trim() || 'адрес по умолчанию';
+    const model = String(agent.model || '').trim() || '—';
+    setOnboardingResult(
+      'onboarding-llm-result',
+      `${transportLabel(agent.auth_method)} · модель ${model} · ${where}`,
+      'ok',
+    );
+  } catch (e) {
+    setOnboardingResult('onboarding-llm-result', e.message || String(e), 'err');
+  }
+}
+
+/* —— Шаг «Движок» —— */
+
+function onboardingEngineValue() {
+  const checked = document.querySelector('input[name="onboarding-engine"]:checked');
+  return String(checked?.value || 'auto');
+}
+
+function setOnboardingEngineValue(value) {
+  const radio = $(`onboarding-engine-${value}`);
+  if (!radio) return false;
+  radio.checked = true;
+  return true;
+}
+
+async function loadOnboardingEngine() {
+  try {
+    const data = await api('/engine/settings');
+    state.onboarding.engine = data;
+    const effective = data?.effective || {};
+    const stored = data?.stored || {};
+    // Как и на шаге модели: форма правит сохранённое, а действующее показывается
+    // подсказкой — чтобы движок и адрес из окружения не переехали в файл.
+    setOnboardingEngineValue(String(stored.engine || 'auto'));
+    const base = $('onboarding-engine-base-url');
+    if (base) {
+      const shown = String(effective.api_base_url?.value || '').trim();
+      if (shown) base.placeholder = shown;
+      base.value = String(stored.api_base_url || '');
+    }
+    renderOverridesInto(
+      'onboarding-engine-overrides',
+      data?.env_overrides,
+      ENGINE_OVERRIDE_FLAGS,
+      ENGINE_OVERRIDE_FIELD_RU,
+    );
+    const err = String(data?.error || '').trim();
+    if (err) setOnboardingError(`Настройки движка: ${err}`);
+  } catch (e) {
+    setOnboardingError(`Настройки движка: ${e.message || String(e)}`);
+  }
+}
+
+async function saveOnboardingEngine() {
+  try {
+    const data = await api('/engine/settings', {
+      method: 'PUT',
+      body: {
+        engine: onboardingEngineValue(),
+        api_base_url: ($('onboarding-engine-base-url')?.value || '').trim(),
+      },
+    });
+    state.onboarding.engine = data;
+    return true;
+  } catch (e) {
+    setOnboardingError(e.message || String(e));
+    return false;
+  }
+}
+
+/** Домен для проверки: введённый на шаге входа, иначе выбранный в основном
+ * окне, иначе первый известный. Без домена endpoint ответит 400, поэтому мастер
+ * говорит об этом сам, а не ходит за отказом. */
+function onboardingProbeDomain() {
+  const typed = ($('onboarding-auth-domain')?.value || '').trim();
+  if (typed) return typed;
+  const selected = getSelectedDomain();
+  if (selected) return selected;
+  const known = state.authDomains.find((d) => String(d.domain || '').trim());
+  if (known) return String(known.domain).trim();
+  const option = [...($('field-domain')?.options || [])].find((o) => o.value.trim());
+  return option ? option.value.trim() : '';
+}
+
+async function probeOnboardingEngine() {
+  const domain = onboardingProbeDomain();
+  if (!domain) {
+    setOnboardingResult(
+      'onboarding-engine-result',
+      'Проверять нечего: укажите домен на шаге «Вход» или выберите его в основном окне.',
+      'warn',
+    );
+    return;
+  }
+  setOnboardingResult('onboarding-engine-result', `Определяем движок ${domain}…`, '');
+  try {
+    const data = await api(`/engine/probe?domain=${encodeURIComponent(domain)}`);
+    if (!data?.ok) {
+      setOnboardingResult(
+        'onboarding-engine-result',
+        `Не удалось определить движок ${domain}: ${data?.error || 'неизвестная ошибка'}`,
+        'err',
+      );
+      return;
+    }
+    const detected = String(data.detected || '');
+    const configured = String(data.configured || '');
+    const detectedRU = ENGINE_MODE_RU[detected] || detected || '—';
+    const configuredRU = ENGINE_MODE_RU[configured] || configured || '—';
+    let text = `${domain}: определён ${detectedRU}, сейчас настроен ${configuredRU}.`;
+    let tone = 'ok';
+    if (detected && detected !== onboardingEngineValue() && setOnboardingEngineValue(detected)) {
+      text += ` Выбран вариант «${detectedRU}».`;
+      tone = 'warn';
+    }
+    setOnboardingResult('onboarding-engine-result', text, tone);
+  } catch (e) {
+    setOnboardingResult('onboarding-engine-result', e.message || String(e), 'err');
+  }
+}
+
+/* —— Шаг «Вход» —— */
+
+function prefillOnboardingAuth() {
+  const input = $('onboarding-auth-domain');
+  if (input && !input.value.trim()) input.value = getSelectedDomain();
+}
+
+async function onOnboardingAuthSubmit(ev) {
+  ev.preventDefault();
+  const fd = new FormData(ev.target);
+  const domain = String(fd.get('domain') || '').trim();
+  const login = String(fd.get('login') || '').trim();
+  const password = String(fd.get('password') || '');
+  if (!domain || !login || !password) return;
+  const submit = $('btn-onboarding-auth-submit');
+  if (submit) submit.disabled = true;
+  setOnboardingError('');
+  setOnboardingResult('onboarding-auth-status', 'Входим…', '');
+  try {
+    await api('/auth/login', { method: 'POST', body: { domain, login, password } });
+    const pwd = $('onboarding-auth-password');
+    if (pwd) pwd.value = '';
+    await loadAuthStatus();
+    renderAuth();
+    setOnboardingResult('onboarding-auth-status', `Вход выполнен: ${domain}`, 'ok');
+  } catch (e) {
+    setOnboardingResult('onboarding-auth-status', '', '');
+    // Антиспам отдаёт адрес страницы проверки: без ссылки сообщение нечем
+    // закрыть, поэтому она идёт рядом с текстом ошибки.
+    setOnboardingError(e.message || String(e), e.data?.antispam ? e.data.url : '');
+  } finally {
+    if (submit) submit.disabled = false;
+  }
+}
+
+/* —— Переходы, открытие и завершение —— */
+
+async function onboardingNext() {
+  if (state.onboarding.busy) return;
+  const step = state.onboarding.step;
+  setOnboardingError('');
+  setOnboardingBusy(true);
+  try {
+    if (step === 'llm' && !(await saveOnboardingLLM())) return;
+    if (step === 'engine' && !(await saveOnboardingEngine())) return;
+  } finally {
+    setOnboardingBusy(false);
+  }
+  if (step === 'auth') {
+    await finishOnboarding(false);
+    return;
+  }
+  await goToOnboardingStep(ONBOARDING_STEPS[onboardingStepIndex(step) + 1]);
+}
+
+async function onboardingBack() {
+  if (state.onboarding.busy) return;
+  const idx = onboardingStepIndex(state.onboarding.step);
+  if (idx === 0) return;
+  await goToOnboardingStep(ONBOARDING_STEPS[idx - 1]);
+}
+
+function onOnboardingKeydown(e) {
+  if (!isOnboardingOpen()) return;
+  if (e.key === 'Escape') {
+    // Первый запуск закрывается только кнопкой «Пропустить настройку»:
+    // случайный Escape не должен молча оставить приложение ненастроенным.
+    if (state.onboarding.status?.required) return;
+    e.preventDefault();
+    e.stopPropagation();
+    closeOnboarding();
+    return;
+  }
+  if (e.key === 'Tab') {
+    e.stopPropagation();
+    trapModalFocus(e, $('onboarding')?.querySelector('.onboarding-dialog'));
+  }
+}
+
+async function openOnboarding() {
+  const overlay = $('onboarding');
+  if (!overlay || !overlay.hidden) return;
+  onboardingLastFocus = document.activeElement;
+  overlay.hidden = false;
+  document.body.classList.add('is-modal-open');
+  document.addEventListener('keydown', onOnboardingKeydown, true);
+  for (const id of ['onboarding-llm-result', 'onboarding-engine-result', 'onboarding-auth-status']) {
+    setOnboardingResult(id, '', '');
+  }
+  await goToOnboardingStep('welcome');
+}
+
+function closeOnboarding() {
+  const overlay = $('onboarding');
+  if (!overlay || overlay.hidden) return;
+  overlay.hidden = true;
+  // Модалка настроек LLM могла открыться поверх: прокрутку возвращает тот, кто
+  // закрывается последним.
+  if (!isModalOpen()) document.body.classList.remove('is-modal-open');
+  document.removeEventListener('keydown', onOnboardingKeydown, true);
+  setOnboardingError('');
+  onboardingLastFocus?.focus?.();
+  onboardingLastFocus = null;
+}
+
+async function finishOnboarding(skipped) {
+  setOnboardingBusy(true);
+  try {
+    state.onboarding.status = await api('/onboarding/complete', {
+      method: 'POST',
+      body: { skipped: !!skipped },
+    });
+  } catch (e) {
+    // Мастер пройден, а отметку записать не удалось: держать оператора внутри
+    // диалога незачем — мастер просто появится снова на следующем запуске.
+    toast(`Не удалось сохранить отметку о настройке: ${e.message || String(e)}`, true);
+  } finally {
+    setOnboardingBusy(false);
+  }
+  closeOnboarding();
+  await bootstrapWorkspace();
+}
+
+/** Статус мастера на старте. Ни сеть, ни битый файл состояния не должны запирать
+ * приложение: мастер просто не открывается, а консоль остаётся рабочей. */
+async function initOnboarding() {
+  try {
+    const status = await api('/onboarding');
+    state.onboarding.status = status;
+    if (status?.required) await openOnboarding();
+  } catch (e) {
+    toast(`Мастер настройки: ${e.message || String(e)}`, true);
+  }
+}
+
+function bindOnboarding() {
+  $('btn-onboarding-open')?.addEventListener('click', () => void openOnboarding());
+  $('btn-onboarding-next')?.addEventListener('click', () => void onboardingNext());
+  $('btn-onboarding-back')?.addEventListener('click', () => void onboardingBack());
+  $('btn-onboarding-skip-all')?.addEventListener('click', () => void finishOnboarding(true));
+  $('onboarding-llm-tab-codex')?.addEventListener('click', () => selectOnboardingLLMTab('codex'));
+  $('onboarding-llm-tab-apikey')?.addEventListener('click', () => selectOnboardingLLMTab('apikey'));
+  $('btn-onboarding-llm-test')?.addEventListener('click', () => void testOnboardingLLM());
+  $('btn-onboarding-codex-login')?.addEventListener('click', () => void startCodexLogin(false));
+  $('btn-onboarding-codex-code-submit')?.addEventListener('click', () => void submitCodexCode());
+  $('onboarding-codex-code')?.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      void submitCodexCode();
+    }
+  });
+  $('btn-onboarding-engine-probe')?.addEventListener('click', () => void probeOnboardingEngine());
+  $('onboarding-auth-form')?.addEventListener('submit', (e) => void onOnboardingAuthSubmit(e));
+  $('btn-onboarding-auth-skip')?.addEventListener('click', () => void finishOnboarding(false));
+}
+
 function bindUI() {
   $('btn-new-chat').addEventListener('click', () => createChat());
   $('btn-patch-chat').addEventListener('click', () => patchActiveChat());
@@ -1933,6 +2532,7 @@ function bindUI() {
   $('btn-approval-quit')?.addEventListener('click', () => postApproval('quit'));
   $('login-form').addEventListener('submit', onLoginSubmit);
   bindLLMSettings();
+  bindOnboarding();
   $('field-domain')?.addEventListener('change', () => {
     void loadGamesForDomain(getSelectedDomain()).then(() => onChatContextChanged());
   });
@@ -1969,18 +2569,10 @@ function bindUI() {
   });
 }
 
-async function boot() {
-  const savedTheme = localStorage.getItem('encli-theme');
-  if (savedTheme) document.documentElement.dataset.theme = savedTheme;
-  bindUI();
-  syncSecurityModeVisual();
-  window.addEventListener('scroll', () => {
-    if (toolTipAnchor) positionToolChipTooltip(toolTipAnchor);
-  }, true);
-  window.addEventListener('resize', () => {
-    if (toolTipAnchor) positionToolChipTooltip(toolTipAnchor);
-  });
-  requestAnimationFrame(() => document.body.classList.add('is-ready'));
+/** Приводит приложение в рабочее состояние: модель агента, сессии, домены,
+ * чаты и активный чат. Вызывается и на старте, и после закрытия мастера —
+ * перезагружать страницу ради этого незачем. */
+async function bootstrapWorkspace() {
   void loadAgentConfig();
   try {
     await loadAuthStatus();
@@ -2000,6 +2592,22 @@ async function boot() {
     renderAuth();
     refreshSendState();
   }
+}
+
+async function boot() {
+  const savedTheme = localStorage.getItem('encli-theme');
+  if (savedTheme) document.documentElement.dataset.theme = savedTheme;
+  bindUI();
+  syncSecurityModeVisual();
+  window.addEventListener('scroll', () => {
+    if (toolTipAnchor) positionToolChipTooltip(toolTipAnchor);
+  }, true);
+  window.addEventListener('resize', () => {
+    if (toolTipAnchor) positionToolChipTooltip(toolTipAnchor);
+  });
+  requestAnimationFrame(() => document.body.classList.add('is-ready'));
+  await bootstrapWorkspace();
+  await initOnboarding();
 }
 
 boot();

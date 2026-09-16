@@ -17,7 +17,7 @@ import (
 func registerEngineFlag(fs *flag.FlagSet, cfg *config) {
 	fs.DurationVar(&cfg.apiRequestInterval, "api-request-interval", 40*time.Millisecond, "Minimum interval between REST API requests (e.g. 200ms = 5 requests/s)")
 	fs.StringVar(&cfg.engine, "engine", os.Getenv(encx.EngineEnvVar),
-		"Encounter engine: legacy (default), new, or auto to probe the API host (env: "+encx.EngineEnvVar+")")
+		"Encounter engine: auto (default) to probe the API host, legacy, or new (env: "+encx.EngineEnvVar+")")
 	// Without an override the API host is derived from the domain
 	// (tech.en.cx -> api.en.cx), which cannot address a local mock or a
 	// self-hosted instance.
@@ -39,15 +39,44 @@ func engineOptions(cfg *config) ([]encx.Option, error) {
 	if cfg.apiRequestInterval > 0 {
 		opts = append(opts, encx.WithAPIRequestInterval(cfg.apiRequestInterval))
 	}
-	if value := strings.TrimSpace(cfg.engine); value != "" {
+	// The stored selection only fills in for a silent flag and environment, both
+	// of which reach us through cfg (registerEngineFlag defaults the flags from
+	// the environment), so reading it here preserves flag > env > file.
+	//
+	// A settings file that does not parse is logged and ignored, where the LLM
+	// one is propagated to the caller. The asymmetry is the cost of being wrong:
+	// a broken LLM file would silently run the agent against a provider the
+	// operator did not choose, while the engine default is auto, which probes
+	// the API host and corrects itself.
+	stored, err := loadEngineSettings()
+	if err != nil {
+		debugf("engine settings: %v", err)
+		stored = engineSettings{}
+	}
+	value := strings.TrimSpace(cfg.engine)
+	if value == "" && stored.Engine != "" {
+		if _, ok := encx.ParseEngineMode(stored.Engine); ok {
+			value = stored.Engine
+		} else {
+			// Hand-edited, since saveEngineSettings refuses such a name. Ignored
+			// for the same reason as a corrupt file: it must not take down every
+			// command that builds a client.
+			debugf("engine settings: ignoring unknown engine %q", stored.Engine)
+		}
+	}
+	if value != "" {
 		mode, ok := encx.ParseEngineMode(value)
 		if !ok {
 			return nil, fmt.Errorf("unknown -engine %q: use legacy, new or auto", value)
 		}
 		opts = append(opts, encx.WithEngine(mode))
 	}
-	if cfg.apiBaseURL != "" {
-		opts = append(opts, encx.WithAPIBaseURL(cfg.apiBaseURL))
+	baseURL := cfg.apiBaseURL
+	if baseURL == "" {
+		baseURL = stored.APIBaseURL
+	}
+	if baseURL != "" {
+		opts = append(opts, encx.WithAPIBaseURL(baseURL))
 	}
 	return opts, nil
 }

@@ -1,14 +1,10 @@
 package main
 
 import (
-	"encoding/json"
 	"fmt"
 	"net/url"
 	"os"
-	"path/filepath"
 	"strings"
-
-	"github.com/sipeed/picoclaw/pkg/fileutil"
 )
 
 // llmSettingsFileEnvVar relocates the settings file; tests use it to stay out of
@@ -28,42 +24,26 @@ type llmSettings struct {
 	Model      string `json:"model,omitempty"`
 }
 
-// llmSettingsFile resolves the settings path.
-//
-// Like the ChatGPT credential it lives in a subdirectory rather than directly in
-// sessionDir(), because AuthRegistry.ListStatus globs sessionDir()/*.json and
-// reads every match as an Encounter domain session: a settings file sitting
-// there would surface in the -web auth panel as a bogus domain whose Logout
-// button deletes it.
+// llmSettingsFile resolves the settings path. The "llm" subdirectory is the
+// part that matters; stateFilePath explains why.
 func llmSettingsFile() string {
-	if path := strings.TrimSpace(os.Getenv(llmSettingsFileEnvVar)); path != "" {
-		return path
-	}
-	return filepath.Join(sessionDir(), "llm", "settings.json")
+	return stateFilePath(llmSettingsFileEnvVar, "llm", "settings.json")
 }
 
-// loadLLMSettings reads the stored transport. A missing file is not an error:
-// nothing configured is the normal state for an operator who runs on the
-// environment alone.
+// llmSettingsWhat is the operator-facing noun in this file's errors and in the
+// warning about a relocated path.
+const llmSettingsWhat = "LLM settings"
+
+// loadLLMSettings reads the stored transport, normalising it on the way out so
+// callers never have to wonder whether a stored value was padded.
 //
-// A file that does not parse IS an error, and it is deliberately propagated all
-// the way to resolveAgentConfig. Ignoring it would silently run the agent
+// An unparseable file is an error here, and it is deliberately propagated all
+// the way to resolveAgentConfig: ignoring it would silently run the agent
 // against a provider the operator did not choose.
 func loadLLMSettings() (llmSettings, error) {
-	path := llmSettingsFile()
-	data, err := os.ReadFile(path)
+	s, err := loadJSONState[llmSettings](llmSettingsFile(), llmSettingsWhat)
 	if err != nil {
-		if os.IsNotExist(err) {
-			return llmSettings{}, nil
-		}
-		return llmSettings{}, fmt.Errorf("read LLM settings %s: %w", path, err)
-	}
-	if len(strings.TrimSpace(string(data))) == 0 {
-		return llmSettings{}, nil
-	}
-	var s llmSettings
-	if err := json.Unmarshal(data, &s); err != nil {
-		return llmSettings{}, fmt.Errorf("parse LLM settings %s: %w (delete the file to start over)", path, err)
+		return llmSettings{}, err
 	}
 	return s.trimmed(), nil
 }
@@ -78,33 +58,12 @@ func (s llmSettings) trimmed() llmSettings {
 }
 
 // saveLLMSettings writes the settings for the next process to read.
-//
-// The file holds an API key, so it is created 0600 in a 0700 directory and
-// written through a temp file: os.WriteFile applies its mode only when creating
-// and would leave a pre-existing file world-readable.
 func saveLLMSettings(s llmSettings) error {
-	data, err := json.MarshalIndent(s.trimmed(), "", "  ")
-	if err != nil {
-		return fmt.Errorf("encode LLM settings: %w", err)
-	}
-	path := llmSettingsFile()
-	warnIfSessionGlobCollision(llmSettingsFileEnvVar, path, "LLM settings")
-	if dir := filepath.Dir(path); dir != "" {
-		if err := os.MkdirAll(dir, 0700); err != nil {
-			return fmt.Errorf("create %s: %w", dir, err)
-		}
-	}
-	if err := fileutil.WriteFileAtomic(path, data, 0600); err != nil {
-		return fmt.Errorf("write LLM settings %s: %w", path, err)
-	}
-	return nil
+	return saveJSONState(llmSettingsFile(), llmSettingsFileEnvVar, llmSettingsWhat, s.trimmed())
 }
 
 func deleteLLMSettings() error {
-	if err := os.Remove(llmSettingsFile()); err != nil && !os.IsNotExist(err) {
-		return err
-	}
-	return nil
+	return deleteJSONState(llmSettingsFile())
 }
 
 // --- resolution ---

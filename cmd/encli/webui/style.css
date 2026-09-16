@@ -1731,6 +1731,328 @@ html[data-theme="light"] .llm-tab.is-active {
   }
 }
 
+/* —— Мастер первого запуска —— */
+/* Оверлей мастера лежит выше .modal-overlay (z-index: 150), чтобы модалка
+   настроек LLM его не перекрывала, но ниже .toast и .tool-chip-tooltip
+   (z-index: 200) — уведомления должны оставаться видимыми поверх мастера.
+   Переходы здесь короткие и переиспользуют modal-fade; общий блок
+   @media (prefers-reduced-motion: reduce) в конце файла гасит их сам. */
+.onboarding-overlay[hidden] {
+  display: none !important;
+}
+
+.onboarding-overlay:not([hidden]) {
+  position: fixed;
+  inset: 0;
+  z-index: 160;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  background: var(--modal-scrim);
+  backdrop-filter: blur(6px);
+  animation: modal-fade 0.2s var(--ease-out);
+}
+
+.onboarding-head {
+  flex-direction: column;
+  align-items: stretch;
+}
+
+/* Тело мастера ограничено по высоте и прокручивается внутри диалога,
+   поэтому кнопки в подвале доступны при любой длине шага. */
+.onboarding-body {
+  max-height: min(58vh, 520px);
+  overflow-y: auto;
+}
+
+/* —— Индикатор шагов —— */
+/* Состояние переключается двумя классами на <li>: .is-active — текущий шаг,
+   .is-done — пройденный. Больше никаких классов JS добавлять не нужно. */
+.onboarding-steps {
+  display: flex;
+  margin: 14px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.onboarding-step {
+  position: relative;
+  flex: 1 1 4.5rem;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.64rem;
+  font-weight: 600;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--text-faint);
+  transition: color 0.2s;
+}
+
+/* Тонкая линия «маршрута» между кружками шагов. */
+.onboarding-step + .onboarding-step::before {
+  content: "";
+  position: absolute;
+  top: 13px;
+  right: 50%;
+  left: -50%;
+  height: 1px;
+  background: var(--border-strong);
+}
+
+.onboarding-step-num {
+  position: relative;
+  z-index: 1;
+  width: 26px;
+  height: 26px;
+  display: grid;
+  place-items: center;
+  border-radius: 999px;
+  border: 1px solid var(--border-strong);
+  background: var(--bg-deep);
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
+  color: var(--text-muted);
+  transition:
+    background 0.2s var(--ease-out),
+    border-color 0.2s,
+    color 0.2s,
+    box-shadow 0.2s;
+}
+
+.onboarding-step-label {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.onboarding-step.is-done {
+  color: var(--text-muted);
+}
+
+.onboarding-step.is-done .onboarding-step-num {
+  border-color: color-mix(in srgb, var(--success) 60%, var(--border));
+  background: color-mix(in srgb, var(--success) 18%, var(--bg-deep));
+  color: var(--success);
+}
+
+.onboarding-step.is-active {
+  color: var(--amber);
+}
+
+.onboarding-step.is-active .onboarding-step-num {
+  border-color: color-mix(in srgb, var(--amber) 55%, var(--border));
+  background: var(--amber-glow);
+  color: var(--amber);
+  box-shadow: 0 0 0 3px var(--amber-glow);
+}
+
+/* Тот же случай, что и у .llm-tab.is-active: на светлой теме янтарная
+   надпись по янтарной подложке не добирает контраста. */
+html[data-theme="light"] .onboarding-step.is-active,
+html[data-theme="light"] .onboarding-step.is-active .onboarding-step-num {
+  color: color-mix(in srgb, var(--amber-deep) 80%, var(--text));
+}
+
+/* —— Шаги мастера —— */
+.onboarding-pane[hidden] {
+  display: none !important;
+}
+
+.onboarding-pane {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  outline: none;
+}
+
+.onboarding-intro {
+  margin: 0;
+  font-size: 0.88rem;
+  line-height: 1.55;
+  color: var(--text);
+}
+
+.onboarding-summary {
+  margin: 0;
+  padding-left: 1.25rem;
+  font-size: 0.84rem;
+  line-height: 1.6;
+  color: var(--text-muted);
+}
+
+.onboarding-summary strong {
+  color: var(--text);
+}
+
+/* —— Выбор движка —— */
+.onboarding-options {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  min-width: 0;
+}
+
+.onboarding-options > legend {
+  padding: 0;
+  margin-bottom: 8px;
+}
+
+.onboarding-option {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: start;
+  gap: 10px;
+  padding: 10px 12px;
+  border-radius: var(--radius);
+  border: 1px solid var(--border);
+  background: var(--bg-elevated);
+  cursor: pointer;
+  transition:
+    background 0.2s var(--ease-out),
+    border-color 0.2s,
+    box-shadow 0.2s;
+}
+
+.onboarding-option:hover {
+  border-color: var(--border-strong);
+  background: var(--bg-hover);
+}
+
+.onboarding-option:has(input:checked) {
+  border-color: color-mix(in srgb, var(--amber) 50%, var(--border));
+  background: color-mix(in srgb, var(--amber-glow) 55%, var(--bg-elevated));
+}
+
+.onboarding-option:has(input:focus-visible) {
+  box-shadow: 0 0 0 3px var(--amber-glow);
+}
+
+.onboarding-option input {
+  margin: 4px 0 0;
+  accent-color: var(--amber);
+}
+
+.onboarding-option input:focus-visible {
+  outline: none;
+}
+
+.onboarding-option-title {
+  display: block;
+  font-size: 0.88rem;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.onboarding-option-desc {
+  display: block;
+  font-size: 0.76rem;
+  line-height: 1.45;
+  color: var(--text-muted);
+}
+
+/* —— Форма входа —— */
+.onboarding-auth-form {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  min-width: 0;
+}
+
+/* —— Результаты проверок —— */
+.onboarding-result:empty {
+  display: none;
+}
+
+.onboarding-result {
+  padding: 10px 12px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--text-faint);
+  background: var(--bg-elevated);
+  font-size: 0.8rem;
+  line-height: 1.45;
+  color: var(--text-muted);
+  word-break: break-word;
+}
+
+.onboarding-result.is-ok {
+  border-left-color: var(--success);
+  color: var(--text);
+}
+
+.onboarding-result.is-warn {
+  border-left-color: var(--amber);
+  color: var(--text);
+}
+
+.onboarding-result.is-err {
+  border-left-color: var(--danger);
+  color: var(--danger-text);
+}
+
+@media (max-width: 720px) {
+  .onboarding-overlay:not([hidden]) {
+    padding: 0;
+    place-items: stretch;
+  }
+
+  /* Диалог здесь растянут на всю высоту (.modal: max-height: 100vh), и
+     собственный потолок тела оставил бы пустоту между ним и подвалом —
+     прокрутку берёт на себя flex-раскладка .modal-body. */
+  .onboarding-body {
+    max-height: none;
+  }
+}
+
+/* Узкие экраны (проверено на 380px): подписи шагов сжимаются, кружки
+   уменьшаются, кнопки подвала выстраиваются в столбец. */
+@media (max-width: 480px) {
+  .onboarding-steps {
+    gap: 0;
+  }
+
+  .onboarding-step {
+    flex: 1 1 3rem;
+    gap: 4px;
+    font-size: 0.56rem;
+    letter-spacing: 0.06em;
+  }
+
+  .onboarding-step + .onboarding-step::before {
+    top: 11px;
+  }
+
+  .onboarding-step-num {
+    width: 22px;
+    height: 22px;
+    font-size: 0.66rem;
+  }
+
+  .onboarding-foot .modal-actions {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .onboarding-foot .modal-actions-gap {
+    display: none;
+  }
+
+  .onboarding-pane .llm-field-row .llm-input {
+    min-width: 0;
+  }
+
+  .onboarding-pane .llm-actions .btn {
+    width: 100%;
+  }
+}
+
 /* Markdown */
 .msg-body :is(pre, code) {
   font-family: var(--font-mono);

@@ -10,6 +10,9 @@ import (
 // parseEngineFlag runs the flag registration the same way main does.
 func parseEngineFlag(t *testing.T, args ...string) *config {
 	t.Helper()
+	// engineOptions falls back to the stored settings, which would otherwise be
+	// the developer's real ones.
+	isolateEngineSettings(t)
 	fs := flag.NewFlagSet("encli", flag.ContinueOnError)
 	cfg := &config{}
 	registerEngineFlag(fs, cfg)

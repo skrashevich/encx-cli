@@ -48,6 +48,7 @@
             <button type="button" class="btn btn-secondary" id="btn-patch-chat" disabled>Сохранить</button>
             <button type="button" class="btn btn-ghost btn-icon" id="btn-export" disabled title="Экспорт чата">↗</button>
             <button type="button" class="btn btn-ghost btn-icon" id="btn-cancel" disabled title="Отменить ответ агента">✕</button>
+            <button type="button" class="btn btn-ghost btn-icon" id="btn-onboarding-open" title="Мастер настройки" aria-label="Мастер настройки" aria-haspopup="dialog">◈</button>
             <button type="button" class="btn btn-ghost btn-icon" id="btn-llm-settings" title="Настройки LLM" aria-label="Настройки LLM" aria-haspopup="dialog">⚙</button>
             <button type="button" class="btn btn-ghost btn-icon" id="btn-theme" title="Светлая/тёмная тема">◐</button>
             <span class="running-pill" id="running-pill" hidden>
@@ -181,6 +182,169 @@
           <span class="modal-actions-gap"></span>
           <button type="button" class="btn btn-secondary" id="btn-llm-cancel">Закрыть</button>
           <button type="button" class="btn btn-primary" id="btn-llm-save">Сохранить</button>
+        </div>
+      </div>
+    </div>
+  </div>
+  <div class="onboarding-overlay" id="onboarding" hidden>
+    <div class="modal onboarding-dialog" role="dialog" aria-modal="true" aria-labelledby="onboarding-title">
+      <div class="modal-head onboarding-head">
+        <div class="modal-head-text">
+          <h2 class="modal-title" id="onboarding-title">Настройка encli</h2>
+          <p class="modal-subtitle" id="onboarding-subtitle">Три шага до первого запроса агенту</p>
+          <ol class="onboarding-steps" id="onboarding-steps">
+            <li class="onboarding-step is-active" data-step="welcome">
+              <span class="onboarding-step-num" aria-hidden="true">1</span>
+              <span class="onboarding-step-label">Начало</span>
+            </li>
+            <li class="onboarding-step" data-step="llm">
+              <span class="onboarding-step-num" aria-hidden="true">2</span>
+              <span class="onboarding-step-label">Модель</span>
+            </li>
+            <li class="onboarding-step" data-step="engine">
+              <span class="onboarding-step-num" aria-hidden="true">3</span>
+              <span class="onboarding-step-label">Движок</span>
+            </li>
+            <li class="onboarding-step" data-step="auth">
+              <span class="onboarding-step-num" aria-hidden="true">4</span>
+              <span class="onboarding-step-label">Вход</span>
+            </li>
+          </ol>
+        </div>
+      </div>
+
+      <div class="modal-body onboarding-body">
+        <section class="onboarding-pane" id="onboarding-pane-welcome" tabindex="-1" hidden>
+          <p class="onboarding-intro">encli — агент для работы с квестами en.cx: читает задания, ведёт переписку и выполняет действия на сайте вместо вас.</p>
+          <p class="onboarding-intro">Мастер проходит три шага и сохраняет настройки локально. Любой шаг можно пропустить и вернуться к нему позже.</p>
+          <ol class="onboarding-summary">
+            <li><strong>Модель</strong> — как агент подключается к языковой модели.</li>
+            <li><strong>Движок</strong> — с каким API домена работать.</li>
+            <li><strong>Вход</strong> — учётная запись en.cx для доступа к играм.</li>
+          </ol>
+        </section>
+
+        <section class="onboarding-pane" id="onboarding-pane-llm" tabindex="-1" hidden>
+          <div class="llm-transport">
+            <div class="llm-tabs" role="tablist" aria-label="Способ подключения">
+              <button type="button" class="llm-tab is-active" id="onboarding-llm-tab-codex" role="tab" aria-selected="true" aria-controls="onboarding-llm-pane-codex">Подписка ChatGPT</button>
+              <button type="button" class="llm-tab" id="onboarding-llm-tab-apikey" role="tab" aria-selected="false" aria-controls="onboarding-llm-pane-apikey" tabindex="-1">OpenAI-совместимый провайдер</button>
+            </div>
+          </div>
+
+          <section class="llm-pane" id="onboarding-llm-pane-codex" role="tabpanel" aria-labelledby="onboarding-llm-tab-codex" tabindex="0">
+            <div class="llm-codex-status" id="onboarding-codex-status" aria-live="polite"></div>
+            <div class="llm-actions">
+              <button type="button" class="btn btn-primary" id="btn-onboarding-codex-login">Войти через ChatGPT</button>
+            </div>
+            <p class="llm-hint" id="onboarding-codex-progress" role="status" aria-live="polite" hidden></p>
+            <details class="llm-details" id="onboarding-codex-manual">
+              <summary>Вставить redirect URL вручную</summary>
+              <p class="llm-hint">Если браузер открылся на другой машине, скопируйте адрес, на который он перенаправил, и вставьте сюда.</p>
+              <div class="llm-field">
+                <label class="llm-field-label" for="onboarding-codex-code">Redirect URL или код</label>
+                <div class="llm-field-row">
+                  <input type="text" id="onboarding-codex-code" class="llm-input" placeholder="http://localhost:1455/auth/callback?code=…" autocomplete="off" spellcheck="false" />
+                  <button type="button" class="btn btn-secondary btn-sm" id="btn-onboarding-codex-code-submit">Отправить</button>
+                </div>
+              </div>
+            </details>
+          </section>
+
+          <section class="llm-pane" id="onboarding-llm-pane-apikey" role="tabpanel" aria-labelledby="onboarding-llm-tab-apikey" tabindex="0" hidden>
+            <div class="llm-field">
+              <label class="llm-field-label" for="onboarding-llm-base-url">Base URL</label>
+              <input type="text" id="onboarding-llm-base-url" class="llm-input" placeholder="https://api.openai.com/v1" autocomplete="off" spellcheck="false" />
+            </div>
+            <div class="llm-field">
+              <label class="llm-field-label" for="onboarding-llm-api-key">API-ключ</label>
+              <input type="password" id="onboarding-llm-api-key" class="llm-input" autocomplete="off" spellcheck="false" />
+            </div>
+            <div class="llm-field">
+              <label class="llm-field-label" for="onboarding-llm-model">Модель</label>
+              <input type="text" id="onboarding-llm-model" class="llm-input" placeholder="gpt-4o-mini" autocomplete="off" spellcheck="false" />
+            </div>
+            <p class="llm-hint" id="onboarding-llm-hint">Подойдёт любой провайдер с OpenAI-совместимым API. Ключ остаётся на этой машине.</p>
+          </section>
+
+          <div class="llm-override-slot" id="onboarding-llm-overrides"></div>
+
+          <div class="llm-actions">
+            <button type="button" class="btn btn-secondary" id="btn-onboarding-llm-test">Проверить подключение</button>
+          </div>
+          <div class="onboarding-result" id="onboarding-llm-result" aria-live="polite"></div>
+        </section>
+
+        <section class="onboarding-pane" id="onboarding-pane-engine" tabindex="-1" hidden>
+          <fieldset class="onboarding-options">
+            <legend class="llm-field-label">Движок домена</legend>
+            <label class="onboarding-option" for="onboarding-engine-auto">
+              <input type="radio" name="onboarding-engine" value="auto" id="onboarding-engine-auto" checked />
+              <span class="onboarding-option-text">
+                <span class="onboarding-option-title">Определить автоматически</span>
+                <span class="onboarding-option-desc">encli сам выберет движок по ответу домена</span>
+              </span>
+            </label>
+            <label class="onboarding-option" for="onboarding-engine-legacy">
+              <input type="radio" name="onboarding-engine" value="legacy" id="onboarding-engine-legacy" />
+              <span class="onboarding-option-text">
+                <span class="onboarding-option-title">Старый движок</span>
+                <span class="onboarding-option-desc">Классический ASP.NET-сайт en.cx</span>
+              </span>
+            </label>
+            <label class="onboarding-option" for="onboarding-engine-new">
+              <input type="radio" name="onboarding-engine" value="new" id="onboarding-engine-new" />
+              <span class="onboarding-option-text">
+                <span class="onboarding-option-title">Новый движок</span>
+                <span class="onboarding-option-desc">Новый REST API</span>
+              </span>
+            </label>
+          </fieldset>
+
+          <div class="llm-field">
+            <label class="llm-field-label" for="onboarding-engine-base-url">Адрес API (необязательно)</label>
+            <input type="text" id="onboarding-engine-base-url" class="llm-input" placeholder="https://domain.en.cx" autocomplete="off" spellcheck="false" />
+          </div>
+
+          <div class="llm-override-slot" id="onboarding-engine-overrides"></div>
+
+          <div class="llm-actions">
+            <button type="button" class="btn btn-secondary" id="btn-onboarding-engine-probe">Определить автоматически</button>
+          </div>
+          <div class="onboarding-result" id="onboarding-engine-result" aria-live="polite"></div>
+        </section>
+
+        <section class="onboarding-pane" id="onboarding-pane-auth" tabindex="-1" hidden>
+          <p class="llm-hint">Логин и пароль нужны, чтобы агент открывал задания от вашего имени. Данные хранятся локально.</p>
+          <form class="onboarding-auth-form" id="onboarding-auth-form" autocomplete="on">
+            <div class="llm-field">
+              <label class="llm-field-label" for="onboarding-auth-domain">Домен</label>
+              <input type="text" name="domain" id="onboarding-auth-domain" class="llm-input" placeholder="demo.en.cx" autocomplete="off" spellcheck="false" required />
+            </div>
+            <div class="llm-field">
+              <label class="llm-field-label" for="onboarding-auth-login">Логин</label>
+              <input type="text" name="login" id="onboarding-auth-login" class="llm-input" autocomplete="username" spellcheck="false" required />
+            </div>
+            <div class="llm-field">
+              <label class="llm-field-label" for="onboarding-auth-password">Пароль</label>
+              <input type="password" name="password" id="onboarding-auth-password" class="llm-input" autocomplete="current-password" required />
+            </div>
+            <div class="llm-actions">
+              <button type="submit" class="btn btn-accent" id="btn-onboarding-auth-submit">Войти</button>
+              <button type="button" class="btn btn-ghost" id="btn-onboarding-auth-skip">Пропустить этот шаг</button>
+            </div>
+          </form>
+          <div class="onboarding-result" id="onboarding-auth-status" aria-live="polite"></div>
+        </section>
+      </div>
+
+      <div class="modal-foot onboarding-foot">
+        <div class="llm-alert" id="onboarding-error" role="alert" hidden></div>
+        <div class="modal-actions">
+          <button type="button" class="btn btn-ghost btn-sm" id="btn-onboarding-skip-all">Пропустить настройку</button>
+          <span class="modal-actions-gap"></span>
+          <button type="button" class="btn btn-secondary" id="btn-onboarding-back">Назад</button>
+          <button type="button" class="btn btn-primary" id="btn-onboarding-next"><span id="onboarding-next-label">Далее</span></button>
         </div>
       </div>
     </div>
