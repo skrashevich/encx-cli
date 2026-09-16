@@ -31,6 +31,9 @@
 
   --success: #5cb88a;
   --danger: #e07070;
+  /* Текстовый оттенок danger: сам --danger не добирает контраста для мелкого
+     текста на подложке из него же, а как цвет рамки он остаётся уместен. */
+  --danger-text: #eb8585;
 
   --radius-sm: 6px;
   --radius: 10px;
@@ -38,6 +41,7 @@
 
   --shadow-soft: 0 12px 40px rgba(0, 0, 0, 0.45);
   --shadow-inset: inset 0 1px 0 rgba(255, 255, 255, 0.04);
+  --modal-scrim: rgba(3, 8, 7, 0.7);
 
   --sidebar-w: 272px;
   --ease-out: cubic-bezier(0.22, 1, 0.36, 1);
@@ -65,6 +69,8 @@ html[data-theme="light"] {
 
   --shadow-soft: 0 12px 40px rgba(20, 32, 28, 0.08);
   --shadow-inset: inset 0 1px 0 rgba(255, 255, 255, 0.8);
+  --modal-scrim: rgba(20, 32, 28, 0.52);
+  --danger-text: #a8291c;
 }
 
 html,
@@ -1316,6 +1322,413 @@ body::before {
   border-color: var(--danger);
   color: var(--danger);
   background: color-mix(in srgb, var(--danger) 12%, var(--bg-elevated));
+}
+
+/* —— Модальное окно: настройки LLM —— */
+.modal-overlay[hidden] {
+  display: none !important;
+}
+
+.modal-overlay:not([hidden]) {
+  position: fixed;
+  inset: 0;
+  z-index: 150;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  background: var(--modal-scrim);
+  backdrop-filter: blur(6px);
+  animation: modal-fade 0.2s var(--ease-out);
+}
+
+body.is-modal-open {
+  overflow: hidden;
+}
+
+@keyframes modal-fade {
+  from {
+    opacity: 0;
+  }
+}
+
+.modal {
+  display: flex;
+  flex-direction: column;
+  width: min(660px, 100%);
+  max-height: min(86vh, 800px);
+  border-radius: var(--radius-lg);
+  border: 1px solid var(--border-strong);
+  background: var(--bg-panel);
+  box-shadow: var(--shadow-soft), var(--shadow-inset);
+  animation: modal-in 0.3s var(--ease-out);
+}
+
+@keyframes modal-in {
+  from {
+    opacity: 0;
+    transform: translateY(10px) scale(0.985);
+  }
+}
+
+.modal-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 18px 20px 14px;
+  border-bottom: 1px solid var(--border);
+}
+
+.modal-head-text {
+  min-width: 0;
+}
+
+.modal-title {
+  margin: 0;
+  font-size: 1.05rem;
+  font-weight: 700;
+  letter-spacing: 0.01em;
+}
+
+.modal-subtitle {
+  margin: 2px 0 0;
+  font-size: 0.78rem;
+  color: var(--text-muted);
+}
+
+.modal-body {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 18px 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+  scrollbar-width: thin;
+  scrollbar-color: var(--border-strong) transparent;
+}
+
+.modal-foot {
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 14px 20px 16px;
+  border-top: 1px solid var(--border);
+  background: color-mix(in srgb, var(--bg-elevated) 55%, transparent);
+  border-radius: 0 0 var(--radius-lg) var(--radius-lg);
+}
+
+.modal-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.modal-actions-gap {
+  flex: 1;
+}
+
+/* Транспорт: сегментированный переключатель */
+.llm-transport {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.llm-tabs {
+  display: flex;
+  gap: 4px;
+  padding: 4px;
+  border-radius: var(--radius);
+  border: 1px solid var(--border);
+  background: var(--bg-deep);
+}
+
+.llm-tab {
+  flex: 1;
+  padding: 9px 12px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-muted);
+  font: inherit;
+  font-size: 0.85rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition:
+    background 0.2s var(--ease-out),
+    color 0.2s,
+    border-color 0.2s;
+}
+
+.llm-tab:hover:not(.is-active) {
+  color: var(--text);
+  background: var(--bg-hover);
+}
+
+.llm-tab.is-active {
+  color: var(--amber);
+  background: var(--amber-glow);
+  border-color: color-mix(in srgb, var(--amber) 45%, var(--border));
+}
+
+/* На светлой теме янтарь по янтарному фону не добирает контраста для текста
+   вкладки — затемняем именно надпись, фон и рамка остаются прежними. */
+html[data-theme="light"] .llm-tab.is-active {
+  color: color-mix(in srgb, var(--amber-deep) 80%, #000);
+}
+
+.llm-tab:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 2px var(--amber-glow);
+}
+
+.llm-note {
+  margin: 0;
+  padding: 8px 10px;
+  border-radius: var(--radius-sm);
+  border: 1px dashed var(--border-strong);
+  font-size: 0.8rem;
+  color: var(--text-muted);
+}
+
+.llm-pane[hidden] {
+  display: none !important;
+}
+
+.llm-pane {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  outline: none;
+}
+
+.llm-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
+
+.llm-field-label {
+  font-size: 0.65rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.14em;
+  color: var(--text-muted);
+}
+
+.llm-field-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.llm-field-row .llm-input {
+  flex: 1;
+  min-width: 12rem;
+}
+
+.llm-input {
+  width: 100%;
+  padding: 10px 12px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border);
+  background: var(--bg-deep);
+  color: var(--text);
+  font-family: var(--font-mono);
+  font-size: 0.82rem;
+  transition: border-color 0.2s, box-shadow 0.2s;
+}
+
+.llm-input::placeholder {
+  color: var(--text-faint);
+}
+
+.llm-input:focus-visible {
+  outline: none;
+  border-color: var(--amber);
+  box-shadow: 0 0 0 3px var(--amber-glow);
+}
+
+.llm-hint {
+  margin: 0;
+  font-size: 0.76rem;
+  line-height: 1.45;
+  color: var(--text-muted);
+}
+
+.llm-hint a {
+  color: var(--amber);
+}
+
+/* Плашки «значение задано снаружи» */
+.llm-override-slot:empty {
+  display: none;
+}
+
+.llm-override-slot {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+
+.llm-override {
+  display: inline-flex;
+  align-items: center;
+  padding: 3px 9px;
+  border-radius: 999px;
+  border: 1px solid var(--border-strong);
+  background: var(--bg-elevated);
+  font-family: var(--font-mono);
+  font-size: 0.68rem;
+  line-height: 1.4;
+  color: var(--text-muted);
+}
+
+.llm-override.is-shadowing {
+  border-color: color-mix(in srgb, var(--amber) 60%, var(--border));
+  background: var(--amber-glow);
+  color: var(--amber);
+  font-weight: 700;
+}
+
+.llm-override-note {
+  font-size: 0.72rem;
+  color: var(--amber);
+}
+
+/* Статус подписки ChatGPT */
+.llm-codex-status {
+  padding: 12px 14px;
+  border-radius: var(--radius);
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--text-faint);
+  background: var(--bg-elevated);
+}
+
+.llm-codex-status.is-ok {
+  border-left-color: var(--success);
+}
+
+.llm-codex-status.is-warn {
+  border-left-color: var(--amber);
+}
+
+.llm-codex-title {
+  margin: 0;
+  font-weight: 600;
+  font-size: 0.9rem;
+}
+
+.llm-codex-rows {
+  margin: 6px 0 0;
+  padding: 0;
+  list-style: none;
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
+  line-height: 1.6;
+  color: var(--text-muted);
+  word-break: break-word;
+}
+
+.llm-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.llm-details {
+  border-top: 1px dashed var(--border);
+  padding-top: 12px;
+}
+
+.llm-details > summary {
+  cursor: pointer;
+  font-size: 0.82rem;
+  font-weight: 600;
+  color: var(--text-muted);
+  list-style-position: inside;
+}
+
+.llm-details > summary:hover {
+  color: var(--amber);
+}
+
+.llm-details > summary:focus-visible {
+  outline: none;
+  color: var(--amber);
+}
+
+.llm-details > *:not(summary) {
+  margin-top: 10px;
+}
+
+/* Итог и ошибки */
+.llm-alert[hidden] {
+  display: none !important;
+}
+
+.llm-alert {
+  margin-bottom: 4px;
+  padding: 10px 12px;
+  border-radius: var(--radius-sm);
+  border: 1px solid color-mix(in srgb, var(--danger) 55%, var(--border));
+  background: color-mix(in srgb, var(--danger) 12%, var(--bg-elevated));
+  color: var(--danger-text);
+  font-size: 0.8rem;
+  line-height: 1.45;
+}
+
+.llm-alert p {
+  margin: 0;
+}
+
+.llm-alert p + p {
+  margin-top: 6px;
+}
+
+.llm-summary {
+  margin: 0;
+  font-size: 0.84rem;
+  font-weight: 500;
+  color: var(--text);
+  word-break: break-word;
+}
+
+.llm-summary-path {
+  margin: 0;
+  font-family: var(--font-mono);
+  font-size: 0.7rem;
+  color: var(--text-muted);
+  word-break: break-all;
+}
+
+@media (max-width: 720px) {
+  .modal-overlay:not([hidden]) {
+    padding: 0;
+    place-items: stretch;
+  }
+
+  .modal {
+    width: 100%;
+    max-height: 100vh;
+    border-radius: 0;
+    border: none;
+  }
+
+  .modal-foot {
+    border-radius: 0;
+  }
+
+  .llm-tabs {
+    flex-direction: column;
+  }
 }
 
 /* Markdown */

@@ -19,6 +19,11 @@ const state = {
   searchQuery: '',
   catalogGames: [],
   attachments: [],
+  llm: null,
+  llmAuth: '',
+  llmEdited: { base_url: false, model: false },
+  codexFlow: null,
+  codexPoll: null,
 };
 
 const ROLE_RU = {
@@ -261,7 +266,7 @@ async function loadAgentConfig() {
     } else {
       const err = String(data?.error || '').trim();
       el.textContent = err ? 'модель не настроена' : '—';
-      el.title = err || 'Задайте LLM_MODEL или OPENROUTER_MODEL';
+      el.title = err || 'Откройте «Настройки LLM» или задайте LLM_MODEL';
       el.classList.add('is-missing');
     }
   } catch (e) {
@@ -1397,6 +1402,522 @@ async function logout() {
   await fillDomainSelect();
 }
 
+/* —— Настройки LLM —— */
+
+const LLM_OVERRIDE_FLAGS = {
+  auth_method: '--llm-auth',
+};
+
+const LLM_OVERRIDE_FIELDS = ['auth_method', 'base_url', 'model', 'api_key'];
+
+const LLM_TRANSPORT_RU = {
+  codex: 'подписка ChatGPT',
+  gigachat: 'GigaChat',
+  apikey: 'OpenAI-совместимый провайдер',
+};
+
+/** Опрос статуса входа через ChatGPT: раз в 2 с, не дольше пяти минут — столько
+ * же живёт поток на стороне сервера (codexLoginTTL). */
+const CODEX_POLL_MS = 2000;
+const CODEX_LOGIN_TTL_MS = 5 * 60 * 1000;
+
+let llmLastFocus = null;
+
+function transportLabel(method) {
+  return LLM_TRANSPORT_RU[method] || LLM_TRANSPORT_RU.apikey;
+}
+
+/** Вкладка, открытая при загрузке: сохранённое значение важнее действующего,
+ * чтобы форма показывала то, что она же и перезапишет. Пустое сохранённое
+ * значение остаётся пустым — при сохранении оно не превратится в «apikey». */
+function initialAuthMethod(data) {
+  const stored = String(data?.stored?.auth_method || '').trim();
+  if (stored) return stored;
+  const effective = String(data?.effective?.auth_method?.value || '').trim();
+  return effective === 'codex' || effective === 'apikey' ? effective : '';
+}
+
+function isModalOpen() {
+  const modal = $('llm-modal');
+  return !!modal && !modal.hidden;
+}
+
+function llmFocusable() {
+  const dialog = $('llm-modal-dialog');
+  if (!dialog) return [];
+  const sel =
+    'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), summary, [tabindex]:not([tabindex="-1"])';
+  return [...dialog.querySelectorAll(sel)].filter((el) => el.getClientRects().length > 0);
+}
+
+function trapLLMFocus(e) {
+  const items = llmFocusable();
+  if (!items.length) return;
+  const first = items[0];
+  const last = items[items.length - 1];
+  const active = document.activeElement;
+  if (e.shiftKey && (active === first || !items.includes(active))) {
+    e.preventDefault();
+    last.focus();
+  } else if (!e.shiftKey && active === last) {
+    e.preventDefault();
+    first.focus();
+  }
+}
+
+function onLLMModalKeydown(e) {
+  if (!isModalOpen()) return;
+  if (e.key === 'Escape') {
+    e.preventDefault();
+    e.stopPropagation();
+    closeLLMModal();
+    return;
+  }
+  if (e.key === 'Tab') {
+    e.stopPropagation();
+    trapLLMFocus(e);
+  }
+}
+
+async function openLLMModal() {
+  const modal = $('llm-modal');
+  if (!modal || !modal.hidden) return;
+  llmLastFocus = document.activeElement;
+  modal.hidden = false;
+  document.body.classList.add('is-modal-open');
+  document.addEventListener('keydown', onLLMModalKeydown, true);
+  renderLLMSettings();
+  try {
+    const data = await api('/llm/settings');
+    applyLLMSnapshot(data);
+  } catch (e) {
+    toast(`Настройки LLM: ${e.message || String(e)}`, true);
+  }
+  const items = llmFocusable();
+  (items[0] || modal).focus?.();
+}
+
+function closeLLMModal() {
+  const modal = $('llm-modal');
+  if (!modal || modal.hidden) return;
+  modal.hidden = true;
+  document.body.classList.remove('is-modal-open');
+  document.removeEventListener('keydown', onLLMModalKeydown, true);
+  llmLastFocus?.focus?.();
+  llmLastFocus = null;
+}
+
+/** Принимает свежий снимок настроек. keepEdits оставляет незасохранённый ввод —
+ * его используют обновления, вызванные входом/выходом ChatGPT, а не формой. */
+function applyLLMSnapshot(data, opts = {}) {
+  state.llm = data || null;
+  if (!opts.keepEdits) {
+    state.llmEdited = { base_url: false, model: false };
+    state.llmAuth = initialAuthMethod(data);
+    const key = $('llm-api-key');
+    if (key) key.value = '';
+  }
+  renderLLMSettings();
+}
+
+function setTabState(btn, active, reachable) {
+  if (!btn) return;
+  btn.classList.toggle('is-active', active);
+  btn.setAttribute('aria-selected', active ? 'true' : 'false');
+  btn.tabIndex = active || reachable ? 0 : -1;
+}
+
+function selectLLMTab(method) {
+  state.llmAuth = method;
+  renderLLMSettings();
+  const pane = $(method === 'codex' ? 'llm-pane-codex' : 'llm-pane-apikey');
+  pane?.focus?.();
+}
+
+function renderLLMOverrides(list) {
+  for (const field of LLM_OVERRIDE_FIELDS) {
+    const slot = $(`llm-override-${field}`);
+    if (slot) slot.innerHTML = '';
+  }
+  for (const o of Array.isArray(list) ? list : []) {
+    const slot = $(`llm-override-${o.field}`);
+    if (!slot) continue;
+    const flag = LLM_OVERRIDE_FLAGS[o.field];
+    const source =
+      o.source === 'flag'
+        ? flag
+          ? `флагом ${flag}`
+          : 'флагом командной строки'
+        : `переменной ${o.env_var || 'окружения'}`;
+    const badge = document.createElement('span');
+    badge.className = 'llm-override' + (o.shadows_stored ? ' is-shadowing' : '');
+    badge.textContent = `переопределено ${source}`;
+    slot.appendChild(badge);
+    if (o.shadows_stored) {
+      const note = document.createElement('span');
+      note.className = 'llm-override-note';
+      note.textContent = 'сохранённое здесь значение не применяется';
+      slot.appendChild(note);
+    }
+  }
+}
+
+function formatCodexExpiry(raw) {
+  const ts = Date.parse(String(raw || ''));
+  if (!Number.isFinite(ts)) return String(raw || '');
+  return new Date(ts).toLocaleString('ru-RU');
+}
+
+function renderCodexStatus(codex) {
+  const box = $('llm-codex-status');
+  if (!box) return;
+  const c = codex || {};
+  const rows = [];
+  let cls = 'llm-codex-status';
+  let title = 'Не выполнен вход';
+  if (c.signed_in) {
+    cls += c.expired ? ' is-warn' : ' is-ok';
+    title = c.expired ? 'Вход выполнен, срок действия истёк' : 'Вход выполнен';
+    if (c.account_id) rows.push(`Аккаунт: ${c.account_id}`);
+    if (c.expires_at) rows.push(`Действует до: ${formatCodexExpiry(c.expires_at)}`);
+  } else {
+    cls += ' is-off';
+  }
+  if (c.error) {
+    cls += ' is-warn';
+    rows.push(`Ошибка: ${c.error}`);
+  }
+  if (c.path) rows.push(`Файл: ${c.path}`);
+  box.className = cls;
+  box.innerHTML = `<p class="llm-codex-title">${escapeHtml(title)}</p>${
+    rows.length ? `<ul class="llm-codex-rows">${rows.map((r) => `<li>${escapeHtml(r)}</li>`).join('')}</ul>` : ''
+  }`;
+}
+
+function renderLLMSettings() {
+  const data = state.llm;
+  const defaults = data?.defaults || {};
+  const stored = data?.stored || {};
+  const method = state.llmAuth;
+  const isCodex = method === 'codex';
+  const isOther = method !== '' && method !== 'codex' && method !== 'apikey';
+
+  setTabState($('llm-tab-codex'), isCodex, isOther);
+  setTabState($('llm-tab-apikey'), !isCodex && !isOther, isOther);
+  const codexPane = $('llm-pane-codex');
+  const apikeyPane = $('llm-pane-apikey');
+  if (codexPane) codexPane.hidden = !isCodex;
+  if (apikeyPane) apikeyPane.hidden = isCodex;
+
+  const note = $('llm-transport-note');
+  if (note) {
+    note.hidden = !isOther;
+    note.textContent = isOther
+      ? `Сохранён транспорт «${method}» — он настраивается через переменные окружения. Выбор вкладки заменит его.`
+      : '';
+  }
+
+  const baseInput = $('llm-base-url');
+  if (baseInput) {
+    baseInput.placeholder = defaults.base_url || '';
+    if (!state.llmEdited.base_url) baseInput.value = stored.base_url || '';
+  }
+  const modelInput = $('llm-model');
+  if (modelInput) {
+    modelInput.placeholder = defaults.model || '';
+    if (!state.llmEdited.model) modelInput.value = stored.model || '';
+  }
+  const keyInput = $('llm-api-key');
+  const keyHint = $('llm-api-key-hint');
+  if (keyInput) {
+    keyInput.placeholder = stored.has_api_key ? stored.api_key_masked || '••••' : 'sk-…';
+  }
+  if (keyHint) {
+    keyHint.textContent = stored.has_api_key
+      ? 'Ключ сохранён. Пустое поле при сохранении его не затирает.'
+      : 'Ключ не сохранён.';
+  }
+  const clearBtn = $('btn-llm-clear-key');
+  if (clearBtn) clearBtn.disabled = !stored.has_api_key;
+
+  renderLLMOverrides(data?.env_overrides);
+  renderCodexStatus(data?.codex);
+
+  const pending = !!state.codexFlow;
+  const loginBtn = $('btn-codex-login');
+  if (loginBtn) loginBtn.disabled = pending;
+  const logoutBtn = $('btn-codex-logout');
+  if (logoutBtn) logoutBtn.disabled = !data?.codex?.signed_in;
+  const cancelBtn = $('btn-codex-cancel');
+  if (cancelBtn) cancelBtn.hidden = !pending;
+
+  const agent = data?.agent || {};
+  const summary = $('llm-summary');
+  if (summary) {
+    const model = String(agent.model || '').trim() || '—';
+    const where = String(agent.base_url || '').trim() || transportLabel(agent.auth_method || method);
+    summary.textContent = `Сейчас используется: ${model} · ${where}`;
+  }
+  const pathEl = $('llm-settings-path');
+  if (pathEl) {
+    pathEl.textContent = data?.settings_path ? `Файл настроек: ${data.settings_path}` : '';
+  }
+
+  const alert = $('llm-alert');
+  if (alert) {
+    // Нечитаемый файл настроек ломает и чтение, и резолв конфига агента — один
+    // и тот же текст приходит дважды, показывать его дважды незачем.
+    const problems = [...new Set([data?.error, agent.error].map((x) => String(x || '').trim()).filter(Boolean))];
+    alert.hidden = problems.length === 0;
+    alert.innerHTML = problems.map((p) => `<p>${escapeHtml(p)}</p>`).join('');
+  }
+}
+
+function setLLMBusy(busy) {
+  for (const id of ['btn-llm-save', 'btn-llm-reset', 'btn-llm-clear-key']) {
+    const el = $(id);
+    if (el) el.disabled = busy;
+  }
+  if (!busy) renderLLMSettings();
+}
+
+function llmFormBody(extra) {
+  return {
+    auth_method: state.llmAuth,
+    base_url: ($('llm-base-url')?.value || '').trim(),
+    model: ($('llm-model')?.value || '').trim(),
+    api_key: ($('llm-api-key')?.value || '').trim(),
+    clear_api_key: false,
+    ...extra,
+  };
+}
+
+async function putLLMSettings(extra, successMsg) {
+  setLLMBusy(true);
+  try {
+    const data = await api('/llm/settings', { method: 'PUT', body: llmFormBody(extra) });
+    applyLLMSnapshot(data);
+    toast(successMsg);
+    void loadAgentConfig();
+  } catch (e) {
+    toast(e.message || String(e), true);
+  } finally {
+    setLLMBusy(false);
+  }
+}
+
+async function saveLLMSettings() {
+  await putLLMSettings(undefined, 'Настройки LLM сохранены.');
+}
+
+async function clearLLMAPIKey() {
+  if (!window.confirm('Удалить сохранённый API-ключ?')) return;
+  await putLLMSettings({ api_key: '', clear_api_key: true }, 'API-ключ удалён.');
+}
+
+async function resetLLMSettings() {
+  if (!window.confirm('Сбросить все сохранённые настройки LLM?')) return;
+  setLLMBusy(true);
+  try {
+    const data = await api('/llm/settings', { method: 'DELETE' });
+    applyLLMSnapshot(data);
+    toast('Настройки LLM сброшены.');
+    void loadAgentConfig();
+  } catch (e) {
+    toast(e.message || String(e), true);
+  } finally {
+    setLLMBusy(false);
+  }
+}
+
+/** Ссылка собирается через DOM, а не через innerHTML: escapeHtml не экранирует
+ * кавычки, а здесь значение попало бы в атрибут href. */
+function setCodexProgress(text, linkURL) {
+  const el = $('llm-codex-progress');
+  if (!el) return;
+  el.textContent = '';
+  el.hidden = !text;
+  if (!text) return;
+  el.append(text);
+  if (/^https?:\/\//i.test(String(linkURL || ''))) {
+    el.append(' Если вкладка не открылась — ');
+    const a = document.createElement('a');
+    a.href = linkURL;
+    a.target = '_blank';
+    a.rel = 'noopener';
+    a.textContent = 'откройте ссылку вручную';
+    el.append(a, '.');
+  }
+}
+
+function stopCodexPoll() {
+  if (state.codexPoll) {
+    clearInterval(state.codexPoll);
+    state.codexPoll = null;
+  }
+}
+
+async function refreshLLMAfterAuth() {
+  try {
+    const data = await api('/llm/settings');
+    applyLLMSnapshot(data, { keepEdits: true });
+  } catch (e) {
+    toast(`Настройки LLM: ${e.message || String(e)}`, true);
+  }
+  void loadAgentConfig();
+}
+
+async function finishCodexFlow(ok, message) {
+  stopCodexPoll();
+  state.codexFlow = null;
+  setCodexProgress('');
+  toast(ok ? 'Вход через ChatGPT выполнен.' : message || 'Вход через ChatGPT не удался.', !ok);
+  await refreshLLMAfterAuth();
+}
+
+function startCodexPoll() {
+  stopCodexPoll();
+  state.codexPoll = setInterval(() => void pollCodexFlow(), CODEX_POLL_MS);
+}
+
+async function pollCodexFlow() {
+  const flow = state.codexFlow;
+  if (!flow) {
+    stopCodexPoll();
+    return;
+  }
+  if (Date.now() > flow.deadline) {
+    await finishCodexFlow(false, 'Вход через ChatGPT не завершён за 5 минут.');
+    return;
+  }
+  try {
+    const snap = await api(`/llm/codex/login/${encodeURIComponent(flow.id)}`);
+    if (snap?.status === 'success') {
+      await finishCodexFlow(true);
+    } else if (snap?.status === 'error') {
+      await finishCodexFlow(false, snap.error);
+    }
+  } catch (e) {
+    if (e.status === 404) {
+      await finishCodexFlow(false, 'Поток входа больше не существует.');
+    }
+    /* остальные ошибки считаем временными и продолжаем опрос */
+  }
+}
+
+async function startCodexLogin(noBrowser) {
+  if (state.codexFlow) return;
+  try {
+    const flow = await api('/llm/codex/login', { method: 'POST', body: { no_browser: !!noBrowser } });
+    if (!flow?.id) throw new Error('Сервер не вернул идентификатор входа');
+    state.codexFlow = { id: flow.id, deadline: Date.now() + CODEX_LOGIN_TTL_MS };
+    const url = String(flow.authorize_url || '');
+    if (!noBrowser && url) window.open(url, '_blank', 'noopener');
+    if (noBrowser) {
+      const manual = $('llm-codex-manual');
+      if (manual) manual.open = true;
+      setCodexProgress('Откройте ссылку, завершите вход и вставьте redirect URL ниже.', url);
+    } else {
+      setCodexProgress('Ожидаем завершения входа в браузере…', url);
+    }
+    startCodexPoll();
+    renderLLMSettings();
+  } catch (e) {
+    toast(e.message || String(e), true);
+    // 409 — занят порт 1455 под redirect: остаётся ручной путь без слушателя.
+    if (e.status === 409 && !noBrowser) {
+      await startCodexLogin(true);
+    }
+  }
+}
+
+async function submitCodexCode() {
+  const input = $('llm-codex-code');
+  const code = (input?.value || '').trim();
+  if (!state.codexFlow) {
+    toast('Сначала нажмите «Войти через ChatGPT».', true);
+    return;
+  }
+  if (!code) {
+    toast('Вставьте redirect URL или код.', true);
+    return;
+  }
+  const id = state.codexFlow.id;
+  try {
+    await api(`/llm/codex/login/${encodeURIComponent(id)}/code`, { method: 'POST', body: { code } });
+    if (input) input.value = '';
+    await finishCodexFlow(true);
+  } catch (e) {
+    toast(e.message || String(e), true);
+  }
+}
+
+async function cancelCodexLogin() {
+  const flow = state.codexFlow;
+  if (!flow) return;
+  stopCodexPoll();
+  state.codexFlow = null;
+  setCodexProgress('');
+  try {
+    await api(`/llm/codex/login/${encodeURIComponent(flow.id)}`, { method: 'DELETE' });
+  } catch {
+    /* поток мог уже завершиться сам — отменять нечего */
+  }
+  toast('Вход отменён.');
+  renderLLMSettings();
+}
+
+async function codexLogout() {
+  if (!window.confirm('Выйти из аккаунта ChatGPT?')) return;
+  try {
+    const codex = await api('/llm/codex/logout', { method: 'POST' });
+    if (state.llm) state.llm.codex = codex;
+    renderLLMSettings();
+    toast('Выход из ChatGPT выполнен.');
+    await refreshLLMAfterAuth();
+  } catch (e) {
+    toast(e.message || String(e), true);
+  }
+}
+
+function bindLLMSettings() {
+  $('btn-llm-settings')?.addEventListener('click', () => void openLLMModal());
+  $('btn-llm-close')?.addEventListener('click', () => closeLLMModal());
+  $('btn-llm-cancel')?.addEventListener('click', () => closeLLMModal());
+  $('llm-modal')?.addEventListener('mousedown', (e) => {
+    if (e.target === e.currentTarget) closeLLMModal();
+  });
+  $('llm-tab-codex')?.addEventListener('click', () => selectLLMTab('codex'));
+  $('llm-tab-apikey')?.addEventListener('click', () => selectLLMTab('apikey'));
+  for (const id of ['llm-tab-codex', 'llm-tab-apikey']) {
+    $(id)?.addEventListener('keydown', (e) => {
+      if (e.key !== 'ArrowLeft' && e.key !== 'ArrowRight') return;
+      e.preventDefault();
+      selectLLMTab(state.llmAuth === 'codex' ? 'apikey' : 'codex');
+      $(state.llmAuth === 'codex' ? 'llm-tab-codex' : 'llm-tab-apikey')?.focus();
+    });
+  }
+  $('llm-base-url')?.addEventListener('input', () => {
+    state.llmEdited.base_url = true;
+  });
+  $('llm-model')?.addEventListener('input', () => {
+    state.llmEdited.model = true;
+  });
+  $('btn-llm-save')?.addEventListener('click', () => void saveLLMSettings());
+  $('btn-llm-reset')?.addEventListener('click', () => void resetLLMSettings());
+  $('btn-llm-clear-key')?.addEventListener('click', () => void clearLLMAPIKey());
+  $('btn-codex-login')?.addEventListener('click', () => void startCodexLogin(false));
+  $('btn-codex-logout')?.addEventListener('click', () => void codexLogout());
+  $('btn-codex-cancel')?.addEventListener('click', () => void cancelCodexLogin());
+  $('btn-codex-code-submit')?.addEventListener('click', () => void submitCodexCode());
+  $('llm-codex-code')?.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      void submitCodexCode();
+    }
+  });
+}
+
 function bindUI() {
   $('btn-new-chat').addEventListener('click', () => createChat());
   $('btn-patch-chat').addEventListener('click', () => patchActiveChat());
@@ -1411,6 +1932,7 @@ function bindUI() {
   $('btn-approval-no')?.addEventListener('click', () => postApproval('no'));
   $('btn-approval-quit')?.addEventListener('click', () => postApproval('quit'));
   $('login-form').addEventListener('submit', onLoginSubmit);
+  bindLLMSettings();
   $('field-domain')?.addEventListener('change', () => {
     void loadGamesForDomain(getSelectedDomain()).then(() => onChatContextChanged());
   });

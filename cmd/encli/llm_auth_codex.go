@@ -153,13 +153,22 @@ func credentialPathCollides(path string) bool {
 // ENCLI_CODEX_AUTH_FILE, so a warning is the right weight: the operator chose the
 // path, but the consequence — a -web logout deleting the sign-in — is silent.
 func warnIfCredentialPathCollides(path string) {
+	warnIfSessionGlobCollision(codexAuthFileEnvVar, path, "ChatGPT credential")
+}
+
+// warnIfSessionGlobCollision reports an override that puts a private file back
+// inside the glob the default paths exist to avoid. It is shared by every
+// relocatable file under sessionDir(): the ChatGPT credential and the LLM
+// settings both land there only through an env var, so a warning is the right
+// weight — the operator chose the path, but the consequence is silent.
+func warnIfSessionGlobCollision(envVar, path, what string) {
 	if !credentialPathCollides(path) {
 		return
 	}
 	fmt.Fprintf(os.Stderr,
-		"warning: %s puts the ChatGPT credential in %s, where -web lists every *.json as an\n"+
+		"warning: %s puts the %s in %s, where -web lists every *.json as an\n"+
 			"Encounter domain session and its Logout button would delete it. Prefer a subdirectory.\n",
-		codexAuthFileEnvVar, sessionDir())
+		envVar, what, sessionDir())
 }
 
 func loadCodexCredential() (*codexCredential, error) {

@@ -6,7 +6,6 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"fmt"
-	"os"
 	"strings"
 	"time"
 
@@ -16,14 +15,23 @@ import (
 // resolveAgentConfig is the single LLM transport resolution used by --llm,
 // -chat and -web. The transport is an OpenAI-compatible API key, a ChatGPT
 // subscription stored by `encli codex-login`, or GigaChat's OAuth key.
+//
+// Each field is resolved the same way: the command line, then the environment,
+// then what the -web settings panel stored, then the built-in default.
 func resolveAgentConfig(cfg *config) (AgentConfig, error) {
 	var requested string
 	if cfg != nil {
 		requested = cfg.llmAuth
 	}
-	authMethod := strings.ToLower(strings.TrimSpace(cmp.Or(requested, os.Getenv("LLM_AUTH"))))
-	apiKey := cmp.Or(os.Getenv("LLM_API_KEY"), os.Getenv("OPENROUTER_API_KEY"))
-	endpoint := cmp.Or(os.Getenv("LLM_BASE_URL"), os.Getenv("OPENROUTER_BASE_URL"))
+	stored, err := loadLLMSettings()
+	if err != nil {
+		return AgentConfig{}, err
+	}
+
+	authMethod := strings.ToLower(resolveLLMField(requested, llmAuthEnvVars, stored.AuthMethod, "").Value)
+	apiKey := resolveLLMField("", llmAPIKeyEnvVars, stored.APIKey, "").Value
+	endpoint := resolveLLMField("", llmBaseURLEnvVars, stored.BaseURL, "").Value
+	model := resolveLLMField("", llmModelEnvVars, stored.Model, "").Value
 
 	// Without an explicit choice a stored ChatGPT sign-in or a GigaChat key is
 	// used only when nothing else was configured. Both an API key and a base URL
@@ -46,10 +54,10 @@ func resolveAgentConfig(cfg *config) (AgentConfig, error) {
 		}
 		return AgentConfig{
 			AuthMethod: authMethodCodex,
-			Model:      codexModel(cmp.Or(os.Getenv("LLM_MODEL"), os.Getenv("OPENROUTER_MODEL"))),
+			Model:      codexModel(model),
 		}, nil
 	case authMethodGigaChat:
-		gigachat, err := gigachatConfigFromEnv(cmp.Or(os.Getenv("LLM_MODEL"), os.Getenv("OPENROUTER_MODEL")))
+		gigachat, err := gigachatConfigFromEnv(model)
 		if err != nil {
 			return AgentConfig{}, err
 		}
@@ -67,12 +75,12 @@ func resolveAgentConfig(cfg *config) (AgentConfig, error) {
 	if apiKey == "" && !strings.Contains(baseURL, "127.0.0.1") && !strings.Contains(baseURL, "localhost") {
 		return AgentConfig{}, fmt.Errorf(
 			"LLM_API_KEY (or OPENROUTER_API_KEY) is required for agent mode; " +
-				"alternatively sign in to a ChatGPT subscription with 'encli codex-login'")
+				"alternatively sign in to a ChatGPT subscription with 'encli codex-login', " +
+				"or configure a provider in the -web LLM settings panel")
 	}
-	model := cmp.Or(os.Getenv("LLM_MODEL"), os.Getenv("OPENROUTER_MODEL"), defaultLLMModel)
 	return AgentConfig{
 		APIKey:  apiKey,
-		Model:   model,
+		Model:   cmp.Or(model, defaultLLMModel),
 		BaseURL: baseURL,
 	}, nil
 }

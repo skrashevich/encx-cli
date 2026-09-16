@@ -28,8 +28,12 @@ func isolateLLMEnv(t *testing.T) string {
 	} {
 		t.Setenv(key, "")
 	}
-	path := filepath.Join(t.TempDir(), "codex-auth.json")
+	dir := t.TempDir()
+	path := filepath.Join(dir, "codex-auth.json")
 	t.Setenv(codexAuthFileEnvVar, path)
+	// The settings file is resolved under sessionDir() by default, so without
+	// this every resolveAgentConfig test would read the developer's real one.
+	t.Setenv(llmSettingsFileEnvVar, filepath.Join(dir, "llm-settings.json"))
 	resetCodexTokenStores()
 	resetGigaChatTokenStores()
 	t.Cleanup(resetCodexTokenStores)

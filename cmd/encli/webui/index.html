@@ -48,6 +48,7 @@
             <button type="button" class="btn btn-secondary" id="btn-patch-chat" disabled>Сохранить</button>
             <button type="button" class="btn btn-ghost btn-icon" id="btn-export" disabled title="Экспорт чата">↗</button>
             <button type="button" class="btn btn-ghost btn-icon" id="btn-cancel" disabled title="Отменить ответ агента">✕</button>
+            <button type="button" class="btn btn-ghost btn-icon" id="btn-llm-settings" title="Настройки LLM" aria-label="Настройки LLM" aria-haspopup="dialog">⚙</button>
             <button type="button" class="btn btn-ghost btn-icon" id="btn-theme" title="Светлая/тёмная тема">◐</button>
             <span class="running-pill" id="running-pill" hidden>
               <span class="running-dot" aria-hidden="true"></span>
@@ -105,6 +106,83 @@
           <span>Отправить</span>
         </button>
       </footer>
+    </div>
+  </div>
+  <div class="modal-overlay" id="llm-modal" hidden>
+    <div class="modal" id="llm-modal-dialog" role="dialog" aria-modal="true" aria-labelledby="llm-modal-title">
+      <div class="modal-head">
+        <div class="modal-head-text">
+          <h2 class="modal-title" id="llm-modal-title">Настройки LLM</h2>
+          <p class="modal-subtitle">Как агент подключается к языковой модели</p>
+        </div>
+        <button type="button" class="btn btn-ghost btn-icon" id="btn-llm-close" title="Закрыть" aria-label="Закрыть настройки LLM">✕</button>
+      </div>
+
+      <div class="modal-body">
+        <div class="llm-transport">
+          <div class="llm-tabs" role="tablist" aria-label="Способ подключения">
+            <button type="button" class="llm-tab" id="llm-tab-codex" role="tab" aria-selected="false" aria-controls="llm-pane-codex" tabindex="-1">Подписка ChatGPT</button>
+            <button type="button" class="llm-tab is-active" id="llm-tab-apikey" role="tab" aria-selected="true" aria-controls="llm-pane-apikey">OpenAI-совместимый провайдер</button>
+          </div>
+          <div class="llm-override-slot" id="llm-override-auth_method"></div>
+          <p class="llm-note" id="llm-transport-note" hidden></p>
+        </div>
+
+        <section class="llm-pane" id="llm-pane-codex" role="tabpanel" aria-labelledby="llm-tab-codex" tabindex="0" hidden>
+          <div class="llm-codex-status" id="llm-codex-status" aria-live="polite"></div>
+          <div class="llm-actions">
+            <button type="button" class="btn btn-primary" id="btn-codex-login">Войти через ChatGPT</button>
+            <button type="button" class="btn btn-secondary" id="btn-codex-logout">Выйти</button>
+            <button type="button" class="btn btn-ghost" id="btn-codex-cancel" hidden>Отмена</button>
+          </div>
+          <p class="llm-hint" id="llm-codex-progress" role="status" aria-live="polite" hidden></p>
+          <details class="llm-details" id="llm-codex-manual">
+            <summary>Вставить redirect URL вручную</summary>
+            <p class="llm-hint">Если браузер открылся на другой машине, скопируйте адрес, на который он перенаправил (или сам код), и вставьте сюда.</p>
+            <div class="llm-field">
+              <label class="llm-field-label" for="llm-codex-code">Redirect URL или код</label>
+              <div class="llm-field-row">
+                <input type="text" id="llm-codex-code" class="llm-input" placeholder="http://localhost:1455/auth/callback?code=…" autocomplete="off" spellcheck="false" />
+                <button type="button" class="btn btn-secondary btn-sm" id="btn-codex-code-submit">Отправить</button>
+              </div>
+            </div>
+          </details>
+        </section>
+
+        <section class="llm-pane" id="llm-pane-apikey" role="tabpanel" aria-labelledby="llm-tab-apikey" tabindex="0">
+          <div class="llm-field">
+            <label class="llm-field-label" for="llm-base-url">Base URL</label>
+            <input type="text" id="llm-base-url" class="llm-input" autocomplete="off" spellcheck="false" />
+            <div class="llm-override-slot" id="llm-override-base_url"></div>
+          </div>
+          <div class="llm-field">
+            <label class="llm-field-label" for="llm-api-key">API-ключ</label>
+            <div class="llm-field-row">
+              <input type="password" id="llm-api-key" class="llm-input" autocomplete="off" spellcheck="false" />
+              <button type="button" class="btn btn-secondary btn-sm" id="btn-llm-clear-key">Очистить ключ</button>
+            </div>
+            <p class="llm-hint" id="llm-api-key-hint"></p>
+            <div class="llm-override-slot" id="llm-override-api_key"></div>
+          </div>
+          <div class="llm-field">
+            <label class="llm-field-label" for="llm-model">Модель</label>
+            <input type="text" id="llm-model" class="llm-input" autocomplete="off" spellcheck="false" />
+            <div class="llm-override-slot" id="llm-override-model"></div>
+          </div>
+        </section>
+      </div>
+
+      <div class="modal-foot">
+        <div class="llm-alert" id="llm-alert" role="alert" hidden></div>
+        <p class="llm-summary" id="llm-summary">Сейчас используется: —</p>
+        <p class="llm-summary-path" id="llm-settings-path"></p>
+        <div class="modal-actions">
+          <button type="button" class="btn btn-ghost btn-sm" id="btn-llm-reset">Сбросить настройки</button>
+          <span class="modal-actions-gap"></span>
+          <button type="button" class="btn btn-secondary" id="btn-llm-cancel">Закрыть</button>
+          <button type="button" class="btn btn-primary" id="btn-llm-save">Сохранить</button>
+        </div>
+      </div>
     </div>
   </div>
   <div id="tool-chip-tooltip" class="tool-chip-tooltip" hidden role="tooltip"></div>

@@ -36,6 +36,8 @@ type webHub struct {
 	runTurn    RunChatTurnFn
 	approvalMu sync.Mutex
 	approvals  map[string]*approvalGate
+	codexMu    sync.Mutex
+	codexLogin *codexLoginManager
 }
 
 func (h *webHub) publishSSE(chatID, eventType string, payload any) {
@@ -90,6 +92,14 @@ func (h *webHub) mount(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/v1/catalog/domains", h.httpCatalogDomains)
 	mux.HandleFunc("GET /api/v1/catalog/games", h.httpCatalogGames)
 	mux.HandleFunc("GET /api/v1/agent/config", h.httpAgentConfig)
+
+	mux.HandleFunc("/api/v1/llm/settings", h.httpLLMSettings)
+	mux.HandleFunc("GET /api/v1/llm/codex/status", h.httpCodexStatus)
+	mux.HandleFunc("POST /api/v1/llm/codex/logout", h.httpCodexLogout)
+	mux.HandleFunc("POST /api/v1/llm/codex/login", h.httpCodexLoginStart)
+	mux.HandleFunc("GET /api/v1/llm/codex/login/{id}", h.httpCodexLoginStatus)
+	mux.HandleFunc("POST /api/v1/llm/codex/login/{id}/code", h.httpCodexLoginCode)
+	mux.HandleFunc("DELETE /api/v1/llm/codex/login/{id}", h.httpCodexLoginCancel)
 
 	sub, err := fs.Sub(webUIFiles, "webui")
 	if err != nil {
