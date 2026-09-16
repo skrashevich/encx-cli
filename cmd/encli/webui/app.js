@@ -735,9 +735,14 @@ function setAgentStatus(phase, message) {
 
   const bar = $('agent-status-bar');
   const textEl = $('agent-status-text');
+  const phaseEl = $('agent-status-phase');
   const pillLabel = $('running-pill-label');
-  if (bar) bar.hidden = false;
+  if (bar) {
+    bar.hidden = false;
+    bar.dataset.phase = phase || 'log';
+  }
   if (textEl) textEl.textContent = text;
+  if (phaseEl) phaseEl.textContent = shortPillLabel(phase);
   if (pillLabel) pillLabel.textContent = shortPillLabel(phase);
 
   refreshSendState();
@@ -1167,6 +1172,41 @@ function toggleTheme() {
   localStorage.setItem('encli-theme', next);
 }
 
+/** Below this width the sidebar is an off-canvas drawer, not a grid column. */
+function isMobileViewport() {
+  return window.matchMedia('(max-width: 760px)').matches;
+}
+
+function setSidebarOpen(open, persist = true) {
+  const root = document.documentElement;
+  root.dataset.sidebar = open ? 'open' : 'closed';
+  const btn = $('btn-sidebar-toggle');
+  if (btn) btn.setAttribute('aria-expanded', String(open));
+  const backdrop = $('sidebar-backdrop');
+  if (backdrop) backdrop.hidden = !(open && isMobileViewport());
+  if (persist) localStorage.setItem('encli-sidebar', open ? '1' : '0');
+}
+
+function toggleSidebar() {
+  const open = document.documentElement.dataset.sidebar === 'open';
+  setSidebarOpen(!open);
+}
+
+function initSidebarState() {
+  const saved = localStorage.getItem('encli-sidebar');
+  const open = saved != null ? saved === '1' : !isMobileViewport();
+  setSidebarOpen(open, false);
+}
+
+function toggleAuthPanel() {
+  const panel = $('auth-panel');
+  const btn = $('btn-auth-toggle');
+  if (!panel || !btn) return;
+  const open = !panel.classList.contains('is-open');
+  panel.classList.toggle('is-open', open);
+  btn.setAttribute('aria-expanded', String(open));
+}
+
 function stopRunningPoll() {
   if (state.runningPoll) {
     clearInterval(state.runningPoll);
@@ -1223,6 +1263,7 @@ async function finishAgentTurn() {
 async function switchChat(chatId) {
   state.attachments = [];
   renderAttachments();
+  if (isMobileViewport()) setSidebarOpen(false);
   await selectChat(chatId);
 }
 
@@ -2593,6 +2634,13 @@ function bindUI() {
   $('btn-export').addEventListener('click', () => exportChat('markdown'));
   $('btn-cancel').addEventListener('click', () => cancelAgent());
   $('btn-theme').addEventListener('click', () => toggleTheme());
+  $('btn-sidebar-toggle')?.addEventListener('click', () => toggleSidebar());
+  $('sidebar-backdrop')?.addEventListener('click', () => setSidebarOpen(false));
+  $('btn-auth-toggle')?.addEventListener('click', () => toggleAuthPanel());
+  window.addEventListener('resize', () => {
+    const backdrop = $('sidebar-backdrop');
+    if (backdrop) backdrop.hidden = !(document.documentElement.dataset.sidebar === 'open' && isMobileViewport());
+  });
   $('btn-approval-yes')?.addEventListener('click', () => postApproval('yes'));
   $('btn-approval-no')?.addEventListener('click', () => postApproval('no'));
   $('btn-approval-quit')?.addEventListener('click', () => postApproval('quit'));
@@ -2663,6 +2711,7 @@ async function bootstrapWorkspace() {
 async function boot() {
   const savedTheme = localStorage.getItem('encli-theme');
   if (savedTheme) document.documentElement.dataset.theme = savedTheme;
+  initSidebarState();
   bindUI();
   syncSecurityModeVisual();
   window.addEventListener('scroll', () => {

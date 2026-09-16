@@ -11,8 +11,9 @@
 </head>
 <body>
   <div class="grain" aria-hidden="true"></div>
+  <div class="sidebar-backdrop" id="sidebar-backdrop" hidden></div>
   <div class="app">
-    <aside class="sidebar">
+    <aside class="sidebar" id="sidebar">
       <header class="sidebar-brand">
         <span class="brand-mark" aria-hidden="true">◇</span>
         <div class="brand-text">
@@ -33,6 +34,9 @@
 
     <div class="main">
       <header class="top-bar">
+        <button type="button" class="btn btn-ghost btn-icon btn-hamburger" id="btn-sidebar-toggle" title="Свернуть/развернуть список чатов" aria-label="Свернуть/развернуть список чатов" aria-expanded="true">
+          <span class="hamburger-bars" aria-hidden="true"></span>
+        </button>
         <section class="chat-context" id="chat-context" aria-label="Контекст чата">
           <div class="context-group">
             <div class="field-inline">
@@ -59,6 +63,7 @@
         </section>
 
         <aside class="auth-panel" id="auth-panel" aria-label="Авторизация">
+          <button type="button" class="btn btn-ghost auth-toggle" id="btn-auth-toggle" aria-expanded="false">Аккаунт</button>
           <form class="login-form" id="login-form" autocomplete="on">
             <input type="text" name="domain" placeholder="домен" aria-label="Домен" required />
             <input type="text" name="login" placeholder="логин" autocomplete="username" aria-label="Логин" required />
@@ -72,7 +77,8 @@
 
       <div class="messages-wrap">
         <div class="agent-status-bar" id="agent-status-bar" hidden role="status" aria-live="polite">
-          <span class="agent-status-dot" aria-hidden="true"></span>
+          <span class="agent-status-icon" aria-hidden="true"></span>
+          <span class="agent-status-phase" id="agent-status-phase"></span>
           <span class="agent-status-text" id="agent-status-text"></span>
         </div>
         <div class="messages" id="messages" aria-live="polite"></div>
