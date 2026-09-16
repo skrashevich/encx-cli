@@ -89,6 +89,31 @@ final class Client
     }
 
     /**
+     * NewClientWithAPIOptions configures an explicit new-engine API host before
+     * any requests or engine detection. Empty apiBaseURL preserves normal detection.
+     * The caller must trust this host: it receives authentication credentials.
+     *
+     * @throws EncxException
+     */
+    public static function newClientWithAPIOptions(
+        string $domain,
+        bool $insecureTLS,
+        bool $useHTTP,
+        int $timeoutSeconds,
+        string $lang,
+        string $apiBaseURL,
+    ): self {
+        return new self((int) Ffi::call('encx_new_client_with_api_options', [
+            $domain,
+            $insecureTLS ? 1 : 0,
+            $useHTTP ? 1 : 0,
+            $timeoutSeconds,
+            $lang,
+            $apiBaseURL,
+        ]));
+    }
+
+    /**
      * NewClientWithOptions creates a client with extended configuration.
      * timeoutSeconds: HTTP client timeout (0 = default 15s). lang: API language (empty = "ru").
      *

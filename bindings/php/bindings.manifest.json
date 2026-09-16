@@ -640,6 +640,44 @@
       ]
     },
     {
+      "goName": "NewClientWithAPIOptions",
+      "cName": "encx_new_client_with_api_options",
+      "kind": "handle",
+      "valueType": "void",
+      "params": [
+        {
+          "name": "domain",
+          "cName": "domain",
+          "type": "string"
+        },
+        {
+          "name": "insecureTLS",
+          "cName": "insecure_tls",
+          "type": "bool"
+        },
+        {
+          "name": "useHTTP",
+          "cName": "use_http",
+          "type": "bool"
+        },
+        {
+          "name": "timeoutSeconds",
+          "cName": "timeout_seconds",
+          "type": "int64"
+        },
+        {
+          "name": "lang",
+          "cName": "lang",
+          "type": "string"
+        },
+        {
+          "name": "apiBaseURL",
+          "cName": "api_base_url",
+          "type": "string"
+        }
+      ]
+    },
+    {
       "goName": "NewClientWithOptions",
       "cName": "encx_new_client_with_options",
       "kind": "handle",

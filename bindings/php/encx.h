@@ -24,6 +24,11 @@ void encx_string_free(char *s);
 // Set insecureTLS to true to skip TLS certificate verification (e.g. for tech.en.cx).
 char *encx_new_client(char *domain, int insecure_tls);
 
+// NewClientWithAPIOptions configures an explicit new-engine API host before
+// any requests or engine detection. Empty apiBaseURL preserves normal detection.
+// The caller must trust this host: it receives authentication credentials.
+char *encx_new_client_with_api_options(char *domain, int insecure_tls, int use_http, long long timeout_seconds, char *lang, char *api_base_url);
+
 // NewClientWithOptions creates a client with extended configuration.
 // timeoutSeconds: HTTP client timeout (0 = default 15s). lang: API language (empty = "ru").
 char *encx_new_client_with_options(char *domain, int insecure_tls, int use_http, long long timeout_seconds, char *lang);

@@ -650,6 +650,19 @@ func encx_new_client(domain *C.char, insecure_tls C.int) *C.char {
 	return cEnvelope(rt.OK(handle))
 }
 
+// NewClientWithAPIOptions configures an explicit new-engine API host before
+// any requests or engine detection. Empty apiBaseURL preserves normal detection.
+// The caller must trust this host: it receives authentication credentials.
+//
+//export encx_new_client_with_api_options
+func encx_new_client_with_api_options(domain *C.char, insecure_tls C.int, use_http C.int, timeout_seconds C.longlong, lang *C.char, api_base_url *C.char) *C.char {
+	handle, err := rt.Default.Add(encxmobile.NewClientWithAPIOptions(C.GoString(domain), insecure_tls != 0, use_http != 0, int64(timeout_seconds), C.GoString(lang), C.GoString(api_base_url)))
+	if err != nil {
+		return cEnvelope(rt.Fail(err))
+	}
+	return cEnvelope(rt.OK(handle))
+}
+
 // NewClientWithOptions creates a client with extended configuration.
 // timeoutSeconds: HTTP client timeout (0 = default 15s). lang: API language (empty = "ru").
 //

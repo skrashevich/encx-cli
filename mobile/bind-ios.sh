@@ -20,6 +20,6 @@ echo "==> Running tests..."
 go test ./mobile/encxmobile/ -count=1
 
 echo "==> Building Encx.xcframework for iOS..."
-gomobile bind -target=ios -o "$OUT_DIR/Encx.xcframework" ./mobile/encxmobile
+gomobile bind -target=ios/arm64,iossimulator/arm64 -ldflags="-w -s" -o "$OUT_DIR/Encx.xcframework" ./mobile/encxmobile
 
 echo "==> Done: $OUT_DIR/Encx.xcframework"
