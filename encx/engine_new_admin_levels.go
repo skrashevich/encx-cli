@@ -184,25 +184,29 @@ func (e *newEngine) AdminRenameLevels(ctx context.Context, gameId int, names map
 	if err != nil {
 		return err
 	}
-	byNumber := make(map[int]enapi.AdminLevelItem, len(list.Levels))
+	// The key is a level ID, which is what the legacy form names its fields by
+	// (txtLevelName_<id>) and what admin-rename-level asks the user for. This
+	// engine used to read the key as a level number, so the same command renamed
+	// a different level depending on which engine answered the domain.
+	byID := make(map[int]enapi.AdminLevelItem, len(list.Levels))
 	for _, level := range list.Levels {
-		byNumber[level.LevelNumber] = level
+		byID[level.LevelID] = level
 	}
 
 	// Renames are applied in level order so a partial failure leaves a
 	// predictable prefix applied rather than an arbitrary subset.
-	numbers := make([]int, 0, len(names))
-	for number := range names {
-		numbers = append(numbers, number)
+	ids := make([]int, 0, len(names))
+	for id := range names {
+		ids = append(ids, id)
 	}
-	sort.Ints(numbers)
+	sort.Ints(ids)
 
-	for _, number := range numbers {
-		level, ok := byNumber[number]
+	for _, id := range ids {
+		level, ok := byID[id]
 		if !ok {
-			return fmt.Errorf("encx: game %d has no level %d", gameId, number)
+			return fmt.Errorf("encx: game %d has no level with id %d", gameId, id)
 		}
-		body := enapi.AdminLevelMetaRequest{LevelName: names[number], Comment: level.Comment}
+		body := enapi.AdminLevelMetaRequest{LevelName: names[id], Comment: level.Comment}
 		if err := e.c.api().PutJSON(ctx, adminLevelPath(gameId, level.LevelID, "/meta"), body, nil); err != nil {
 			return err
 		}

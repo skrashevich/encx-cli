@@ -491,7 +491,7 @@ func (c *Client) legacyAdminUpdateSector(ctx context.Context, gameId, levelNum, 
 	if name == "" {
 		name = fmt.Sprintf("Сектор %d", sectorId)
 	}
-	if err := c.adminSaveSectorForm(ctx, gameId, levelNum, sectorId, name, s.Answers); err != nil {
+	if err := c.adminSaveSectorForm(ctx, gameId, levelNum, sectorId, name, s.ForMemberID, s.Answers); err != nil {
 		return fmt.Errorf("encx: admin update sector: %w", err)
 	}
 	return nil
@@ -899,7 +899,11 @@ func (c *Client) legacyAdminDeleteCorrection(ctx context.Context, gameId int, co
 }
 
 // legacyCreateDateLayout is the date format the ASP.NET admin forms render and accept.
-const legacyCreateDateLayout = "02.01.2006 15:04:05"
+const (
+	legacyCreateDateLayout = "02.01.2006 15:04:05"
+	// legacyCreateDateLayoutNoSeconds is the same spelling as a person types it.
+	legacyCreateDateLayoutNoSeconds = "02.01.2006 15:04"
+)
 
 // legacyGidRe pulls a game id out of the redirect the create form answers with.
 var legacyGidRe = regexp.MustCompile(`(?i)[?&]gid=(\d+)`)
@@ -1491,10 +1495,34 @@ func (c *Client) legacyAdminGetActionMonitor(ctx context.Context, gameId int) ([
 
 // --- Game Messages ---
 
+// legacyLevelIDForNumber resolves a level number to the id the message editor
+// addresses levels by.
+//
+// MessageEdit.aspx is the one admin page whose level= is a level ID and not a
+// level number: asked for a number it answers with a stub that closes the
+// window, so an update posted there changed nothing and said nothing. The
+// message calls that take a level number per the interface resolve it here, and
+// AdminCreateMessage, which takes an id already, does not.
+func (c *Client) legacyLevelIDForNumber(ctx context.Context, gameId, levelNum int) (int, error) {
+	levels, err := c.legacyAdminGetLevels(ctx, gameId)
+	if err != nil {
+		return 0, fmt.Errorf("encx: resolve level %d of game %d: %w", levelNum, gameId, err)
+	}
+	for _, level := range levels {
+		if level.Number == levelNum {
+			if level.ID <= 0 {
+				return 0, fmt.Errorf("encx: level %d of game %d has no id", levelNum, gameId)
+			}
+			return level.ID, nil
+		}
+	}
+	return 0, fmt.Errorf("encx: game %d has no level %d", gameId, levelNum)
+}
+
 // AdminCreateMessage creates a message for a game using the MessageEdit form.
 func (c *Client) legacyAdminCreateMessage(ctx context.Context, gameId, levelID int, m AdminGameMessage) error {
 	u := fmt.Sprintf("%s/Administration/Games/MessageEdit.aspx?gid=%d&level=%d&action=add", c.baseURL(), gameId, levelID)
-	form := adminMessageForm(levelID, m)
+	form := adminMessageForm(levelID, m, "save", "btnSave")
 	_, err := c.doPost(ctx, u, form)
 	if err != nil {
 		return fmt.Errorf("encx: admin create message: %w", err)
@@ -1504,10 +1532,17 @@ func (c *Client) legacyAdminCreateMessage(ctx context.Context, gameId, levelID i
 
 // AdminUpdateMessage updates an existing message by its ID.
 func (c *Client) legacyAdminUpdateMessage(ctx context.Context, gameId, levelNum, messageId int, m AdminGameMessage) error {
-	u := fmt.Sprintf("%s/Administration/Games/MessageEdit.aspx?gid=%d&level=%d&mid=%d", c.baseURL(), gameId, levelNum, messageId)
-	form := adminMessageForm(levelNum, m)
-	_, err := c.doPost(ctx, u, form)
+	levelID, err := c.legacyLevelIDForNumber(ctx, gameId, levelNum)
 	if err != nil {
+		return fmt.Errorf("encx: admin update message: %w", err)
+	}
+	// action=edit opens the message for editing; anything else at this address
+	// is the read-only view, and posting the create pair to it adds a copy
+	// instead of changing anything — a probe collected four of them that way.
+	u := fmt.Sprintf("%s/Administration/Games/MessageEdit.aspx?gid=%d&level=%d&action=edit&mid=%d",
+		c.baseURL(), gameId, levelID, messageId)
+	form := adminMessageForm(levelID, m, "update", "btnUpdate")
+	if _, err := c.doPost(ctx, u, form); err != nil {
 		return fmt.Errorf("encx: admin update message: %w", err)
 	}
 	return nil
@@ -1515,16 +1550,29 @@ func (c *Client) legacyAdminUpdateMessage(ctx context.Context, gameId, levelNum,
 
 // AdminDeleteMessage deletes a message by its ID.
 func (c *Client) legacyAdminDeleteMessage(ctx context.Context, gameId, levelNum, messageId int) error {
-	u := fmt.Sprintf("%s/Administration/Games/MessageEdit.aspx?gid=%d&level=%d&mid=%d&action=delete", c.baseURL(), gameId, levelNum, messageId)
-	_, err := c.doGet(ctx, u)
+	levelID, err := c.legacyLevelIDForNumber(ctx, gameId, levelNum)
+	if err != nil {
+		return fmt.Errorf("encx: admin delete message: %w", err)
+	}
+	u := fmt.Sprintf("%s/Administration/Games/MessageEdit.aspx?gid=%d&level=%d&mid=%d&action=delete", c.baseURL(), gameId, levelID, messageId)
+	_, err = c.doGet(ctx, u)
 	if err != nil {
 		return fmt.Errorf("encx: admin delete message: %w", err)
 	}
 	return nil
 }
 
-func adminMessageForm(levelID int, m AdminGameMessage) url.Values {
+// adminMessageForm builds the message editor's form. The editor spells its two
+// operations differently — a new message is saved with btnSave and action=save,
+// an existing one with btnUpdate and action=update — and it decides what to do
+// from its own hidden action field plus the coordinates of the image submit.
+// Without them it re-renders the form and writes nothing, which is how "message
+// created" was reported for a game that never got one.
+func adminMessageForm(levelID int, m AdminGameMessage, action, submit string) url.Values {
 	form := url.Values{}
+	form.Set("action", action)
+	form.Set(submit+".x", "1")
+	form.Set(submit+".y", "1")
 	form.Set("txtMessage", m.Text)
 	if m.ReplaceNlToBr {
 		form.Set("chkReplaceNlToBr", "on")

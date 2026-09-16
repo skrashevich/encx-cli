@@ -220,6 +220,27 @@ func TestNewEngineAdminUpdateGameInfoRefusesLegacyDateSpelling(t *testing.T) {
 	}
 }
 
+// The same spelling without the seconds, which is how a person writes a game
+// time. It used to slip past the guard and reach the route verbatim, where the
+// caller got a bare "Validation failed" instead of being told the format.
+func TestNewEngineAdminUpdateGameInfoRefusesLegacyDateWithoutSeconds(t *testing.T) {
+	var calls []adminCall
+	c := newGameAdminClient(t, &calls)
+
+	err := c.AdminUpdateGameInfo(context.Background(), 82448, AdminGameInfo{
+		StartDateTime: "07.06.2027 18:30",
+	})
+	if err == nil {
+		t.Fatal("AdminUpdateGameInfo accepted a legacy-spelled date")
+	}
+	if !strings.Contains(err.Error(), "RFC3339") {
+		t.Errorf("error = %v, want it to name the format the route takes", err)
+	}
+	if len(calls) != 0 {
+		t.Errorf("the request was sent anyway: %v", adminCallPaths(calls))
+	}
+}
+
 // The new engine accepts afc in 0..1, i.e. 0..10 in the legacy spelling. A
 // value outside that range is refused before the request goes out, so the
 // caller learns what is wrong instead of reading "Validation failed".

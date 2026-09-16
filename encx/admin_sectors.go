@@ -166,7 +166,12 @@ func (c *Client) adminReadSectorEditPage(ctx context.Context, gameID, levelNum, 
 	return body, nil
 }
 
-func (c *Client) adminSaveSectorForm(ctx context.Context, gameID, levelNum, sectorID int, name string, answers []string) error {
+// adminSaveSectorForm rewrites a sector's answers. forMemberID is the ddlAnswerFor
+// value each written answer gets, empty meaning "for everyone": the update path
+// used to hard-code that for every field, so AdminSector.ForMemberID was honoured
+// when a sector was created and silently dropped when it was updated — while the
+// new engine honoured it in both.
+func (c *Client) adminSaveSectorForm(ctx context.Context, gameID, levelNum, sectorID int, name, forMemberID string, answers []string) error {
 	maxRounds := len(answers) + 2
 	if maxRounds < 2 {
 		maxRounds = 2
@@ -205,11 +210,18 @@ func (c *Client) adminSaveSectorForm(ctx context.Context, gameID, levelNum, sect
 					targets = append(targets, field)
 				}
 			}
+			member := strings.TrimSpace(forMemberID)
+			if member == "" {
+				member = "0"
+			}
 			for i, answer := range answers {
 				if i >= len(targets) {
 					break
 				}
 				form.Set(targets[i].AnswerName, answer)
+				if targets[i].ForName != "" {
+					form.Set(targets[i].ForName, member)
+				}
 			}
 		}
 

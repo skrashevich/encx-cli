@@ -508,7 +508,11 @@ func (c *Client) legacyAdminGetMessageIds(ctx context.Context, gameId, levelNum 
 
 // AdminGetMessage reads message details from the admin panel.
 func (c *Client) legacyAdminGetMessage(ctx context.Context, gameId, levelNum, messageId int) (*AdminGameMessage, error) {
-	u := fmt.Sprintf("%s/Administration/Games/MessageEdit.aspx?gid=%d&level=%d&mid=%d", c.baseURL(), gameId, levelNum, messageId)
+	levelID, err := c.legacyLevelIDForNumber(ctx, gameId, levelNum)
+	if err != nil {
+		return nil, fmt.Errorf("encx: admin get message: %w", err)
+	}
+	u := fmt.Sprintf("%s/Administration/Games/MessageEdit.aspx?gid=%d&level=%d&mid=%d", c.baseURL(), gameId, levelID, messageId)
 	body, err := c.doGet(ctx, u)
 	if err != nil {
 		return nil, fmt.Errorf("encx: admin get message: %w", err)

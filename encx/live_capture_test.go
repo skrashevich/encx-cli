@@ -55,8 +55,16 @@ func TestCaptureAdminFixtures(t *testing.T) {
 	}
 
 	// --- Populate the game so every collection has something in it. ---
+	// Keyed by level ID, like the legacy txtLevelName_<id> fields.
+	levels, err := c.AdminGetLevels(ctx, gameID)
+	if err != nil {
+		t.Fatalf("levels: %v", err)
+	}
+	if len(levels) < 3 {
+		t.Fatalf("levels = %d, want at least 3", len(levels))
+	}
 	if err := c.AdminRenameLevels(ctx, gameID, map[int]string{
-		1: "Первый уровень", 2: "Второй уровень", 3: "Третий уровень",
+		levels[0].ID: "Первый уровень", levels[1].ID: "Второй уровень", levels[2].ID: "Третий уровень",
 	}); err != nil {
 		t.Fatalf("rename: %v", err)
 	}
@@ -79,7 +87,7 @@ func TestCaptureAdminFixtures(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("penalty hint: %v", err)
 	}
-	levels, err := c.AdminGetLevels(ctx, gameID)
+	levels, err = c.AdminGetLevels(ctx, gameID)
 	if err != nil {
 		t.Fatalf("levels: %v", err)
 	}

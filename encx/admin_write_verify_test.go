@@ -241,3 +241,167 @@ func TestLegacyDateEqualIgnoresSpelling(t *testing.T) {
 		t.Error("a minute apart is not the same moment")
 	}
 }
+
+// MessageEdit.aspx is the one admin page whose level= is a level ID rather than
+// a level number. Posted a number it answers with a stub that closes the window
+// and changes nothing, so the interface's level-number calls have to resolve the
+// id first — the way the new engine already did.
+func TestLegacyMessageCallsAddressLevelsById(t *testing.T) {
+	t.Parallel()
+	const levelManager = `<html><body>
+		<input name="txtLevelName_1580899" value="Первый">
+		<a href="LevelEditor.aspx?level=1&gid=82856">1</a>
+		<input name="txtLevelName_1580900" value="Второй">
+		<a href="LevelEditor.aspx?level=2&gid=82856">2</a>
+		</body></html>`
+
+	var messageURLs []string
+	c := verifyingClient(t, func(w http.ResponseWriter, r *http.Request) {
+		if strings.Contains(r.URL.Path, "MessageEdit.aspx") {
+			messageURLs = append(messageURLs, r.URL.String())
+		}
+		_, _ = w.Write([]byte(levelManager))
+	})
+
+	if err := c.legacyAdminDeleteMessage(context.Background(), 82856, 2, 7001); err != nil {
+		t.Fatalf("legacyAdminDeleteMessage: %v", err)
+	}
+	if len(messageURLs) != 1 {
+		t.Fatalf("message requests = %v", messageURLs)
+	}
+	if !strings.Contains(messageURLs[0], "level=1580900") {
+		t.Fatalf("level 2 must be addressed by its id: %s", messageURLs[0])
+	}
+}
+
+// A level the game does not have is named rather than posted to a page that
+// would answer with a stub.
+func TestLegacyMessageCallsRefuseAnUnknownLevel(t *testing.T) {
+	t.Parallel()
+	c := verifyingClient(t, func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(`<html><body><input name="txtLevelName_1580899" value="Первый">
+			<a href="LevelEditor.aspx?level=1&gid=82856">1</a></body></html>`))
+	})
+
+	err := c.legacyAdminDeleteMessage(context.Background(), 82856, 9, 7001)
+	if err == nil || !strings.Contains(err.Error(), "has no level 9") {
+		t.Fatalf("error = %v, want it to name the missing level", err)
+	}
+}
+
+// AdminSector.ForMemberID is honoured when a sector is created and used to be
+// dropped when it is updated: every ddlAnswerFor field was reset to "0" and none
+// was written back. The new engine applied it in both cases, so the same call
+// addressed a different audience depending on which engine answered.
+func TestLegacyUpdateSectorKeepsForMemberID(t *testing.T) {
+	t.Parallel()
+	const answersEditor = `<html><body><form>
+		<input type="text" name="txtAnswer_0" value="старый"/>
+		<select name="ddlAnswerFor_0"><option value="0">все</option>
+			<option value="1516219">skrashevich</option></select>
+		<input type="text" name="txtAnswer_1" value=""/>
+		<select name="ddlAnswerFor_1"><option value="0">все</option></select>
+		<input type="image" name="btnSaveSector"/>
+		</form></body></html>`
+
+	var posted url.Values
+	c := verifyingClient(t, func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodPost {
+			if err := r.ParseForm(); err != nil {
+				t.Errorf("ParseForm: %v", err)
+			}
+			posted = r.Form
+		}
+		_, _ = w.Write([]byte(answersEditor))
+	})
+
+	sector := AdminSector{Name: "Ответ", ForMemberID: "1516219", Answers: []string{"ответ"}}
+	if err := c.legacyAdminUpdateSector(context.Background(), 82856, 1, 3525903, sector); err != nil {
+		t.Fatalf("legacyAdminUpdateSector: %v", err)
+	}
+	if got := posted.Get("ddlAnswerFor_0"); got != "1516219" {
+		t.Fatalf("ddlAnswerFor_0 = %q, want the member the caller named", got)
+	}
+	// A field that carries no answer stays addressed to everyone.
+	if got := posted.Get("ddlAnswerFor_1"); got != "0" {
+		t.Fatalf("ddlAnswerFor_1 = %q, want the untouched default", got)
+	}
+}
+
+// An empty ForMemberID keeps meaning "for everyone".
+func TestLegacyUpdateSectorDefaultsToEveryone(t *testing.T) {
+	t.Parallel()
+	const answersEditor = `<html><body><form>
+		<input type="text" name="txtAnswer_0" value="старый"/>
+		<select name="ddlAnswerFor_0"><option value="0">все</option></select>
+		<input type="image" name="btnSaveSector"/>
+		</form></body></html>`
+
+	var posted url.Values
+	c := verifyingClient(t, func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodPost {
+			if err := r.ParseForm(); err != nil {
+				t.Errorf("ParseForm: %v", err)
+			}
+			posted = r.Form
+		}
+		_, _ = w.Write([]byte(answersEditor))
+	})
+
+	sector := AdminSector{Name: "Ответ", Answers: []string{"ответ"}}
+	if err := c.legacyAdminUpdateSector(context.Background(), 82856, 1, 3525903, sector); err != nil {
+		t.Fatalf("legacyAdminUpdateSector: %v", err)
+	}
+	if got := posted.Get("ddlAnswerFor_0"); got != "0" {
+		t.Fatalf("ddlAnswerFor_0 = %q, want everyone", got)
+	}
+}
+
+// The message editor spells its two operations differently. Posting the create
+// pair at an existing message adds a copy instead of changing it: a live probe
+// collected four messages out of one create and three "updates".
+func TestLegacyMessageFormsUseTheRightSubmit(t *testing.T) {
+	t.Parallel()
+	const levelManager = `<html><body>
+		<input name="txtLevelName_1581001" value="Первый">
+		<a href="LevelEditor.aspx?level=1&gid=82868">1</a>
+		<input name="txtLevelName_1581002" value="Второй">
+		<a href="LevelEditor.aspx?level=2&gid=82868">2</a>
+		</body></html>`
+
+	var posted []url.Values
+	var urls []string
+	c := verifyingClient(t, func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodPost {
+			if err := r.ParseForm(); err != nil {
+				t.Errorf("ParseForm: %v", err)
+			}
+			posted = append(posted, r.Form)
+			urls = append(urls, r.URL.String())
+		}
+		_, _ = w.Write([]byte(levelManager))
+	})
+
+	msg := AdminGameMessage{Text: "текст"}
+	if err := c.legacyAdminCreateMessage(context.Background(), 82868, 1581002, msg); err != nil {
+		t.Fatalf("legacyAdminCreateMessage: %v", err)
+	}
+	if err := c.legacyAdminUpdateMessage(context.Background(), 82868, 2, 43967, msg); err != nil {
+		t.Fatalf("legacyAdminUpdateMessage: %v", err)
+	}
+	if len(posted) != 2 {
+		t.Fatalf("posts = %d, want create and update", len(posted))
+	}
+
+	if posted[0].Get("action") != "save" || posted[0].Get("btnSave.x") == "" {
+		t.Errorf("create must submit btnSave/action=save: %v", posted[0])
+	}
+	if posted[1].Get("action") != "update" || posted[1].Get("btnUpdate.x") == "" {
+		t.Errorf("update must submit btnUpdate/action=update: %v", posted[1])
+	}
+	// The update goes to the editing view of that message, addressed by level id.
+	if !strings.Contains(urls[1], "action=edit") || !strings.Contains(urls[1], "level=1581002") ||
+		!strings.Contains(urls[1], "mid=43967") {
+		t.Errorf("update URL = %s", urls[1])
+	}
+}

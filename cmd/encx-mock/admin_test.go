@@ -53,7 +53,10 @@ func TestMockAdminLevelsRoundTrip(t *testing.T) {
 	}
 
 	last := len(after)
-	names := map[int]string{last: "Последний"}
+	// AdminRenameLevels is keyed by level ID, the way the legacy form names its
+	// fields and the way admin-rename-level is documented.
+	lastID := after[last-1].ID
+	names := map[int]string{lastID: "Последний"}
 	if err := c.AdminRenameLevels(ctx, mockGameID, names); err != nil {
 		t.Fatalf("AdminRenameLevels: %v", err)
 	}
@@ -69,7 +72,7 @@ func TestMockAdminLevelsRoundTrip(t *testing.T) {
 	}
 
 	// A rename must leave the comment alone, which is what the legacy form did.
-	if err := c.AdminRenameLevels(ctx, mockGameID, map[int]string{last: "Переименован"}); err != nil {
+	if err := c.AdminRenameLevels(ctx, mockGameID, map[int]string{lastID: "Переименован"}); err != nil {
 		t.Fatalf("AdminRenameLevels (single): %v", err)
 	}
 	if _, comment, err = c.AdminGetComment(ctx, mockGameID, last); err != nil {
@@ -96,7 +99,16 @@ func TestMockAdminLevelsRoundTrip(t *testing.T) {
 func TestMockAdminReordersLevels(t *testing.T) {
 	c, ctx := adminClient(t)
 
-	if err := c.AdminRenameLevels(ctx, mockGameID, map[int]string{1: "A", 2: "B", 3: "C"}); err != nil {
+	levels, err := c.AdminGetLevels(ctx, mockGameID)
+	if err != nil {
+		t.Fatalf("AdminGetLevels: %v", err)
+	}
+	if len(levels) < 3 {
+		t.Fatalf("levels = %d, want at least 3", len(levels))
+	}
+	if err := c.AdminRenameLevels(ctx, mockGameID, map[int]string{
+		levels[0].ID: "A", levels[1].ID: "B", levels[2].ID: "C",
+	}); err != nil {
 		t.Fatalf("AdminRenameLevels: %v", err)
 	}
 	order := func() []string {

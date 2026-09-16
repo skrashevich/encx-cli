@@ -541,11 +541,14 @@ func TestNewEngineLevelChangesRespectCanManipulate(t *testing.T) {
 	}
 }
 
+// The map is keyed by level ID — the legacy form names its fields
+// txtLevelName_<id> and admin-rename-level takes an id — so the same call must
+// reach the same level on either engine.
 func TestNewEngineAdminRenameLevelsKeepsComments(t *testing.T) {
 	var calls []adminCall
 	c := newAdminClient(t, &calls)
 
-	err := c.AdminRenameLevels(context.Background(), 82448, map[int]string{2: "Новое имя", 1: "Первое имя"})
+	err := c.AdminRenameLevels(context.Background(), 82448, map[int]string{812: "Новое имя", 811: "Первое имя"})
 	if err != nil {
 		t.Fatalf("AdminRenameLevels: %v", err)
 	}

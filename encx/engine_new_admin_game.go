@@ -165,13 +165,19 @@ func (e *newEngine) AdminUpdateGameInfo(ctx context.Context, gameId int, info Ad
 		if value == "" {
 			return
 		}
-		if _, err := time.Parse(legacyCreateDateLayout, value); err == nil {
-			if dateErr == nil {
-				dateErr = fmt.Errorf(
-					"encx: дата %q записана в формате старой админки; новый движок "+
-						"принимает RFC3339, например 2026-09-10T18:00:00+03:00", value)
+		// Both spellings of the old admin panel, because a person writes a game
+		// time without the seconds the editor prints: "07.06.2027 18:30". Left
+		// unrecognised it slipped past this guard and reached the route verbatim,
+		// where it became a bare "Validation failed".
+		for _, layout := range []string{legacyCreateDateLayout, legacyCreateDateLayoutNoSeconds} {
+			if _, err := time.Parse(layout, value); err == nil {
+				if dateErr == nil {
+					dateErr = fmt.Errorf(
+						"encx: дата %q записана в формате старой админки; новый движок "+
+							"принимает RFC3339, например 2026-09-10T18:00:00+03:00", value)
+				}
+				return
 			}
-			return
 		}
 		update[key] = value
 	}
