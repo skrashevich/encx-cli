@@ -56,6 +56,9 @@ type config struct {
 
 func main() {
 	if len(os.Args) < 2 {
+		if autoStartWebIfGUI(nil) {
+			return
+		}
 		printUsage()
 		os.Exit(1)
 	}
@@ -70,34 +73,7 @@ func main() {
 		if os.Args[i] == "-web" || os.Args[i] == "--web" {
 			flagArgs := append([]string(nil), os.Args[1:i]...)
 			flagArgs = append(flagArgs, os.Args[i+1:]...)
-			fs := flag.NewFlagSet("encli", flag.ExitOnError)
-			cfg := &config{}
-			webAddr := defaultWebAddr
-			fs.StringVar(&cfg.domain, "domain", cmp.Or(os.Getenv("ENCX_DOMAIN"), "tech.en.cx"), "Default Encounter domain for new chats")
-			fs.StringVar(&cfg.login, "login", os.Getenv("ENCX_LOGIN"), "Login username")
-			fs.StringVar(&cfg.password, "password", os.Getenv("ENCX_PASSWORD"), "Login password")
-			fs.IntVar(&cfg.gameId, "game-id", envInt("ENCX_GAME_ID", 0), "Default game ID for new chats")
-			fs.BoolVar(&cfg.insecure, "insecure", envBool("ENCX_INSECURE"), "Skip TLS verification")
-			fs.BoolVar(&cfg.useHTTP, "http", false, "Use plain HTTP")
-			fs.BoolVar(&cfg.debug, "debug", envBool("ENCX_DEBUG"), "Enable debug logging")
-			registerHARFlags(fs, cfg)
-			registerEngineFlag(fs, cfg)
-			fs.BoolVar(&cfg.agentReadonly, "readonly", false, "Agent: block tools that modify or delete data")
-			registerLLMAuthFlag(fs, cfg)
-			fs.StringVar(&webAddr, "web-addr", cmp.Or(os.Getenv("ENCLI_WEB_ADDR"), defaultWebAddr), "Web UI listen address")
-			if cfg.agentReadonly {
-				cfg.agentSecurity = SecurityModeReadonly
-			}
-			fs.Parse(flagArgs)
-			if cfg.agentSecurity == "" && !cfg.agentReadonly {
-				cfg.agentSecurity = SecurityModeApprove
-			}
-			debugMode = cfg.debug
-			ctx, cancel := context.WithCancel(context.Background())
-			defer cancel()
-			if err := cmdWeb(ctx, cfg, webAddr); err != nil && err != context.Canceled {
-				fatal("%v", err)
-			}
+			runWebMode(flagArgs)
 			return
 		}
 	}
@@ -201,6 +177,9 @@ func main() {
 	}
 
 	if cmd == "" {
+		if autoStartWebIfGUI(os.Args[1:]) {
+			return
+		}
 		printUsage()
 		os.Exit(1)
 	}
@@ -495,6 +474,67 @@ func main() {
 	}
 }
 
+// runWebMode starts the web UI. flagArgs are the command line arguments with the
+// -web marker already removed; the auto-start path passes whatever flags came
+// with the invocation, which on a double-click is nothing at all.
+func runWebMode(flagArgs []string) {
+	fs := flag.NewFlagSet("encli", flag.ExitOnError)
+	cfg := &config{}
+	webAddr := defaultWebAddr
+	fs.StringVar(&cfg.domain, "domain", cmp.Or(os.Getenv("ENCX_DOMAIN"), "tech.en.cx"), "Default Encounter domain for new chats")
+	fs.StringVar(&cfg.login, "login", os.Getenv("ENCX_LOGIN"), "Login username")
+	fs.StringVar(&cfg.password, "password", os.Getenv("ENCX_PASSWORD"), "Login password")
+	fs.IntVar(&cfg.gameId, "game-id", envInt("ENCX_GAME_ID", 0), "Default game ID for new chats")
+	fs.BoolVar(&cfg.insecure, "insecure", envBool("ENCX_INSECURE"), "Skip TLS verification")
+	fs.BoolVar(&cfg.useHTTP, "http", false, "Use plain HTTP")
+	fs.BoolVar(&cfg.debug, "debug", envBool("ENCX_DEBUG"), "Enable debug logging")
+	registerHARFlags(fs, cfg)
+	registerEngineFlag(fs, cfg)
+	fs.BoolVar(&cfg.agentReadonly, "readonly", false, "Agent: block tools that modify or delete data")
+	registerLLMAuthFlag(fs, cfg)
+	fs.StringVar(&webAddr, "web-addr", cmp.Or(os.Getenv("ENCLI_WEB_ADDR"), defaultWebAddr), "Web UI listen address")
+	if cfg.agentReadonly {
+		cfg.agentSecurity = SecurityModeReadonly
+	}
+	fs.Parse(flagArgs)
+	if cfg.agentSecurity == "" && !cfg.agentReadonly {
+		cfg.agentSecurity = SecurityModeApprove
+	}
+	debugMode = cfg.debug
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	if err := cmdWeb(ctx, cfg, webAddr); err != nil && err != context.Canceled {
+		fatal("%v", err)
+	}
+}
+
+// Indirections so the auto-start decision is testable off Windows, where the
+// detector always says no and the runner would block on a listening socket.
+var (
+	guiDetector = launchedFromGUI
+	webRunner   = runWebMode
+)
+
+// autoStartWebIfGUI covers the Windows double-click: no subcommand was given and
+// there is no terminal to read usage from, so the web UI is the only thing that
+// makes the run useful. It reports whether it handled the invocation; a run from
+// a shell falls through to printUsage as before.
+func autoStartWebIfGUI(flagArgs []string) bool {
+	// A parent that is itself a GUI process gets a console of its own for encli,
+	// which reads as a double-click. ENCLI_NO_AUTO_WEB is the escape hatch for
+	// such an automation: without it a run that used to exit immediately would
+	// block on a listening socket.
+	if os.Getenv("ENCLI_NO_AUTO_WEB") != "" {
+		return false
+	}
+	if !guiDetector() {
+		return false
+	}
+	fmt.Fprintln(os.Stderr, "encli: no command given and no terminal attached — starting the web UI")
+	webRunner(flagArgs)
+	return true
+}
+
 func printUsage() {
 	fmt.Fprintf(os.Stderr, `encli — Encounter (en.cx) game engine client
 
@@ -597,6 +637,8 @@ TUI chat:
 
 Web UI:
   -web            Start local chat UI for the built-in agent (opens browser)
+                  On Windows this starts automatically when encli.exe is launched
+                  without a command and without a terminal (double-click)
   -web-addr       Listen address (default: 127.0.0.1:8787, env: ENCLI_WEB_ADDR)
                   Per-chat security mode: readonly / approve / full (UI switcher)
 
@@ -633,6 +675,7 @@ Environment variables:
   GIGACHAT_CA_BUNDLE     PEM with the Russian trusted root CA (turns TLS verification on)
   GIGACHAT_INSECURE      0 to verify GigaChat's certificate (default: not verified)
   ENCLI_WEB_ADDR       Web UI listen address for -web mode
+  ENCLI_NO_AUTO_WEB    Windows: never auto-start the Web UI on a GUI launch (1/true)
   OPENROUTER_API_KEY   Alias for LLM_API_KEY (backward compat)
   OPENROUTER_MODEL     Alias for LLM_MODEL (backward compat)
 
