@@ -6,11 +6,13 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"html"
 	"net"
 	"net/http"
 	"net/url"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/sipeed/picoclaw/pkg/auth"
@@ -23,11 +25,14 @@ import (
 // codexLoginTTL bounds one sign-in. It matches the timeout of PicoClaw's own
 // browser flow, and it is what releases the callback port when an operator
 // opens the panel and walks away.
-const codexLoginTTL = 5 * time.Minute
+//
+// A var, not a const, so a test can pin a short deadline instead of waiting out
+// five minutes to prove the port comes back.
+var codexLoginTTL = 5 * time.Minute
 
 // codexLoginRetention keeps a finished flow around long enough for the panel to
 // poll its outcome, then drops it so a completed sign-in stops being addressable.
-const codexLoginRetention = 2 * time.Minute
+var codexLoginRetention = 2 * time.Minute
 
 const (
 	codexLoginPending = "pending"
@@ -50,14 +55,28 @@ type codexLoginFlow struct {
 	status    string
 	errMsg    string
 	accountID string
+	settledAt time.Time
 
 	// stop closes the callback listener exactly once, whichever of the redirect,
 	// the manual paste or the timeout finishes the flow first.
 	stop sync.Once
 	// server is nil when the flow was started without a local listener.
-	server        *http.Server
-	listener      net.Listener
-	cancelTimeout func()
+	server   *http.Server
+	listener net.Listener
+	// timer is the TTL, held atomically rather than behind a cancel closure: it
+	// is stored only after AfterFunc returns, so a deadline short enough for the
+	// callback to win the race is read as "already fired" instead of racing the
+	// assignment. retireTimer is the retention timer and is held the same way.
+	timer       atomic.Pointer[time.Timer]
+	retireTimer atomic.Pointer[time.Timer]
+	// retire drops this flow from the manager, a retention window after it ends.
+	retire func()
+	// ttl and retention are captured when the flow starts rather than read from
+	// the package vars later: release and the sweep run at arbitrary later
+	// moments, and a flow's deadlines should not change under it once it is
+	// already running.
+	ttl       time.Duration
+	retention time.Duration
 }
 
 func (f *codexLoginFlow) snapshot() map[string]any {
@@ -95,20 +114,50 @@ func (f *codexLoginFlow) finish(accountID string, err error) {
 		} else {
 			f.status, f.accountID = codexLoginSuccess, accountID
 		}
+		f.settledAt = time.Now()
 	}
 	f.mu.Unlock()
 	f.release()
 }
 
+// settledFor reports how long the flow has been finished. The sweep measures the
+// retention window from here rather than from createdAt: a sign-in that succeeded
+// on the last second of its TTL would otherwise be collected the moment it
+// landed, and the panel's next poll would report it as gone instead of done.
+// stopRetireTimer cancels the pending retirement of a flow that is being dropped
+// right now. Stopping it from inside its own callback is a no-op, so every path
+// may call it.
+func (f *codexLoginFlow) stopRetireTimer() {
+	if t := f.retireTimer.Load(); t != nil {
+		t.Stop()
+	}
+}
+
+func (f *codexLoginFlow) settledFor() (time.Duration, bool) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.status == codexLoginPending {
+		return 0, false
+	}
+	return time.Since(f.settledAt), true
+}
+
 func (f *codexLoginFlow) release() {
 	f.stop.Do(func() {
-		if f.cancelTimeout != nil {
-			f.cancelTimeout()
+		if t := f.timer.Load(); t != nil {
+			t.Stop()
 		}
 		// The listener is closed here and now: the port is the scarce resource,
 		// and the next sign-in must be able to bind it as soon as this one ends.
 		if f.listener != nil {
 			_ = f.listener.Close()
+		}
+		// Scheduled inside the Once so the flow is retired exactly once, whichever
+		// of the redirect, the paste, the cancel or the timeout ended it — and so
+		// the panel still gets one last answer about an outcome it may not have
+		// polled yet.
+		if f.retire != nil {
+			f.retireTimer.Store(time.AfterFunc(f.retention, f.retire))
 		}
 		if f.server == nil {
 			return
@@ -205,6 +254,8 @@ func (m *codexLoginManager) start(noLocalServer bool) (*codexLoginFlow, error) {
 		state:     state,
 		status:    codexLoginPending,
 		createdAt: time.Now(),
+		ttl:       codexLoginTTL,
+		retention: codexLoginRetention,
 	}
 
 	port := cfg.Port
@@ -216,22 +267,34 @@ func (m *codexLoginManager) start(noLocalServer bool) (*codexLoginFlow, error) {
 					"Close whatever holds it — another encli sign-in or the Codex CLI — or use the manual paste option",
 				cfg.Port, err)
 		}
-		port = actual
-		flow.listener = listener
-		flow.server = &http.Server{Handler: m.callbackHandler(flow)}
-		go func() {
-			_ = flow.server.Serve(listener)
-		}()
+		port, flow.listener = actual, listener
 	}
 
+	// Everything the callback handler reads is written before Serve starts. The
+	// redirect port is fixed, so a stray local request could otherwise reach a
+	// handler whose RedirectURI and timeout were still being assigned.
 	flow.RedirectURI = fmt.Sprintf("http://localhost:%d/auth/callback", port)
 	flow.AuthorizeURL = auth.BuildAuthorizeURL(cfg, pkce, state, flow.RedirectURI)
+	flow.retire = func() { m.forget(flow.ID) }
+	if flow.listener != nil {
+		flow.server = &http.Server{Handler: m.callbackHandler(flow)}
+	}
 
-	timer := time.AfterFunc(codexLoginTTL, func() {
-		flow.finish("", fmt.Errorf("the ChatGPT sign-in was not completed within %s", codexLoginTTL))
-		m.forget(flow.ID)
-	})
-	flow.cancelTimeout = func() { timer.Stop() }
+	// The TTL is armed only once every field release() touches is in place, so a
+	// deadline short enough to fire immediately still finds a complete flow.
+	flow.timer.Store(time.AfterFunc(flow.ttl, func() {
+		// Only the outcome is recorded here. Dropping the flow is left to the
+		// retention timer release() starts, so the panel's next poll reports the
+		// timeout rather than a 404 it can only describe as "flow gone".
+		flow.finish("", fmt.Errorf("the ChatGPT sign-in was not completed within %s", flow.ttl))
+	}))
+
+	if flow.server != nil {
+		go func() {
+			// A TTL that already fired closed the listener, so Serve returns at once.
+			_ = flow.server.Serve(flow.listener)
+		}()
+	}
 
 	m.mu.Lock()
 	m.sweepLocked()
@@ -263,7 +326,7 @@ func (m *codexLoginManager) callbackHandler(flow *codexLoginFlow) http.Handler {
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		if err != nil {
 			w.WriteHeader(http.StatusBadGateway)
-			fmt.Fprintf(w, "<html><body><h2>Вход не удался</h2><p>%s</p></body></html>", htmlEscape(err.Error()))
+			fmt.Fprintf(w, "<html><body><h2>Вход не удался</h2><p>%s</p></body></html>", html.EscapeString(err.Error()))
 			return
 		}
 		fmt.Fprint(w, "<html><body><h2>Вход выполнен</h2><p>Можно закрыть эту вкладку и вернуться в encli.</p></body></html>")
@@ -349,16 +412,26 @@ func (m *codexLoginManager) get(id string) (*codexLoginFlow, bool) {
 func (m *codexLoginManager) forget(id string) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	// A flow dropped early — cancelled, or retired on schedule — should not leave
+	// its retention timer holding it alive for nothing.
+	if f := m.flows[id]; f != nil {
+		f.stopRetireTimer()
+	}
 	delete(m.flows, id)
 }
 
-// sweepLocked drops flows nothing will poll again. The caller holds m.mu.
+// sweepLocked drops flows nothing will poll again. It is the backstop for the
+// retention timer release() starts — a flow whose process was busy elsewhere
+// when that timer fired is still collected here. The caller holds m.mu.
 func (m *codexLoginManager) sweepLocked() {
 	now := time.Now()
 	for id, f := range m.flows {
-		age := now.Sub(f.createdAt)
-		if age > codexLoginTTL+codexLoginRetention || (f.settled() && age > codexLoginRetention) {
+		since, settled := f.settledFor()
+		// The second arm collects a flow whose TTL never landed at all — a timer
+		// that was never armed, or a process asleep past both windows.
+		if (settled && since > f.retention) || now.Sub(f.createdAt) > f.ttl+f.retention {
 			f.release()
+			f.stopRetireTimer()
 			delete(m.flows, id)
 		}
 	}
@@ -370,11 +443,6 @@ func newFlowID() (string, error) {
 		return "", fmt.Errorf("generating a sign-in id: %w", err)
 	}
 	return hex.EncodeToString(b[:]), nil
-}
-
-func htmlEscape(s string) string {
-	r := strings.NewReplacer("&", "&amp;", "<", "&lt;", ">", "&gt;", `"`, "&quot;")
-	return r.Replace(s)
 }
 
 // --- HTTP handlers ---

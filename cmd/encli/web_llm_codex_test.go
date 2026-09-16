@@ -494,6 +494,107 @@ func TestWebCodexStatusReportsAnExpiredToken(t *testing.T) {
 	}
 }
 
+// pinCodexLoginTimings shrinks the sign-in deadlines for one test and restores
+// them afterwards, so the expiry paths are exercised in milliseconds instead of
+// minutes.
+func pinCodexLoginTimings(t *testing.T, ttl, retention time.Duration) {
+	t.Helper()
+	oldTTL, oldRetention := codexLoginTTL, codexLoginRetention
+	codexLoginTTL, codexLoginRetention = ttl, retention
+	t.Cleanup(func() { codexLoginTTL, codexLoginRetention = oldTTL, oldRetention })
+}
+
+// waitForCodex polls cond until it holds or the budget runs out. The expiry it
+// waits on is driven by a timer, so there is nothing to synchronise on.
+func waitForCodex(t *testing.T, what string, cond func() bool) {
+	t.Helper()
+	deadline := time.Now().Add(3 * time.Second)
+	for time.Now().Before(deadline) {
+		if cond() {
+			return
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	t.Fatalf("timed out waiting for %s", what)
+}
+
+// A sign-in nobody finishes must expire on its own. The flow is what holds the
+// callback port, so an operator who opened the panel and walked away would
+// otherwise block every later attempt — including their own.
+func TestWebCodexLoginExpiresAndReleasesThePort(t *testing.T) {
+	// Retention is left long so the panel's poll lands inside the window where
+	// the outcome is still addressable; retirement is covered by its own test.
+	pinCodexLoginTimings(t, 50*time.Millisecond, 30*time.Second)
+	srv, manager := newCodexTestServer(t, codexSignedInIssuer())
+	flow, _ := startCodexLogin(t, srv, manager, "")
+	addr := flow.listener.Addr().String()
+
+	waitForCodex(t, "the sign-in to expire", flow.settled)
+
+	// The panel gets the reason, not a bare disappearance.
+	payload := codexFlowStatus(t, srv, flow.ID)
+	if payload["status"] != codexLoginError {
+		t.Fatalf("status = %v, want %q", payload["status"], codexLoginError)
+	}
+	if msg, _ := payload["error"].(string); !strings.Contains(msg, "not completed within") {
+		t.Fatalf("error = %q, want the timeout reason", msg)
+	}
+
+	l, err := net.Listen("tcp", addr)
+	if err != nil {
+		t.Fatalf("the callback port was not released on expiry: %v", err)
+	}
+	l.Close()
+
+	if hasCodexCredential() {
+		t.Fatal("an expired sign-in stored a credential")
+	}
+}
+
+// A deadline short enough to fire while start is still assembling the flow must
+// not race or panic. The TTL is armed last for exactly this reason, and the
+// deadlines are tunable vars, so somebody will eventually pin one this short.
+func TestWebCodexLoginSurvivesAnImmediateDeadline(t *testing.T) {
+	pinCodexLoginTimings(t, time.Nanosecond, 30*time.Second)
+	srv, manager := newCodexTestServer(t, codexSignedInIssuer())
+	flow, _ := startCodexLogin(t, srv, manager, "")
+
+	waitForCodex(t, "the immediate deadline to land", flow.settled)
+	payload := codexFlowStatus(t, srv, flow.ID)
+	if payload["status"] != codexLoginError {
+		t.Fatalf("status = %v, want %q", payload["status"], codexLoginError)
+	}
+	if _, ok := manager.get(flow.ID); !ok {
+		t.Fatal("the flow was retired before its retention window")
+	}
+}
+
+// A finished sign-in stops being addressable once the retention window passes,
+// so a completed flow id cannot be polled forever.
+func TestWebCodexLoginRetiresAFinishedFlow(t *testing.T) {
+	pinCodexLoginTimings(t, 30*time.Second, 40*time.Millisecond)
+	srv, manager := newCodexTestServer(t, codexSignedInIssuer())
+	flow, _ := startCodexLogin(t, srv, manager, "")
+
+	res, err := http.Get(codexCallbackURL(flow, "auth-code-1", flow.state))
+	if err != nil {
+		t.Fatalf("callback: %v", err)
+	}
+	res.Body.Close()
+	if !flow.settled() {
+		t.Fatal("the redirect did not finish the sign-in")
+	}
+
+	waitForCodex(t, "the finished sign-in to be retired", func() bool {
+		_, ok := manager.get(flow.ID)
+		return !ok
+	})
+	status, _, _ := codexJSON(t, http.MethodGet, srv.URL+"/api/v1/llm/codex/login/"+flow.ID, "")
+	if status != http.StatusNotFound {
+		t.Fatalf("status of a retired flow = %d, want 404", status)
+	}
+}
+
 // codexCallbackURL addresses the listener directly rather than through the
 // "localhost" in RedirectURI, so the test does not depend on how that name
 // resolves on the machine running it.

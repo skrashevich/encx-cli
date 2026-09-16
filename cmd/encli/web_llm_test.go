@@ -173,7 +173,10 @@ func TestWebLLMSettingsPutRejectsBadInput(t *testing.T) {
 	}{
 		{"unknown auth method", `{"auth_method":"chatgpt"}`, "unknown LLM auth method"},
 		{"base url scheme", `{"base_url":"ftp://x"}`, "http://"},
-		{"base url not a url", `{"base_url":"не-url"}`, "base URL"},
+		// url.Parse accepts a bare word as a relative reference, so what refuses
+		// this is the scheme check, not the parser.
+		{"base url without a scheme", `{"base_url":"не-url"}`, "base URL"},
+		{"base url with no host", `{"base_url":"https://"}`, "no host"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			srv := newLLMSettingsTestServer(t)

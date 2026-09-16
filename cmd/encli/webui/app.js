@@ -1811,11 +1811,64 @@ async function refreshLLMAfterAuth() {
   void loadAgentConfig();
 }
 
+/** Успешный вход обязан ещё и записать транспорт: автовыбор подписки на стороне
+ * сервера срабатывает, только когда не задано вообще ничего (web_agent.go), и у
+ * пользователя с сохранённым api_key вход без записи оставил бы агента на старом
+ * провайдере, пока панель показывает «Вход выполнен».
+ *
+ * Пишутся сохранённые base_url/model, а не содержимое формы: поток мог
+ * завершиться, пока оператор правил поля, и сохранять его черновик молча — нет. */
+async function persistCodexTransport() {
+  // Без снимка писать нельзя: PUT перезаписывает base_url и model как есть, так
+  // что пустые поля затёрли бы сохранённое. Начальный GET мог упасть — модалка
+  // при этом открыта и вход доступен, — поэтому снимок сначала добирается.
+  if (!state.llm) {
+    try {
+      applyLLMSnapshot(await api('/llm/settings'), { keepEdits: true });
+    } catch (e) {
+      return e.message || String(e);
+    }
+    if (!state.llm) return 'не удалось прочитать текущие настройки';
+  }
+  const stored = state.llm.stored || {};
+  if (String(stored.auth_method || '') === 'codex') return '';
+  try {
+    await api('/llm/settings', {
+      method: 'PUT',
+      body: {
+        auth_method: 'codex',
+        // base_url подписка не использует, и он переживёт обратное переключение
+        // на провайдера — а вот model очищается намеренно: codexModel() пропускает
+        // без единого слова любое gpt-/o3-/o4-имя, поэтому сохранённое
+        // `openai/gpt-4o-mini` ушло бы в бэкенд подписки, тот молча подменил бы
+        // его своим дефолтом, а в отчёте стояло бы запрошенное имя.
+        base_url: stored.base_url || '',
+        model: '',
+        api_key: '',
+        clear_api_key: false,
+      },
+    });
+    return '';
+  } catch (e) {
+    return e.message || String(e);
+  }
+}
+
 async function finishCodexFlow(ok, message) {
   stopCodexPoll();
   state.codexFlow = null;
   setCodexProgress('');
-  toast(ok ? 'Вход через ChatGPT выполнен.' : message || 'Вход через ChatGPT не удался.', !ok);
+  // Тост один на всё завершение: #toast — единственный элемент с перезаписью
+  // текста, поэтому предупреждение, показанное перед сообщением об успехе,
+  // прожило бы нулевое время и оператор увидел бы только «Вход выполнен».
+  const failedToSave = ok ? await persistCodexTransport() : '';
+  if (!ok) {
+    toast(message || 'Вход через ChatGPT не удался.', true);
+  } else if (failedToSave) {
+    toast(`Вход выполнен, но транспорт не сохранён: ${failedToSave}`, true);
+  } else {
+    toast('Вход через ChatGPT выполнен.');
+  }
   await refreshLLMAfterAuth();
 }
 
@@ -1851,12 +1904,24 @@ async function pollCodexFlow() {
 
 async function startCodexLogin(noBrowser) {
   if (state.codexFlow) return;
+  // Вкладка открывается синхронно, до запроса: window.open после await уже вне
+  // пользовательского жеста, и блокировщик всплывающих окон его отклонит.
+  // Адрес известен только после ответа сервера, поэтому окно открывается пустым
+  // и переадресуется ниже — а значит нужен handle, и флаг 'noopener' здесь не
+  // годится: с ним window.open по спецификации возвращает null. Связь рвётся
+  // вручную (popup.opener = null), пока вкладка ещё about:blank.
+  const popup = noBrowser ? null : window.open('', '_blank');
   try {
     const flow = await api('/llm/codex/login', { method: 'POST', body: { no_browser: !!noBrowser } });
     if (!flow?.id) throw new Error('Сервер не вернул идентификатор входа');
     state.codexFlow = { id: flow.id, deadline: Date.now() + CODEX_LOGIN_TTL_MS };
     const url = String(flow.authorize_url || '');
-    if (!noBrowser && url) window.open(url, '_blank', 'noopener');
+    if (popup && url) {
+      popup.opener = null;
+      popup.location.replace(url);
+    } else if (popup) {
+      popup.close();
+    }
     if (noBrowser) {
       for (const target of CODEX_TARGETS) {
         const manual = $(target.manual);
@@ -1869,6 +1934,7 @@ async function startCodexLogin(noBrowser) {
     startCodexPoll();
     renderLLMSettings();
   } catch (e) {
+    popup?.close();
     toast(e.message || String(e), true);
     // 409 — занят порт 1455 под redirect: остаётся ручной путь без слушателя.
     if (e.status === 409 && !noBrowser) {
