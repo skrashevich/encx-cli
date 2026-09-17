@@ -10,7 +10,7 @@ require (
 	github.com/charmbracelet/x/ansi v0.11.8
 	github.com/hybridgroup/yzma v1.27.0
 	github.com/ledongthuc/pdf v0.0.0-20260907135840-6c8c28e0e8a0
-	github.com/modelcontextprotocol/go-sdk v1.7.0
+	github.com/modelcontextprotocol/go-sdk v1.8.0
 	github.com/openai/openai-go/v3 v3.22.0
 	github.com/sipeed/picoclaw v0.3.1
 	golang.org/x/image v0.46.0
