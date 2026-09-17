@@ -128,12 +128,29 @@
       <div class="modal-body">
         <div class="llm-transport">
           <div class="llm-tabs" role="tablist" aria-label="Способ подключения">
+            <button type="button" class="llm-tab" id="llm-tab-local" role="tab" aria-selected="false" aria-controls="llm-pane-local" tabindex="-1">Локальная модель</button>
             <button type="button" class="llm-tab" id="llm-tab-codex" role="tab" aria-selected="false" aria-controls="llm-pane-codex" tabindex="-1">Подписка ChatGPT</button>
             <button type="button" class="llm-tab is-active" id="llm-tab-apikey" role="tab" aria-selected="true" aria-controls="llm-pane-apikey">OpenAI-совместимый провайдер</button>
           </div>
           <div class="llm-override-slot" id="llm-override-auth_method"></div>
           <p class="llm-note" id="llm-transport-note" hidden></p>
         </div>
+
+        <section class="llm-pane" id="llm-pane-local" role="tabpanel" aria-labelledby="llm-tab-local" tabindex="0" hidden>
+          <div class="llm-codex-status" id="llm-local-status" aria-live="polite"></div>
+          <div class="llm-field">
+            <label class="llm-field-label" for="llm-local-model">Модель: путь к .gguf или URL</label>
+            <input type="text" id="llm-local-model" class="llm-input" autocomplete="off" spellcheck="false" />
+            <p class="llm-hint">Пустое поле — модель по умолчанию; она скачивается один раз при первом запросе.</p>
+            <div class="llm-override-slot" id="llm-override-local_model"></div>
+          </div>
+          <div class="llm-field">
+            <label class="llm-field-label" for="llm-local-lib">Каталог библиотек llama.cpp</label>
+            <input type="text" id="llm-local-lib" class="llm-input" autocomplete="off" spellcheck="false" />
+            <p class="llm-hint">Пустое поле — encli скачает и установит библиотеки сам. Укажите путь, если у вас своя сборка llama.cpp.</p>
+            <div class="llm-override-slot" id="llm-override-local_lib_path"></div>
+          </div>
+        </section>
 
         <section class="llm-pane" id="llm-pane-codex" role="tabpanel" aria-labelledby="llm-tab-codex" tabindex="0" hidden>
           <div class="llm-codex-status" id="llm-codex-status" aria-live="polite"></div>
@@ -233,12 +250,18 @@
         <section class="onboarding-pane" id="onboarding-pane-llm" tabindex="-1" hidden>
           <div class="llm-transport">
             <div class="llm-tabs" role="tablist" aria-label="Способ подключения">
-              <button type="button" class="llm-tab is-active" id="onboarding-llm-tab-codex" role="tab" aria-selected="true" aria-controls="onboarding-llm-pane-codex">Подписка ChatGPT</button>
+              <button type="button" class="llm-tab is-active" id="onboarding-llm-tab-local" role="tab" aria-selected="true" aria-controls="onboarding-llm-pane-local">Локальная модель</button>
+              <button type="button" class="llm-tab" id="onboarding-llm-tab-codex" role="tab" aria-selected="false" aria-controls="onboarding-llm-pane-codex" tabindex="-1">Подписка ChatGPT</button>
               <button type="button" class="llm-tab" id="onboarding-llm-tab-apikey" role="tab" aria-selected="false" aria-controls="onboarding-llm-pane-apikey" tabindex="-1">OpenAI-совместимый провайдер</button>
             </div>
           </div>
 
-          <section class="llm-pane" id="onboarding-llm-pane-codex" role="tabpanel" aria-labelledby="onboarding-llm-tab-codex" tabindex="0">
+          <section class="llm-pane" id="onboarding-llm-pane-local" role="tabpanel" aria-labelledby="onboarding-llm-tab-local" tabindex="0">
+            <div class="llm-codex-status" id="onboarding-local-status" aria-live="polite"></div>
+            <p class="llm-hint">Агент работает на этой машине, без сети и без ключей. Ничего вводить не нужно: модель и библиотеки скачиваются один раз. Маленькая модель по умолчанию заметно слабее облачных — модель можно сменить позже в настройках LLM.</p>
+          </section>
+
+          <section class="llm-pane" id="onboarding-llm-pane-codex" role="tabpanel" aria-labelledby="onboarding-llm-tab-codex" tabindex="0" hidden>
             <div class="llm-codex-status" id="onboarding-codex-status" aria-live="polite"></div>
             <div class="llm-actions">
               <button type="button" class="btn btn-primary" id="btn-onboarding-codex-login">Войти через ChatGPT</button>

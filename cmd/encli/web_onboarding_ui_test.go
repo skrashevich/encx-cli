@@ -23,6 +23,9 @@ var onboardingUIIDs = []string{
 	"onboarding-pane-auth",
 
 	// Шаг «Модель».
+	"onboarding-llm-tab-local",
+	"onboarding-llm-pane-local",
+	"onboarding-local-status",
 	"onboarding-llm-tab-codex",
 	"onboarding-llm-tab-apikey",
 	"onboarding-llm-pane-codex",
@@ -112,6 +115,7 @@ func TestOnboardingMarkupWiring(t *testing.T) {
 	}{
 		{"оверлей мастера скрыт до запуска", `<div class="onboarding-overlay" id="onboarding" hidden>`},
 		{"диалог помечен как модальный", `role="dialog" aria-modal="true" aria-labelledby="onboarding-title"`},
+		{"вкладка local управляет своей панелью", `aria-controls="onboarding-llm-pane-local"`},
 		{"вкладка codex управляет своей панелью", `aria-controls="onboarding-llm-pane-codex"`},
 		{"вкладка apikey управляет своей панелью", `aria-controls="onboarding-llm-pane-apikey"`},
 		{"ошибка мастера объявляется ассистивным технологиям", `id="onboarding-error" role="alert" hidden`},

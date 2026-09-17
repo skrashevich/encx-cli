@@ -21,10 +21,14 @@ const state = {
   attachments: [],
   llm: null,
   llmAuth: '',
-  llmEdited: { base_url: false, model: false },
+  llmEdited: { base_url: false, model: false, local_model: false, local_lib_path: false },
   codexFlow: null,
   codexPoll: null,
-  onboarding: { step: 'welcome', status: null, llmAuth: 'codex', engine: null, busy: false },
+  // llmAuth здесь обязано совпадать с тем, какая вкладка размечена активной
+  // в index.html: до ответа /llm/settings согласовать их некому, а если запрос
+  // упадёт, расхождение останется навсегда — и «Далее» сохранит не тот
+  // транспорт, который оператор видел выбранным.
+  onboarding: { step: 'welcome', status: null, llmAuth: 'local', engine: null, busy: false },
 };
 
 const ROLE_RU = {
@@ -1450,9 +1454,13 @@ const LLM_OVERRIDE_FLAGS = {
   auth_method: '--llm-auth',
 };
 
-const LLM_OVERRIDE_FIELDS = ['auth_method', 'base_url', 'model', 'api_key'];
+const LLM_OVERRIDE_FIELDS = ['auth_method', 'base_url', 'model', 'api_key', 'local_model', 'local_lib_path'];
+
+/** Вкладки транспорта в порядке отрисовки: стрелками фокус ходит по ним же. */
+const LLM_TABS = ['local', 'codex', 'apikey'];
 
 const LLM_TRANSPORT_RU = {
+  local: 'локальная модель на этой машине',
   codex: 'подписка ChatGPT',
   gigachat: 'GigaChat',
   apikey: 'OpenAI-совместимый провайдер',
@@ -1485,13 +1493,19 @@ function transportLabel(method) {
 }
 
 /** Вкладка, открытая при загрузке: сохранённое значение важнее действующего,
- * чтобы форма показывала то, что она же и перезапишет. Пустое сохранённое
- * значение остаётся пустым — при сохранении оно не превратится в «apikey». */
+ * чтобы форма показывала то, что она же и перезапишет.
+ *
+ * Если не сохранено и не задано снаружи ничего, берётся транспорт, который
+ * агент на самом деле выбрал. Резолвер уходит в local, когда не настроено ни
+ * одного облачного провайдера, и открывать при этом вкладку провайдера значило
+ * бы противоречить итоговой строке внизу окна. */
 function initialAuthMethod(data) {
   const stored = String(data?.stored?.auth_method || '').trim();
   if (stored) return stored;
   const effective = String(data?.effective?.auth_method?.value || '').trim();
-  return effective === 'codex' || effective === 'apikey' ? effective : '';
+  if (LLM_TABS.includes(effective)) return effective;
+  const resolved = String(data?.agent?.auth_method || '').trim();
+  return LLM_TABS.includes(resolved) ? resolved : '';
 }
 
 function isModalOpen() {
@@ -1579,7 +1593,7 @@ function closeLLMModal() {
 function applyLLMSnapshot(data, opts = {}) {
   state.llm = data || null;
   if (!opts.keepEdits) {
-    state.llmEdited = { base_url: false, model: false };
+    state.llmEdited = { base_url: false, model: false, local_model: false, local_lib_path: false };
     state.llmAuth = initialAuthMethod(data);
     const key = $('llm-api-key');
     if (key) key.value = '';
@@ -1597,8 +1611,7 @@ function setTabState(btn, active, reachable) {
 function selectLLMTab(method) {
   state.llmAuth = method;
   renderLLMSettings();
-  const pane = $(method === 'codex' ? 'llm-pane-codex' : 'llm-pane-apikey');
-  pane?.focus?.();
+  $(`llm-pane-${LLM_TABS.includes(method) ? method : 'apikey'}`)?.focus?.();
 }
 
 /** Узлы плашки «значение задано снаружи». Одна и та же лексика нужна и модалке
@@ -1672,20 +1685,61 @@ function renderCodexStatus(codex) {
   }
 }
 
+/** Что локальному инференсу ещё нужно, прежде чем он ответит. Модалка
+ * открывается до выбора вкладки, поэтому цена переключения — скачивание в
+ * сотни мегабайт — должна быть видна заранее, а не после первого запроса. */
+function renderLocalStatus(local) {
+  const l = local || {};
+  const rows = [];
+  let cls = 'llm-codex-status';
+  let title;
+  if (!l.supported) {
+    cls += ' is-warn';
+    title = 'Готовых библиотек llama.cpp для этой платформы нет';
+  } else if (l.model_cached && l.libs_installed) {
+    cls += ' is-ok';
+    title = 'Готово к работе';
+  } else {
+    cls += ' is-off';
+    title = l.libs_installed
+      ? 'Модель будет скачана при первом запросе'
+      : 'Модель и библиотеки llama.cpp будут скачаны при первом запросе';
+  }
+  if (l.model_path) rows.push(`Модель: ${l.model_path}${l.model_cached ? '' : ' (нет на диске)'}`);
+  if (l.lib_path) rows.push(`Библиотеки: ${l.lib_path}${l.libs_installed ? '' : ' (не установлены)'}`);
+  if (l.cache_dir) rows.push(`Кэш: ${l.cache_dir}`);
+  if (l.error) {
+    cls += ' is-warn';
+    rows.push(`Ошибка: ${l.error}`);
+  }
+  // Как и со статусом входа через ChatGPT: обе площадки всегда в DOM, видна
+  // одна, и снимок настроек в приложении один — поэтому рисуются обе.
+  const html =
+    `<p class="llm-codex-title">${escapeHtml(title)}</p>` +
+    (rows.length ? `<ul class="llm-codex-rows">${rows.map((r) => `<li>${escapeHtml(r)}</li>`).join('')}</ul>` : '');
+  for (const id of ['llm-local-status', 'onboarding-local-status']) {
+    const box = $(id);
+    if (!box) continue;
+    box.className = cls;
+    box.innerHTML = html;
+  }
+}
+
 function renderLLMSettings() {
   const data = state.llm;
   const defaults = data?.defaults || {};
   const stored = data?.stored || {};
   const method = state.llmAuth;
-  const isCodex = method === 'codex';
-  const isOther = method !== '' && method !== 'codex' && method !== 'apikey';
+  const isOther = method !== '' && !LLM_TABS.includes(method);
+  // Пустой сохранённый транспорт показывает вкладку провайдера: она же —
+  // умолчание формы, и сохранение её не превращает в «apikey» само по себе.
+  const shown = isOther ? '' : method || 'apikey';
 
-  setTabState($('llm-tab-codex'), isCodex, isOther);
-  setTabState($('llm-tab-apikey'), !isCodex && !isOther, isOther);
-  const codexPane = $('llm-pane-codex');
-  const apikeyPane = $('llm-pane-apikey');
-  if (codexPane) codexPane.hidden = !isCodex;
-  if (apikeyPane) apikeyPane.hidden = isCodex;
+  for (const name of LLM_TABS) {
+    setTabState($(`llm-tab-${name}`), name === shown, isOther);
+    const pane = $(`llm-pane-${name}`);
+    if (pane) pane.hidden = name !== shown;
+  }
 
   const note = $('llm-transport-note');
   if (note) {
@@ -1705,6 +1759,16 @@ function renderLLMSettings() {
     modelInput.placeholder = defaults.model || '';
     if (!state.llmEdited.model) modelInput.value = stored.model || '';
   }
+  const localModelInput = $('llm-local-model');
+  if (localModelInput) {
+    localModelInput.placeholder = defaults.local_model || '';
+    if (!state.llmEdited.local_model) localModelInput.value = stored.local_model || '';
+  }
+  const localLibInput = $('llm-local-lib');
+  if (localLibInput) {
+    localLibInput.placeholder = data?.local?.lib_path || '';
+    if (!state.llmEdited.local_lib_path) localLibInput.value = stored.local_lib_path || '';
+  }
   const keyInput = $('llm-api-key');
   const keyHint = $('llm-api-key-hint');
   if (keyInput) {
@@ -1720,6 +1784,7 @@ function renderLLMSettings() {
 
   renderLLMOverrides(data?.env_overrides);
   renderCodexStatus(data?.codex);
+  renderLocalStatus(data?.local);
 
   const pending = !!state.codexFlow;
   for (const target of CODEX_TARGETS) {
@@ -1767,6 +1832,8 @@ function llmFormBody(extra) {
     base_url: ($('llm-base-url')?.value || '').trim(),
     model: ($('llm-model')?.value || '').trim(),
     api_key: ($('llm-api-key')?.value || '').trim(),
+    local_model: ($('llm-local-model')?.value || '').trim(),
+    local_lib_path: ($('llm-local-lib')?.value || '').trim(),
     clear_api_key: false,
     ...extra,
   };
@@ -1887,6 +1954,10 @@ async function persistCodexTransport() {
         model: '',
         api_key: '',
         clear_api_key: false,
+        // PUT переписывает и поля локального инференса — без них вход через
+        // ChatGPT стирал бы путь к модели, который оператор указал раньше.
+        local_model: stored.local_model || '',
+        local_lib_path: stored.local_lib_path || '',
       },
     });
     return '';
@@ -2046,14 +2117,17 @@ function bindLLMSettings() {
   $('llm-modal')?.addEventListener('mousedown', (e) => {
     if (e.target === e.currentTarget) closeLLMModal();
   });
-  $('llm-tab-codex')?.addEventListener('click', () => selectLLMTab('codex'));
-  $('llm-tab-apikey')?.addEventListener('click', () => selectLLMTab('apikey'));
-  for (const id of ['llm-tab-codex', 'llm-tab-apikey']) {
-    $(id)?.addEventListener('keydown', (e) => {
+  for (const [index, name] of LLM_TABS.entries()) {
+    const tab = $(`llm-tab-${name}`);
+    if (!tab) continue;
+    tab.addEventListener('click', () => selectLLMTab(name));
+    tab.addEventListener('keydown', (e) => {
       if (e.key !== 'ArrowLeft' && e.key !== 'ArrowRight') return;
       e.preventDefault();
-      selectLLMTab(state.llmAuth === 'codex' ? 'apikey' : 'codex');
-      $(state.llmAuth === 'codex' ? 'llm-tab-codex' : 'llm-tab-apikey')?.focus();
+      const step = e.key === 'ArrowLeft' ? -1 : 1;
+      const next = LLM_TABS[(index + step + LLM_TABS.length) % LLM_TABS.length];
+      selectLLMTab(next);
+      $(`llm-tab-${next}`)?.focus();
     });
   }
   $('llm-base-url')?.addEventListener('input', () => {
@@ -2061,6 +2135,12 @@ function bindLLMSettings() {
   });
   $('llm-model')?.addEventListener('input', () => {
     state.llmEdited.model = true;
+  });
+  $('llm-local-model')?.addEventListener('input', () => {
+    state.llmEdited.local_model = true;
+  });
+  $('llm-local-lib')?.addEventListener('input', () => {
+    state.llmEdited.local_lib_path = true;
   });
   $('btn-llm-save')?.addEventListener('click', () => void saveLLMSettings());
   $('btn-llm-reset')?.addEventListener('click', () => void resetLLMSettings());
@@ -2095,6 +2175,8 @@ const LLM_OVERRIDE_FIELD_RU = {
   base_url: 'base URL',
   model: 'модель',
   api_key: 'API-ключ',
+  local_model: 'локальная модель',
+  local_lib_path: 'каталог llama.cpp',
 };
 
 const ENGINE_OVERRIDE_FLAGS = {
@@ -2210,6 +2292,9 @@ async function goToOnboardingStep(step) {
   renderOnboardingChrome();
   $(`onboarding-pane-${step}`)?.focus?.();
   if (step === 'llm') {
+    // Из состояния, а не по совпадению со статикой: снимок настроек приходит
+    // асинхронно и может не прийти вовсе.
+    renderOnboardingLLMTabs();
     await loadOnboardingLLM();
   } else if (step === 'engine') {
     await loadOnboardingEngine();
@@ -2220,24 +2305,28 @@ async function goToOnboardingStep(step) {
 
 /* —— Шаг «Модель» —— */
 
+/** Вкладки мастера — те же транспорты, что и в модалке, и в том же порядке.
+ * GigaChat сюда не попадает: он настраивается только переменными окружения. */
+const ONBOARDING_LLM_TABS = ['local', 'codex', 'apikey'];
+
 function onboardingLLMTab() {
-  return state.onboarding.llmAuth === 'apikey' ? 'apikey' : 'codex';
+  const method = state.onboarding.llmAuth;
+  return ONBOARDING_LLM_TABS.includes(method) ? method : 'codex';
 }
 
 function renderOnboardingLLMTabs() {
-  const isCodex = onboardingLLMTab() === 'codex';
-  setTabState($('onboarding-llm-tab-codex'), isCodex, false);
-  setTabState($('onboarding-llm-tab-apikey'), !isCodex, false);
-  const codexPane = $('onboarding-llm-pane-codex');
-  if (codexPane) codexPane.hidden = !isCodex;
-  const apikeyPane = $('onboarding-llm-pane-apikey');
-  if (apikeyPane) apikeyPane.hidden = isCodex;
+  const shown = onboardingLLMTab();
+  for (const name of ONBOARDING_LLM_TABS) {
+    setTabState($(`onboarding-llm-tab-${name}`), name === shown, false);
+    const pane = $(`onboarding-llm-pane-${name}`);
+    if (pane) pane.hidden = name !== shown;
+  }
 }
 
 function selectOnboardingLLMTab(method) {
   state.onboarding.llmAuth = method;
   renderOnboardingLLMTabs();
-  $(method === 'codex' ? 'onboarding-llm-pane-codex' : 'onboarding-llm-pane-apikey')?.focus?.();
+  $(`onboarding-llm-pane-${onboardingLLMTab()}`)?.focus?.();
 }
 
 function onboardingKeyHint(keyStatus) {
@@ -2266,7 +2355,11 @@ function fillOnboardingLLM(data, opts = {}) {
   const keyStatus = effective.api_key || {};
   if (!opts.keepEdits) {
     const method = initialAuthMethod(data);
-    state.onboarding.llmAuth = method === 'apikey' || (!method && keyStatus.has_value) ? 'apikey' : 'codex';
+    if (ONBOARDING_LLM_TABS.includes(method)) {
+      state.onboarding.llmAuth = method;
+    } else {
+      state.onboarding.llmAuth = keyStatus.has_value ? 'apikey' : 'codex';
+    }
   }
 
   const base = $('onboarding-llm-base-url');
@@ -2308,18 +2401,30 @@ async function loadOnboardingLLM() {
 /** Шаг обязан оставить настройку записанной, а не только показанной, поэтому
  * переход дальше начинается с сохранения. Для вкладки подписки поля
  * OpenAI-провайдера очищаются: подписка их не использует, а сохранённая модель
- * провайдера подменила бы модель подписки. */
+ * провайдера подменила бы модель подписки.
+ *
+ * Локальная вкладка ничего не очищает и ничего не спрашивает. Она пишет только
+ * сам транспорт, а сохранённые base_url и model переживают переключение — как и
+ * у подписки, они пригодятся при возврате к провайдеру. Раньше эта ветка
+ * записывала apikey всегда: пройти мастер, ничего не заполнив, означало прибить
+ * пустой ключ и сломать ровно тот запуск, ради которого локальный транспорт и
+ * существует. */
 async function saveOnboardingLLM() {
-  const isCodex = onboardingLLMTab() === 'codex';
+  const tab = onboardingLLMTab();
+  const isCodex = tab === 'codex';
+  const isLocal = tab === 'local';
+  const stored = state.llm?.stored || {};
   try {
     const data = await api('/llm/settings', {
       method: 'PUT',
       body: {
-        auth_method: isCodex ? 'codex' : 'apikey',
-        base_url: isCodex ? '' : ($('onboarding-llm-base-url')?.value || '').trim(),
-        model: isCodex ? '' : ($('onboarding-llm-model')?.value || '').trim(),
-        api_key: isCodex ? '' : ($('onboarding-llm-api-key')?.value || '').trim(),
+        auth_method: tab,
+        base_url: isLocal ? String(stored.base_url || '') : isCodex ? '' : ($('onboarding-llm-base-url')?.value || '').trim(),
+        model: isLocal ? String(stored.model || '') : isCodex ? '' : ($('onboarding-llm-model')?.value || '').trim(),
+        api_key: isCodex || isLocal ? '' : ($('onboarding-llm-api-key')?.value || '').trim(),
         clear_api_key: false,
+        local_model: String(stored.local_model || ''),
+        local_lib_path: String(stored.local_lib_path || ''),
       },
     });
     applyLLMSnapshot(data);
@@ -2608,8 +2713,9 @@ function bindOnboarding() {
   $('btn-onboarding-next')?.addEventListener('click', () => void onboardingNext());
   $('btn-onboarding-back')?.addEventListener('click', () => void onboardingBack());
   $('btn-onboarding-skip-all')?.addEventListener('click', () => void finishOnboarding(true));
-  $('onboarding-llm-tab-codex')?.addEventListener('click', () => selectOnboardingLLMTab('codex'));
-  $('onboarding-llm-tab-apikey')?.addEventListener('click', () => selectOnboardingLLMTab('apikey'));
+  for (const name of ONBOARDING_LLM_TABS) {
+    $(`onboarding-llm-tab-${name}`)?.addEventListener('click', () => selectOnboardingLLMTab(name));
+  }
   $('btn-onboarding-llm-test')?.addEventListener('click', () => void testOnboardingLLM());
   $('btn-onboarding-codex-login')?.addEventListener('click', () => void startCodexLogin(false));
   $('btn-onboarding-codex-code-submit')?.addEventListener('click', () => void submitCodexCode());

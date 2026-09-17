@@ -1,19 +1,21 @@
 package main
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"net/http"
+	"runtime"
 	"slices"
 	"strings"
 	"time"
 )
 
-// The -web settings panel configures the two transports an operator can set up
-// from a browser: an OpenAI-compatible provider, and a ChatGPT subscription.
-// GigaChat stays on the environment for now; it is still accepted here so the
-// API and resolveAgentConfig agree on what a valid auth method is.
-var llmSettableAuthMethods = []string{authMethodAPIKey, authMethodCodex, authMethodGigaChat}
+// The -web settings panel configures the transports an operator can set up from
+// a browser: local inference, an OpenAI-compatible provider, and a ChatGPT
+// subscription. GigaChat stays on the environment for now; it is still accepted
+// here so the API and resolveAgentConfig agree on what a valid auth method is.
+var llmSettableAuthMethods = []string{authMethodLocal, authMethodAPIKey, authMethodCodex, authMethodGigaChat}
 
 // llmAPIKeyStatus describes the key without disclosing it. The panel needs to
 // know that a key exists and which one, not what it is: -web binds to localhost
@@ -27,10 +29,25 @@ type llmAPIKeyStatus struct {
 }
 
 type llmEffectiveSettings struct {
-	AuthMethod llmFieldSource  `json:"auth_method"`
-	BaseURL    llmFieldSource  `json:"base_url"`
-	Model      llmFieldSource  `json:"model"`
-	APIKey     llmAPIKeyStatus `json:"api_key"`
+	AuthMethod   llmFieldSource  `json:"auth_method"`
+	BaseURL      llmFieldSource  `json:"base_url"`
+	Model        llmFieldSource  `json:"model"`
+	APIKey       llmAPIKeyStatus `json:"api_key"`
+	LocalModel   llmFieldSource  `json:"local_model"`
+	LocalLibPath llmFieldSource  `json:"local_lib_path"`
+}
+
+// llmLocalStatus tells the panel what a switch to local inference would cost
+// right now. A first run downloads ~400 MB of weights, and an operator is owed
+// that fact before they pick the transport rather than after.
+type llmLocalStatus struct {
+	ModelPath     string `json:"model_path"`
+	ModelCached   bool   `json:"model_cached"`
+	LibPath       string `json:"lib_path"`
+	LibsInstalled bool   `json:"libs_installed"`
+	CacheDir      string `json:"cache_dir"`
+	Supported     bool   `json:"supported"`
+	Error         string `json:"error,omitempty"`
 }
 
 // llmStoredSettings is the file's own content, which is what the form edits.
@@ -42,6 +59,8 @@ type llmStoredSettings struct {
 	Model        string `json:"model"`
 	HasAPIKey    bool   `json:"has_api_key"`
 	APIKeyMasked string `json:"api_key_masked,omitempty"`
+	LocalModel   string `json:"local_model"`
+	LocalLibPath string `json:"local_lib_path"`
 }
 
 // llmEnvOverride is one field the panel cannot change from here.
@@ -109,6 +128,7 @@ type llmSettingsPayload struct {
 	Defaults     map[string]string    `json:"defaults"`
 	AuthMethods  []string             `json:"auth_methods"`
 	Codex        llmCodexStatus       `json:"codex"`
+	Local        llmLocalStatus       `json:"local"`
 	Agent        llmAgentSummary      `json:"agent"`
 	SettingsPath string               `json:"settings_path"`
 	Error        string               `json:"error,omitempty"`
@@ -120,11 +140,13 @@ type llmSettingsPayload struct {
 // it in the file. The key cannot work that way: the form never receives it, so
 // an empty string means "leave it alone" and clearing is an explicit act.
 type llmSettingsUpdate struct {
-	AuthMethod  string `json:"auth_method"`
-	BaseURL     string `json:"base_url"`
-	Model       string `json:"model"`
-	APIKey      string `json:"api_key"`
-	ClearAPIKey bool   `json:"clear_api_key"`
+	AuthMethod   string `json:"auth_method"`
+	BaseURL      string `json:"base_url"`
+	Model        string `json:"model"`
+	APIKey       string `json:"api_key"`
+	ClearAPIKey  bool   `json:"clear_api_key"`
+	LocalModel   string `json:"local_model"`
+	LocalLibPath string `json:"local_lib_path"`
 }
 
 func (h *webHub) httpLLMSettings(w http.ResponseWriter, r *http.Request) {
@@ -176,10 +198,12 @@ func (h *webHub) httpPutLLMSettings(w http.ResponseWriter, r *http.Request) {
 		current = llmSettings{}
 	}
 	next := llmSettings{
-		AuthMethod: authMethod,
-		BaseURL:    strings.TrimSpace(req.BaseURL),
-		Model:      strings.TrimSpace(req.Model),
-		APIKey:     current.APIKey,
+		AuthMethod:   authMethod,
+		BaseURL:      strings.TrimSpace(req.BaseURL),
+		Model:        strings.TrimSpace(req.Model),
+		APIKey:       current.APIKey,
+		LocalModel:   strings.TrimSpace(req.LocalModel),
+		LocalLibPath: strings.TrimSpace(req.LocalLibPath),
 	}
 	switch {
 	case req.ClearAPIKey:
@@ -195,6 +219,22 @@ func (h *webHub) httpPutLLMSettings(w http.ResponseWriter, r *http.Request) {
 	payload, err := h.llmSettingsPayload()
 	if err != nil {
 		payload.Error = err.Error()
+	}
+	// The operator has just chosen a transport, which is the moment -web has been
+	// waiting for: it does not prefetch until the choice has been offered.
+	//
+	// The decision is made on what they asked for, not on what resolved. A
+	// configuration that fails to resolve — "codex" saved before codex-login, say
+	// — leaves payload.Agent.AuthMethod empty, and reading that as "not local"
+	// would abandon a download the next start may well need.
+	//
+	// The request context is not used: it ends with this response, and the
+	// download outlives it by minutes.
+	switch {
+	case payload.Agent.AuthMethod == authMethodLocal:
+		startLocalPrefetch(context.WithoutCancel(r.Context()), h.cfg, prefetchWhenInvited, nil)
+	case authMethod != "" && authMethod != authMethodLocal:
+		stopLocalPrefetch()
 	}
 	writeJSON(w, http.StatusOK, payload)
 }
@@ -224,6 +264,8 @@ func (h *webHub) llmSettingsPayload() (llmSettingsPayload, error) {
 	baseField := resolveLLMField("", llmBaseURLEnvVars, stored.BaseURL, defaultLLMBaseURL)
 	modelField := resolveLLMField("", llmModelEnvVars, stored.Model, defaultLLMModel)
 	keyField := resolveLLMField("", llmAPIKeyEnvVars, stored.APIKey, "")
+	localModelField := resolveLLMField("", llmLocalModelEnvVars, stored.LocalModel, defaultLocalModelURL)
+	localLibField := resolveLLMField("", llmLocalLibEnvVars, stored.LocalLibPath, "")
 
 	payload := llmSettingsPayload{
 		Effective: llmEffectiveSettings{
@@ -236,6 +278,8 @@ func (h *webHub) llmSettingsPayload() (llmSettingsPayload, error) {
 				Source:   keyField.Source,
 				EnvVar:   keyField.EnvVar,
 			},
+			LocalModel:   localModelField,
+			LocalLibPath: localLibField,
 		},
 		Stored: llmStoredSettings{
 			AuthMethod:   stored.AuthMethod,
@@ -243,14 +287,18 @@ func (h *webHub) llmSettingsPayload() (llmSettingsPayload, error) {
 			Model:        stored.Model,
 			HasAPIKey:    stored.APIKey != "",
 			APIKeyMasked: maskAPIKey(stored.APIKey),
+			LocalModel:   stored.LocalModel,
+			LocalLibPath: stored.LocalLibPath,
 		},
 		Defaults: map[string]string{
 			"base_url":    defaultLLMBaseURL,
 			"model":       defaultLLMModel,
 			"codex_model": defaultCodexModel,
+			"local_model": defaultLocalModelURL,
 		},
 		AuthMethods:  llmSettableAuthMethods,
 		Codex:        codexStatusForWeb(),
+		Local:        localStatusForWeb(localModelField.Value, localLibField.Value),
 		SettingsPath: llmSettingsFile(),
 	}
 
@@ -259,6 +307,8 @@ func (h *webHub) llmSettingsPayload() (llmSettingsPayload, error) {
 		{"base_url", baseField, stored.BaseURL},
 		{"model", modelField, stored.Model},
 		{"api_key", keyField, stored.APIKey},
+		{"local_model", localModelField, stored.LocalModel},
+		{"local_lib_path", localLibField, stored.LocalLibPath},
 	})
 
 	agentCfg, agentErr := resolveAgentConfig(h.cfg)
@@ -271,6 +321,31 @@ func (h *webHub) llmSettingsPayload() (llmSettingsPayload, error) {
 		payload.Agent.Error = agentErr.Error()
 	}
 	return payload, loadErr
+}
+
+// localStatusForWeb reports what local inference would need before it could
+// run: which weights, whether they are already downloaded, and where the
+// llama.cpp libraries are.
+//
+// Nothing here downloads anything. The panel is read on every open, and a GET
+// that quietly starts a 400 MB transfer is not a status report.
+func localStatusForWeb(modelRef, libPath string) llmLocalStatus {
+	status := llmLocalStatus{CacheDir: localCacheDir(), Supported: true}
+	status.ModelPath, status.ModelCached = localModelCached(modelRef)
+
+	status.LibPath = strings.TrimSpace(libPath)
+	if status.LibPath == "" {
+		status.LibPath = localLibDir()
+	}
+	status.LibsInstalled = localLibrariesInstalled(status.LibPath)
+
+	if !status.LibsInstalled && strings.TrimSpace(libPath) == "" {
+		if _, err := llamaAssetURL(runtime.GOOS, runtime.GOARCH); err != nil {
+			status.Supported = false
+			status.Error = err.Error()
+		}
+	}
+	return status
 }
 
 // codexStatusForWeb reports the stored ChatGPT sign-in for the panel. A missing

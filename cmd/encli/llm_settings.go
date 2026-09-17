@@ -22,6 +22,13 @@ type llmSettings struct {
 	BaseURL    string `json:"base_url,omitempty"`
 	APIKey     string `json:"api_key,omitempty"`
 	Model      string `json:"model,omitempty"`
+
+	// LocalModel and LocalLibPath configure the "local" transport. They are kept
+	// apart from Model and BaseURL because they describe files on this machine
+	// rather than a remote endpoint: switching between a cloud provider and local
+	// inference must not make an operator retype either side.
+	LocalModel   string `json:"local_model,omitempty"`
+	LocalLibPath string `json:"local_lib_path,omitempty"`
 }
 
 // llmSettingsFile resolves the settings path. The "llm" subdirectory is the
@@ -50,10 +57,12 @@ func loadLLMSettings() (llmSettings, error) {
 
 func (s llmSettings) trimmed() llmSettings {
 	return llmSettings{
-		AuthMethod: strings.ToLower(strings.TrimSpace(s.AuthMethod)),
-		BaseURL:    strings.TrimSpace(s.BaseURL),
-		APIKey:     strings.TrimSpace(s.APIKey),
-		Model:      strings.TrimSpace(s.Model),
+		AuthMethod:   strings.ToLower(strings.TrimSpace(s.AuthMethod)),
+		BaseURL:      strings.TrimSpace(s.BaseURL),
+		APIKey:       strings.TrimSpace(s.APIKey),
+		Model:        strings.TrimSpace(s.Model),
+		LocalModel:   strings.TrimSpace(s.LocalModel),
+		LocalLibPath: strings.TrimSpace(s.LocalLibPath),
 	}
 }
 
