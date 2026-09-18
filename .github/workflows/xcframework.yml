@@ -35,19 +35,26 @@ jobs:
           ls -R /tmp/xcframework-out/Encx.xcframework/
 
       - name: Checkout enkapp
+        if: ${{ secrets.ENKAPP_PAT != '' }}
         uses: actions/checkout@v7
         with:
           repository: skrashevich/enkapp
           token: ${{ secrets.ENKAPP_PAT }}
           path: enkapp
 
+      - name: Skip enkapp sync when token is unavailable
+        if: ${{ secrets.ENKAPP_PAT == '' }}
+        run: echo "ENKAPP_PAT is not configured; skipping enkapp sync/publish."
+
       - name: Sync xcframework
+        if: ${{ secrets.ENKAPP_PAT != '' }}
         run: |
           FRAMEWORK_DIR="$GITHUB_WORKSPACE/enkapp/encx-cli/Frameworks/Encx.xcframework"
           mkdir -p "$FRAMEWORK_DIR"
           rsync -a --delete /tmp/xcframework-out/Encx.xcframework/ "$FRAMEWORK_DIR/"
 
       - name: Commit and push
+        if: ${{ secrets.ENKAPP_PAT != '' }}
         working-directory: enkapp
         run: |
           git config user.name "github-actions[bot]"
