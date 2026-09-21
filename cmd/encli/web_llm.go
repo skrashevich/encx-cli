@@ -38,7 +38,7 @@ type llmEffectiveSettings struct {
 }
 
 // llmLocalStatus tells the panel what a switch to local inference would cost
-// right now. A first run downloads ~400 MB of weights, and an operator is owed
+// right now. A first run downloads about a gigabyte of weights, and an operator is owed
 // that fact before they pick the transport rather than after.
 type llmLocalStatus struct {
 	ModelPath     string `json:"model_path"`
@@ -328,7 +328,7 @@ func (h *webHub) llmSettingsPayload() (llmSettingsPayload, error) {
 // llama.cpp libraries are.
 //
 // Nothing here downloads anything. The panel is read on every open, and a GET
-// that quietly starts a 400 MB transfer is not a status report.
+// that quietly starts a gigabyte transfer is not a status report.
 func localStatusForWeb(modelRef, libPath string) llmLocalStatus {
 	status := llmLocalStatus{CacheDir: localCacheDir(), Supported: true}
 	status.ModelPath, status.ModelCached = localModelCached(modelRef)

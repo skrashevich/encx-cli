@@ -258,7 +258,7 @@ func TestDownloadFileRejectsAWrongDigest(t *testing.T) {
 	defer server.Close()
 
 	dest := filepath.Join(t.TempDir(), "llama.tar.gz")
-	err := downloadFile(t.Context(), server.URL+"/llama.tar.gz", dest, strings.Repeat("0", 64), nil)
+	err := downloadFile(t.Context(), server.URL+"/llama.tar.gz", dest, strings.Repeat("0", 64), maxLocalDownloadBytes, nil)
 	if !errors.Is(err, errDigestMismatch) {
 		t.Fatalf("error = %v, want errDigestMismatch", err)
 	}
@@ -268,7 +268,7 @@ func TestDownloadFileRejectsAWrongDigest(t *testing.T) {
 
 	// The same body under its real digest installs.
 	want := fmt.Sprintf("%x", sha256.Sum256([]byte("not the archive you asked for")))
-	if err := downloadFile(t.Context(), server.URL+"/llama.tar.gz", dest, want, nil); err != nil {
+	if err := downloadFile(t.Context(), server.URL+"/llama.tar.gz", dest, want, maxLocalDownloadBytes, nil); err != nil {
 		t.Fatalf("downloadFile with the right digest: %v", err)
 	}
 }
@@ -363,7 +363,7 @@ func TestDownloadFileLeavesNothingBehindOnFailure(t *testing.T) {
 	defer server.Close()
 
 	dest := filepath.Join(t.TempDir(), "model.gguf")
-	if err := downloadFile(t.Context(), server.URL+"/model.gguf", dest, "", nil); err == nil {
+	if err := downloadFile(t.Context(), server.URL+"/model.gguf", dest, "", maxLocalDownloadBytes, nil); err == nil {
 		t.Fatal("downloadFile reported success on a truncated body")
 	}
 	if leftovers := downloadLeftovers(t, dest); len(leftovers) != 0 {
@@ -671,5 +671,52 @@ func writeTestZip(t *testing.T, path string, files map[string]string) {
 	}
 	if err := os.WriteFile(path, buf.Bytes(), 0o600); err != nil {
 		t.Fatal(err)
+	}
+}
+
+// The cap is on what encli fetches of its own accord. A 70B at Q4_K_M is about
+// 42 GB, and a ceiling encli picked has no business refusing a machine that can
+// hold one — the same line the digest draws.
+func TestDownloadFileBoundsOnlyItsOwnFetches(t *testing.T) {
+	const body = "more than the caller allows"
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Write([]byte(body))
+	}))
+	defer server.Close()
+
+	dest := filepath.Join(t.TempDir(), "model.gguf")
+	err := downloadFile(t.Context(), server.URL+"/model.gguf", dest, "", 4, nil)
+	if err == nil {
+		t.Fatal("downloadFile accepted a body over the limit")
+	}
+	if leftovers := downloadLeftovers(t, dest); len(leftovers) != 0 {
+		t.Errorf("the refusal left %v behind", leftovers)
+	}
+
+	// The same body with no limit is the operator's own model.
+	if err := downloadFile(t.Context(), server.URL+"/model.gguf", dest, "", localDownloadUnbounded, nil); err != nil {
+		t.Fatalf("an unbounded download was refused: %v", err)
+	}
+	if got, err := os.ReadFile(dest); err != nil || string(got) != body {
+		t.Fatalf("cached file = %q, %v", got, err)
+	}
+}
+
+// A server that declares the size gets a refusal before a byte is written,
+// rather than after filling the disk to the limit and being told then.
+func TestDownloadFileRefusesADeclaredOversizeBeforeWriting(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Length", "4096")
+		w.Write(bytes.Repeat([]byte("x"), 4096))
+	}))
+	defer server.Close()
+
+	dest := filepath.Join(t.TempDir(), "model.gguf")
+	err := downloadFile(t.Context(), server.URL+"/model.gguf", dest, "", 1024, nil)
+	if err == nil || !strings.Contains(err.Error(), "the server reports") {
+		t.Fatalf("error = %v, want the refusal to name what the server declared", err)
+	}
+	if leftovers := downloadLeftovers(t, dest); len(leftovers) != 0 {
+		t.Errorf("the refusal left %v behind", leftovers)
 	}
 }

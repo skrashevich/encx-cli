@@ -4,6 +4,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/hybridgroup/yzma/pkg/llama"
 	"github.com/hybridgroup/yzma/pkg/message"
 	"github.com/hybridgroup/yzma/pkg/template"
 	"github.com/sipeed/picoclaw/pkg/providers"
@@ -385,5 +386,37 @@ func TestLocalToolDefinitionsCarryTheSchema(t *testing.T) {
 	}
 	if localToolDefinitions(nil) != nil {
 		t.Error("an empty catalog must stay empty so the template takes its plain path")
+	}
+}
+
+// The prefix search decides how much of the KV cache survives a turn, so it has
+// to be right about the boundary cases rather than merely right about the common
+// one — reusing a token too many decodes new text on top of state that does not
+// match it.
+func TestCommonTokenPrefix(t *testing.T) {
+	seq := func(values ...int) []llama.Token {
+		out := make([]llama.Token, len(values))
+		for i, v := range values {
+			out[i] = llama.Token(v)
+		}
+		return out
+	}
+
+	cases := map[string]struct {
+		cached, next []llama.Token
+		want         int
+	}{
+		"the next prompt continues the cached one": {seq(1, 2, 3), seq(1, 2, 3, 4, 5), 3},
+		"identical":                           {seq(1, 2, 3), seq(1, 2, 3), 3},
+		"diverges in the middle":              {seq(1, 2, 3, 4), seq(1, 2, 9, 4), 2},
+		"diverges at the first token":         {seq(1, 2, 3), seq(9, 2, 3), 0},
+		"the cache is longer than the prompt": {seq(1, 2, 3, 4, 5), seq(1, 2, 3), 3},
+		"nothing cached":                      {nil, seq(1, 2, 3), 0},
+		"nothing to compare against":          {seq(1, 2, 3), nil, 0},
+	}
+	for name, tc := range cases {
+		if got := commonTokenPrefix(tc.cached, tc.next); got != tc.want {
+			t.Errorf("%s: commonTokenPrefix = %d, want %d", name, got, tc.want)
+		}
 	}
 }

@@ -36,9 +36,9 @@ import (
 
 const (
 	// defaultLocalModelURL is the model an operator gets without choosing one: a
-	// 0.5B instruct model small enough (~400 MB) to download on first use and to
-	// run on a laptop CPU, and one whose chat template declares tool calling,
-	// which the agent depends on entirely.
+	// 2B instruct model small enough (~1 GB) to download on first use and to run
+	// on a laptop CPU, and one whose chat template declares tool calling, which
+	// the agent depends on entirely.
 	defaultLocalModelURL = "https://huggingface.co/bartowski/Qwen_Qwen3-VL-2B-Instruct-GGUF/resolve/main/Qwen_Qwen3-VL-2B-Instruct-Q4_K_M.gguf"
 
 	// defaultLocalModelSHA256 is what that URL served when this was written.
@@ -56,7 +56,7 @@ const (
 	// check it against, and their URL is their decision. It is cached in a
 	// different directory so it cannot take the built-in model's place — see
 	// localPinnedModelsDir.
-	defaultLocalModelSHA256 = "6eb923e7d26e9cea28811e1a8e852009b21242fb157b26149d3b188f3a8c8653"
+	defaultLocalModelSHA256 = "5cbb3ab861b7caec6dcfc98af6d0a74f2da0ce57453e194eb5c38ac49963c638"
 
 	// llamaNightlyTag and llamaBuilderTag pin the llama.cpp build that is
 	// installed. The nightly tag is where ggml-org publishes the binaries;
@@ -88,11 +88,18 @@ const (
 	// llamaManifestLimit caps the manifest read. The published file is ~70 KB.
 	llamaManifestLimit = 8 << 20
 
-	// maxLocalDownloadBytes bounds what a download may write. It is generous —
-	// the largest GGUF anyone would run on a laptop is far below it — and exists
+	// maxLocalDownloadBytes bounds the downloads encli makes on its own account,
 	// so a server that answers with an endless body fills a bounded amount of
 	// disk instead of all of it.
+	//
+	// It is not applied to a model the operator named. The largest GGUF that fits
+	// on a laptop is far below this, but a 70B at Q4_K_M is about 42 GB, and a
+	// ceiling encli picked is no business of a machine that can hold one. That is
+	// the same line the digest draws: their URL is their decision.
 	maxLocalDownloadBytes = 32 << 30
+
+	// localDownloadUnbounded is the limit to pass for such a download.
+	localDownloadUnbounded = 0
 )
 
 // llmLocalDirEnvVar relocates the whole local-inference cache — libraries and
@@ -545,7 +552,7 @@ func writeLibrarySymlink(target, linkname string) error {
 // complete and has been verified, so neither an interrupted download — a
 // cancelled run, a dropped connection, a laptop lid — nor a file that fails the
 // check can leave anything behind that a later run would treat as the cache.
-func downloadFile(ctx context.Context, url, dest, wantSHA256 string, onProgress func(done, total int64)) error {
+func downloadFile(ctx context.Context, url, dest, wantSHA256 string, maxBytes int64, onProgress func(done, total int64)) error {
 	if err := os.MkdirAll(filepath.Dir(dest), 0o755); err != nil {
 		return fmt.Errorf("create %s: %w", filepath.Dir(dest), err)
 	}
@@ -564,6 +571,13 @@ func downloadFile(ctx context.Context, url, dest, wantSHA256 string, onProgress 
 	if resp.StatusCode != http.StatusOK {
 		return fmt.Errorf("download %s: HTTP %d", url, resp.StatusCode)
 	}
+	// Asked before a byte is written. A server that declares the size gets a
+	// refusal now rather than after filling the disk to the limit and being told
+	// then; one that declares nothing, or lies, is still caught below.
+	if maxBytes > 0 && resp.ContentLength > maxBytes {
+		return fmt.Errorf("download %s: the server reports %s, over the %s limit",
+			url, humanBytes(resp.ContentLength), humanBytes(maxBytes))
+	}
 
 	// The scratch file carries this process's pid. encli can legitimately run
 	// twice at once — a -web server and a one-shot --llm call share the cache —
@@ -577,8 +591,11 @@ func downloadFile(ctx context.Context, url, dest, wantSHA256 string, onProgress 
 	}
 	counter := &progressWriter{total: resp.ContentLength, onProgress: onProgress}
 	digest := sha256.New()
-	written, copyErr := io.Copy(io.MultiWriter(out, counter, digest),
-		io.LimitReader(resp.Body, maxLocalDownloadBytes+1))
+	body := io.Reader(resp.Body)
+	if maxBytes > 0 {
+		body = io.LimitReader(resp.Body, maxBytes+1)
+	}
+	written, copyErr := io.Copy(io.MultiWriter(out, counter, digest), body)
 	closeErr := out.Close()
 	if copyErr != nil {
 		os.Remove(part)
@@ -588,9 +605,9 @@ func downloadFile(ctx context.Context, url, dest, wantSHA256 string, onProgress 
 		os.Remove(part)
 		return closeErr
 	}
-	if written > maxLocalDownloadBytes {
+	if maxBytes > 0 && written > maxBytes {
 		os.Remove(part)
-		return fmt.Errorf("download %s: the response exceeds the %s limit", url, humanBytes(maxLocalDownloadBytes))
+		return fmt.Errorf("download %s: the response exceeds the %s limit", url, humanBytes(maxBytes))
 	}
 	if wantSHA256 != "" {
 		if got := fmt.Sprintf("%x", digest.Sum(nil)); got != wantSHA256 {
@@ -605,7 +622,7 @@ func downloadFile(ctx context.Context, url, dest, wantSHA256 string, onProgress 
 	return nil
 }
 
-// localDownloadClient has no overall timeout on purpose: a 400 MB model on a
+// localDownloadClient has no overall timeout on purpose: a gigabyte of weights on a
 // slow link legitimately takes many minutes, and a deadline here would cancel it
 // halfway every time. Cancellation is the caller's context, and a stalled
 // connection is caught by the response-header timeout.
@@ -628,7 +645,7 @@ const maxLocalRedirects = 10
 // For everything with a pinned digest a downgrade costs only privacy, since
 // substituted bytes fail the check. The path that has no digest is the one this
 // is for: an operator's own LLM_LOCAL_MODEL URL. There, an https request that is
-// redirected to http hands 400 MB of weights to anyone on the wire, and
+// redirected to http hands a gigabyte of weights to anyone on the wire, and
 // llama.cpp parses a GGUF in C.
 func refuseDowngradeToHTTP(req *http.Request, via []*http.Request) error {
 	if len(via) >= maxLocalRedirects {
@@ -693,7 +710,7 @@ const localScratchMaxAge = time.Hour
 // a file nobody will ever look at again.
 //
 // -web makes that an everyday shape rather than a corner case: it starts the
-// 400 MB download at launch, so someone who starts the server, sees the download
+// gigabyte download at launch, so someone who starts the server, sees the download
 // line and presses Ctrl-C leaves a few hundred megabytes behind — silently, and
 // once per attempt.
 func sweepStaleLocalScratch() {
@@ -735,7 +752,7 @@ type localAssets struct {
 // waiting on it.
 //
 // Both halves matter. Two chats asking for the agent at once must not start two
-// downloads of the same 400 MB file, so preparation is under one lock. But a
+// downloads of the same gigabyte file, so preparation is under one lock. But a
 // caller that arrives second would then sit silently for minutes behind that
 // lock, which reads as a hang — so it subscribes to the progress of the download
 // already running before it blocks, and reports that instead.
@@ -839,7 +856,7 @@ func (m *localAssetManager) ensureLibraries(ctx context.Context, configured stri
 	// encli installing at the same time must not have its copy renamed away or
 	// removed out from under its unpacker.
 	archive := filepath.Join(localCacheDir(), fmt.Sprintf("%d-%s", os.Getpid(), path.Base(assetURL)))
-	if err := downloadFile(ctx, assetURL, archive, wantDigest, func(done, total int64) {
+	if err := downloadFile(ctx, assetURL, archive, wantDigest, maxLocalDownloadBytes, func(done, total int64) {
 		m.notify("llama.cpp libraries: %s", downloadProgressText(done, total))
 	}); err != nil {
 		return "", err
@@ -900,8 +917,14 @@ func (m *localAssetManager) ensureModel(ctx context.Context, ref string) (string
 		return model.path, nil
 	}
 
+	// Bounded only for the model encli picked; see maxLocalDownloadBytes.
+	limit := int64(localDownloadUnbounded)
+	if model.wantSHA256 != "" {
+		limit = maxLocalDownloadBytes
+	}
+
 	m.notify("downloading the model %s (this happens once)", model.name())
-	if err := downloadFile(ctx, model.url, model.path, model.wantSHA256, func(done, total int64) {
+	if err := downloadFile(ctx, model.url, model.path, model.wantSHA256, limit, func(done, total int64) {
 		m.notify("model %s: %s", model.name(), downloadProgressText(done, total))
 	}); err != nil {
 		if errors.Is(err, errDigestMismatch) {

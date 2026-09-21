@@ -590,7 +590,7 @@ encli admin-action-monitor -game-id 12345
 | Переменная | Алиас | Назначение |
 |---|---|---|
 | `LLM_API_KEY` | `OPENROUTER_API_KEY` | API-ключ OpenRouter ([получить](https://openrouter.ai/keys)) |
-| `LLM_LOCAL_MODEL` | — | GGUF для `LLM_AUTH=local`: путь к файлу или URL (по умолчанию: Qwen2.5-0.5B-Instruct-Q4_K_M) |
+| `LLM_LOCAL_MODEL` | — | GGUF для `LLM_AUTH=local`: путь к файлу или URL (по умолчанию: Qwen3-VL-2B-Instruct-Q4_K_M) |
 | `LLM_LOCAL_LIB` | `YZMA_LIB` | Каталог с библиотеками `llama.cpp`; задан — автоустановка выключена |
 | `LLM_LOCAL_CONTEXT` | — | Контекстное окно локальной модели в токенах (по умолчанию: 65536) |
 | `LLM_MODEL` | `OPENROUTER_MODEL` | Идентификатор модели в каталоге OpenRouter, например `anthropic/claude-sonnet-4` или `google/gemini-2.5-pro-preview` |
@@ -634,7 +634,7 @@ encli -llm-auth local -game-id 12345 --llm "покажи статус игры"
 
 | Что | Откуда | Куда |
 |---|---|---|
-| Модель `Qwen_Qwen3-VL-2B-Instruct-Q4_K_M.gguf` (~400 МБ) | [bartowski/QQwen_Qwen3-VL-2B-Instruct-GGUF](https://huggingface.co/bartowski/Qwen2.5-0.5B-Instruct-GGUF) | `~/.config/encli/local-llm/models/builtin/` |
+| Модель `Qwen_Qwen3-VL-2B-Instruct-Q4_K_M.gguf` (~1 ГБ) | [bartowski/Qwen_Qwen3-VL-2B-Instruct-GGUF](https://huggingface.co/bartowski/Qwen_Qwen3-VL-2B-Instruct-GGUF) | `~/.config/encli/local-llm/models/builtin/` |
 | Библиотеки `llama.cpp` для вашей платформы (~30 МБ) | релизы [ggml-org/llama.cpp](https://github.com/ggml-org/llama.cpp/releases) и [llama-cpp-builder](https://github.com/hybridgroup/llama-cpp-builder/releases) | `~/.config/encli/local-llm/lib/` |
 
 Если запрос приходит, пока загрузка ещё идёт, он дожидается её и видит тот же прогресс
@@ -1128,7 +1128,7 @@ encli import-scenario -game-id 82307 --sync-missing "/Users/svk/Downloads/moscow
 | — | `LLM_API_KEY` | API-ключ для `--llm` и `-web` (не нужен для localhost) |
 | — | `LLM_MODEL` | Модель для агента (по умолчанию: `openai/gpt-oss-120b:free`) |
 | `-llm-auth` | `LLM_AUTH` | Транспорт агента: `local` — llama.cpp на этой машине, `apikey` — OpenAI-совместимый API, `codex` — подписка ChatGPT, `gigachat` — GigaChat API. Без настроек берётся `local` |
-| — | `LLM_LOCAL_MODEL` | GGUF для `LLM_AUTH=local`: путь к файлу или URL (по умолчанию: Qwen_Qwen3-VL-2B-Instruct-GGUD) |
+| — | `LLM_LOCAL_MODEL` | GGUF для `LLM_AUTH=local`: путь к файлу или URL (по умолчанию: Qwen3-VL-2B-Instruct-Q4_K_M) |
 | — | `LLM_LOCAL_LIB` | Каталог с библиотеками `llama.cpp` (алиас: `YZMA_LIB`); задан — автоустановка выключена |
 | — | `LLM_LOCAL_CONTEXT` | Контекстное окно локальной модели в токенах (по умолчанию: 65536) |
 | — | `ENCLI_LLM_LOCAL_DIR` | Кэш локальной модели и библиотек (по умолчанию: `~/.config/encli/local-llm`) |

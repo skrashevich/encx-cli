@@ -26,10 +26,16 @@ const (
 	// defaultLocalContextSize is the window the local context is created with.
 	//
 	// It is not a round number picked for comfort. The agent's system prompt plus
-	// its tool catalog measures about 6700 tokens before the conversation starts,
+	// its tool catalog measures about 6800 tokens before the conversation starts,
 	// so an 8k window leaves barely a turn of room and every second message would
-	// be refused for overflow. The KV cache is allocated up front — roughly
-	// 200 MB at this size for a 0.5B model — which is what a larger window costs.
+	// be refused for overflow.
+	//
+	// The KV cache is allocated up front, and that is what a larger window costs.
+	// Measured on the built-in model: peak resident memory is 1.28 GiB at a 1024
+	// window, 2.95 GiB at 16k and 8.19 GiB at this one. The weights allow far
+	// more — the model was trained at 256k — so what bounds this is the machine,
+	// and 8 GiB is a real requirement rather than a headroom figure. An operator
+	// whose machine is smaller lowers LLM_LOCAL_CONTEXT.
 	defaultLocalContextSize = 65536
 
 	// defaultLocalMaxTokens caps one reply. A local model that starts repeating
@@ -163,6 +169,10 @@ type localRuntime struct {
 
 	// closed is set by close and read by generate, both under mu. See close.
 	closed bool
+
+	// cached is the token sequence currently decoded into the KV cache, in
+	// order. See reuseCachedPrefix for what it buys.
+	cached []llama.Token
 
 	// abort is read by llama.cpp itself, between compute steps, through the
 	// callback installed in sharedLocalRuntime. It is what lets close interrupt
@@ -338,11 +348,82 @@ func (r *localRuntime) decodeBatch(batch llama.Batch, what string) error {
 	}
 }
 
-// generate runs one completion and reports the text with the token counts.
+// commonTokenPrefix reports how many leading tokens two sequences share.
 //
-// The KV cache is cleared first: the agent hands the whole conversation over on
-// every turn, so anything left from the previous one is the same prefix a second
-// time and would be answered as if the user had repeated themselves.
+// It compares the tokens themselves rather than assuming anything about the
+// text they came from. The agent re-renders the whole conversation through the
+// chat template on every turn, so the new prompt usually starts with the old one
+// — but "usually" is not a guarantee, and a shrinking transcript or an edited
+// system prompt diverges somewhere in the middle.
+func commonTokenPrefix(a, b []llama.Token) int {
+	n := min(len(a), len(b))
+	for i := range n {
+		if a[i] != b[i] {
+			return i
+		}
+	}
+	return n
+}
+
+// reuseCachedPrefix keeps as much of the KV cache as the new prompt can use and
+// reports how many of its tokens are therefore already decoded.
+//
+// This is what makes local inference usable for an agent rather than merely
+// correct. Every turn hands the model the whole conversation again, so without
+// it each turn re-decodes everything said so far. Measured on the built-in
+// model, the second turn of a one-tool task — the first prompt plus 359 bytes of
+// tool call and result — cost 9.3 s before and 0.44 s after, reusing 6801 of its
+// 6901 tokens. A ten-step task had been paying a minute and a half for work it
+// had already done.
+//
+// The last cached token is deliberately dropped: sampling needs logits, and
+// those exist only for a token this call decoded. Reusing the prompt whole would
+// leave nothing to decode and nothing to sample from.
+//
+// The win lives in the tool-call loop inside one user message, which is where
+// the cost was. Across user messages, and between two chats sharing the process,
+// the system prompt carries the domain and the current time, so the sequences
+// diverge early and most of the prompt is decoded again. That is the correct
+// answer rather than a missed optimisation: the comparison is on the tokens
+// themselves, so a prefix is reused only when it really is one.
+func (r *localRuntime) reuseCachedPrefix(tokens []llama.Token) (int, error) {
+	memory, err := llama.GetMemory(r.lctx)
+	if err != nil {
+		return 0, fmt.Errorf("read the llama context memory: %w", err)
+	}
+
+	// startOver drops the whole cache. Its own failure is the one thing this
+	// function may not shrug off: decoding then continues from wherever the
+	// leftover state ended, so the model answers a conversation nobody had —
+	// fluently, and wrongly. That is exactly what the cache invalidation exists
+	// to prevent, so it is reported rather than logged.
+	startOver := func() (int, error) {
+		r.cached = nil
+		if err := llama.MemoryClear(memory, true); err != nil {
+			return 0, fmt.Errorf("clear the llama context memory: %w", err)
+		}
+		return 0, nil
+	}
+
+	reuse := min(commonTokenPrefix(r.cached, tokens), len(tokens)-1)
+	if reuse <= 0 {
+		return startOver()
+	}
+
+	// Drop everything after the shared prefix. A refusal means the backend
+	// cannot remove part of a sequence, so the only safe answer is to start
+	// over rather than decode on top of state that does not match.
+	ok, err := llama.MemorySeqRm(memory, 0, llama.Pos(reuse), -1)
+	if err != nil || !ok {
+		debugf("local inference: could not trim the context memory to %d tokens (ok=%v): %v", reuse, ok, err)
+		return startOver()
+	}
+
+	r.cached = r.cached[:reuse]
+	return reuse, nil
+}
+
+// generate runs one completion and reports the text with the token counts.
 func (r *localRuntime) generate(ctx context.Context, prompt string, maxTokens int) (localCompletion, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -360,19 +441,31 @@ func (r *localRuntime) generate(ctx context.Context, prompt string, maxTokens in
 		return result, localContextOverflowError(r.contextSize, len(tokens)+localContextHeadroom)
 	}
 
-	memory, err := llama.GetMemory(r.lctx)
-	if err != nil {
-		return result, fmt.Errorf("read the llama context memory: %w", err)
-	}
-	if err := llama.MemoryClear(memory, true); err != nil {
-		return result, fmt.Errorf("clear the llama context memory: %w", err)
-	}
-	llama.SamplerReset(r.sampler)
+	// Any failure below leaves the cache describing state the context no longer
+	// has. Dropping it costs one full prompt on the next call; keeping it wrong
+	// would decode new tokens on top of a prefix that is not there.
+	forgetCache := true
+	defer func() {
+		if forgetCache {
+			r.cached = nil
+		}
+	}()
 
-	// The prompt is decoded in batches of NBatch. llama.cpp refuses a batch
-	// larger than that, and a transcript of a few thousand tokens exceeds it
-	// easily.
-	for start := 0; start < len(tokens); start += r.nBatch {
+	reused, err := r.reuseCachedPrefix(tokens)
+	if err != nil {
+		return result, err
+	}
+	// The sampler is reset every call while the KV cache is not, and that is not
+	// a contradiction: its ring buffer feeds the repetition penalties from the
+	// tokens it sampled, which is per reply, while the cache holds attention
+	// state, which is per conversation.
+	llama.SamplerReset(r.sampler)
+	debugf("local inference: %d prompt tokens, %d reused from the cache", len(tokens), reused)
+
+	// What is left of the prompt is decoded in batches of NBatch. llama.cpp
+	// refuses a batch larger than that, and a transcript of a few thousand
+	// tokens exceeds it easily.
+	for start := reused; start < len(tokens); start += r.nBatch {
 		if err := ctx.Err(); err != nil {
 			return result, err
 		}
@@ -380,6 +473,7 @@ func (r *localRuntime) generate(ctx context.Context, prompt string, maxTokens in
 		if err := r.decodeBatch(llama.BatchGetOne(tokens[start:end]), "the prompt"); err != nil {
 			return result, err
 		}
+		r.cached = append(r.cached, tokens[start:end]...)
 	}
 
 	var out strings.Builder
@@ -392,6 +486,7 @@ func (r *localRuntime) generate(ctx context.Context, prompt string, maxTokens in
 		token := llama.SamplerSample(r.sampler, r.lctx, -1)
 		if llama.VocabIsEOG(r.vocab, token) {
 			result.text = out.String()
+			forgetCache = false
 			return result, nil
 		}
 		n := llama.TokenToPiece(r.vocab, token, piece, 0, true)
@@ -408,12 +503,18 @@ func (r *localRuntime) generate(ctx context.Context, prompt string, maxTokens in
 			result.text = out.String()
 			return result, err
 		}
+		// Decoded, so it belongs in the cache. Whether the next turn reuses it
+		// is the model's business: the template re-renders this reply as text,
+		// and on the built-in model that text does not tokenize back to exactly
+		// these tokens. Recorded because it is true, not because it pays.
+		r.cached = append(r.cached, token)
 	}
 
 	// The loop ran out of budget or of window rather than reaching an
 	// end-of-generation token, so the reply is cut off and says so.
 	result.text = out.String()
 	result.finishReason = localFinishLength
+	forgetCache = false
 	return result, nil
 }
 
@@ -441,7 +542,7 @@ type localProvider struct {
 //
 // The preparation happens here rather than on the first token so that a first
 // run reports "downloading the model" while it downloads, instead of appearing
-// to hang for the minutes a 400 MB file takes.
+// to hang for the minutes a gigabyte of weights takes.
 func newLocalProvider(ctx context.Context, cfg localLLMConfig, onProgress func(string)) (providers.LLMProvider, error) {
 	assets, err := localAssetsManager.prepare(ctx, cfg, onProgress)
 	if err != nil {
@@ -487,7 +588,7 @@ const (
 // startLocalPrefetch is how the -web handlers reach the prefetch.
 //
 // It is a package var for one reason: those handlers run in every web test, and
-// starting a 400 MB download is not a side effect a test suite may have. Tests
+// starting a gigabyte download is not a side effect a test suite may have. Tests
 // replace it to observe the decision without making it. Nothing else reassigns
 // it — see isolateLLMEnv.
 var startLocalPrefetch = prefetchLocalInference
