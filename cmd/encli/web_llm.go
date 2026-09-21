@@ -48,6 +48,14 @@ type llmLocalStatus struct {
 	CacheDir      string `json:"cache_dir"`
 	Supported     bool   `json:"supported"`
 	Error         string `json:"error,omitempty"`
+
+	// Downloading and Progress describe an acquisition that is under way right
+	// now. The fields above are a look at the disk, and the disk does not change
+	// until the download finishes — so without these the panel shows the same
+	// "not downloaded yet" for the several minutes the weights take, and the
+	// operator who just chose local inference sees a frozen screen.
+	Downloading bool   `json:"downloading"`
+	Progress    string `json:"progress,omitempty"`
 }
 
 // llmStoredSettings is the file's own content, which is what the form edits.
@@ -216,25 +224,31 @@ func (h *webHub) httpPutLLMSettings(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
 	}
-	payload, err := h.llmSettingsPayload()
-	if err != nil {
-		payload.Error = err.Error()
-	}
 	// The operator has just chosen a transport, which is the moment -web has been
 	// waiting for: it does not prefetch until the choice has been offered.
 	//
+	// Settled before the panel is described, so the description can include it.
+	// The other order answers "nothing is downloading" to the very request that
+	// started the download, and the browser has nothing to watch.
+	//
 	// The decision is made on what they asked for, not on what resolved. A
 	// configuration that fails to resolve — "codex" saved before codex-login, say
-	// — leaves payload.Agent.AuthMethod empty, and reading that as "not local"
-	// would abandon a download the next start may well need.
+	// — resolves to nothing at all, and reading that as "not local" would abandon
+	// a download the next start may well need.
 	//
 	// The request context is not used: it ends with this response, and the
 	// download outlives it by minutes.
+	resolved, resolveErr := resolveAgentConfig(h.cfg)
 	switch {
-	case payload.Agent.AuthMethod == authMethodLocal:
+	case resolveErr == nil && resolved.AuthMethod == authMethodLocal:
 		startLocalPrefetch(context.WithoutCancel(r.Context()), h.cfg, prefetchWhenInvited, nil)
 	case authMethod != "" && authMethod != authMethodLocal:
 		stopLocalPrefetch()
+	}
+
+	payload, err := h.llmSettingsPayload()
+	if err != nil {
+		payload.Error = err.Error()
 	}
 	writeJSON(w, http.StatusOK, payload)
 }
@@ -338,6 +352,7 @@ func localStatusForWeb(modelRef, libPath string) llmLocalStatus {
 		status.LibPath = localLibDir()
 	}
 	status.LibsInstalled = localLibrariesInstalled(status.LibPath)
+	status.Progress, status.Downloading = localAssetsManager.progress()
 
 	if !status.LibsInstalled && strings.TrimSpace(libPath) == "" {
 		if _, err := llamaAssetURL(runtime.GOOS, runtime.GOARCH); err != nil {

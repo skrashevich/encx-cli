@@ -63,6 +63,7 @@ var onboardingUIIDs = []string{
 
 	// Подвал и повторный запуск мастера.
 	"onboarding-error",
+	"onboarding-wait",
 	"btn-onboarding-back",
 	"btn-onboarding-next",
 	"btn-onboarding-skip-all",

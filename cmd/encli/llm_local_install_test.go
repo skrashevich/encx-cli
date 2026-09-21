@@ -720,3 +720,61 @@ func TestDownloadFileRefusesADeclaredOversizeBeforeWriting(t *testing.T) {
 		t.Errorf("the refusal left %v behind", leftovers)
 	}
 }
+
+// The panel has no listener to subscribe — the handler that starts the download
+// answers long before it finishes — so this pair is the only thing that lets the
+// browser say anything at all while a gigabyte comes down.
+func TestLocalAssetManagerReportsProgress(t *testing.T) {
+	m := &localAssetManager{}
+
+	if line, running := m.progress(); running || line != "" {
+		t.Fatalf("a fresh manager reports %q, running=%v", line, running)
+	}
+
+	outer := m.beginProgress()
+	if _, running := m.progress(); !running {
+		t.Fatal("progress is not reported as running after it began")
+	}
+	m.notify("model %s: %s", "weights.gguf", "10%")
+	if line, _ := m.progress(); line != "model weights.gguf: 10%" {
+		t.Errorf("line = %q, want the last notified one", line)
+	}
+
+	// A second acquisition — the agent run asking for what the prefetch is
+	// already fetching — must not let its own quick finish end the first.
+	inner := m.beginProgress()
+	inner()
+	if line, running := m.progress(); !running || line == "" {
+		t.Errorf("the inner finish ended the outer one: line=%q running=%v", line, running)
+	}
+
+	outer()
+	if line, running := m.progress(); running || line != "" {
+		t.Errorf("after the last finish: line=%q running=%v, want silence", line, running)
+	}
+}
+
+// The status the panel renders has to carry the live download, not only what is
+// on disk: the disk does not change until the very end.
+func TestLocalStatusForWebCarriesTheDownload(t *testing.T) {
+	t.Setenv(llmLocalDirEnvVar, t.TempDir())
+
+	if status := localStatusForWeb(defaultLocalModelURL, ""); status.Downloading {
+		t.Fatal("a status with nothing running reports a download")
+	}
+
+	finished := localAssetsManager.beginProgress()
+	t.Cleanup(finished)
+	localAssetsManager.notify("model %s: %s", "weights.gguf", "42%")
+
+	status := localStatusForWeb(defaultLocalModelURL, "")
+	if !status.Downloading {
+		t.Error("a running download is not reported")
+	}
+	if !strings.Contains(status.Progress, "42%") {
+		t.Errorf("progress = %q, want the notified line", status.Progress)
+	}
+	if status.ModelCached {
+		t.Error("a model that is still downloading is reported as cached")
+	}
+}

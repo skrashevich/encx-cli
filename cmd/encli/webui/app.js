@@ -1699,12 +1699,16 @@ function renderLocalStatus(local) {
   } else if (l.model_cached && l.libs_installed) {
     cls += ' is-ok';
     title = 'Готово к работе';
+  } else if (l.downloading) {
+    cls += ' is-warn';
+    title = 'Загрузка идёт — это единожды, окно можно закрыть';
   } else {
     cls += ' is-off';
     title = l.libs_installed
       ? 'Модель будет скачана при первом запросе'
       : 'Модель и библиотеки llama.cpp будут скачаны при первом запросе';
   }
+  if (l.downloading && l.progress) rows.push(l.progress);
   if (l.model_path) rows.push(`Модель: ${l.model_path}${l.model_cached ? '' : ' (нет на диске)'}`);
   if (l.lib_path) rows.push(`Библиотеки: ${l.lib_path}${l.libs_installed ? '' : ' (не установлены)'}`);
   if (l.cache_dir) rows.push(`Кэш: ${l.cache_dir}`);
@@ -1722,6 +1726,59 @@ function renderLocalStatus(local) {
     if (!box) continue;
     box.className = cls;
     box.innerHTML = html;
+  }
+  syncLocalProgressPoll(l.downloading);
+  announceLocalDownload(l);
+  // Кнопка «Далее» заблокирована на время загрузки, а решение об этом принимает
+  // renderOnboardingChrome по этому же снимку — значит его надо перерисовать,
+  // иначе кнопка разблокируется только при следующем действии оператора.
+  if (isOnboardingOpen()) renderOnboardingChrome();
+}
+
+/** Мастер закрывается сразу после выбора, и дальше загрузка идёт при закрытых
+ * панелях — поэтому о её начале и конце сообщается тостом. Внутри окна настроек
+ * прогресс и так виден, а вот тот, кто мастер закрыл, не видит ничего. */
+let localDownloadAnnounced = false;
+
+function announceLocalDownload(local) {
+  const downloading = !!local?.downloading;
+  if (downloading === localDownloadAnnounced) return;
+  localDownloadAnnounced = downloading;
+  if (downloading) {
+    toast('Локальная модель скачивается в фоне — это единожды. Агент ответит, когда загрузка закончится.');
+  } else if (local?.model_cached) {
+    toast('Локальная модель готова к работе.');
+  }
+}
+
+/** Опрос прогресса загрузки весов.
+ *
+ * Загрузку запускает обработчик, который возвращается за миллисекунды, а сама
+ * она идёт минуты: подписаться браузеру не на что, событий по ней не приходит.
+ * Поэтому пока сервер сообщает, что загрузка идёт, снимок настроек перечитывается
+ * — иначе выбравший локальную модель видит неменяющееся «будет скачано» и
+ * решает, что всё зависло. Опрос останавливается сам, как только загрузка
+ * закончилась. */
+const LOCAL_PROGRESS_POLL_MS = 2000;
+let localProgressPoll = null;
+
+function syncLocalProgressPoll(downloading) {
+  if (downloading && !localProgressPoll) {
+    localProgressPoll = setInterval(() => void refreshLocalProgress(), LOCAL_PROGRESS_POLL_MS);
+  } else if (!downloading && localProgressPoll) {
+    clearInterval(localProgressPoll);
+    localProgressPoll = null;
+  }
+}
+
+async function refreshLocalProgress() {
+  try {
+    // keepEdits: опрос идёт, пока оператор может печатать в тех же полях, и
+    // затирать его ввод обновлением статуса нельзя.
+    applyLLMSnapshot(await api('/llm/settings'), { keepEdits: true });
+  } catch {
+    // Одна неудачная выборка — не повод бросать опрос и не повод для тоста:
+    // загрузка продолжается, следующая попытка через две секунды.
   }
 }
 
@@ -2273,8 +2330,23 @@ function renderOnboardingChrome() {
 
   const back = $('btn-onboarding-back');
   if (back) back.disabled = busy || idx === 0;
+
+  // Пока веса качаются, вперёд не пускаем: пройти мастер до конца значило бы
+  // закрыть его и получить агента, который на первое же сообщение замолчит на
+  // несколько минут. Причина обязана быть видна — иначе серая кнопка без
+  // объяснения и есть то самое «выглядит зависшим». «Пропустить настройку»
+  // остаётся доступной: это осознанный выход, а не тупик.
+  const local = state.llm?.local || {};
+  const waiting = !!local.downloading;
   const next = $('btn-onboarding-next');
-  if (next) next.disabled = busy;
+  if (next) next.disabled = busy || waiting;
+  const wait = $('onboarding-wait');
+  if (wait) {
+    wait.hidden = !waiting;
+    wait.textContent = waiting
+      ? `Ждём загрузку локальной модели${local.progress ? `: ${local.progress}` : '…'}`
+      : '';
+  }
   const nextLabel = $('onboarding-next-label');
   if (nextLabel) nextLabel.textContent = idx === ONBOARDING_STEPS.length - 1 ? 'Готово' : 'Далее';
   const skipAll = $('btn-onboarding-skip-all');
@@ -2693,6 +2765,12 @@ async function finishOnboarding(skipped) {
     setOnboardingBusy(false);
   }
   closeOnboarding();
+  // Завершение мастера — второй момент, когда сервер может начать загрузку
+  // весов. Ответ на /onboarding/complete про неё ничего не знает, поэтому
+  // статус перечитывается отдельно: иначе опрос прогресса не запустится и
+  // оператор, только что выбравший локальную модель, останется без единого
+  // признака того, что что-то происходит.
+  await refreshLocalProgress();
   await bootstrapWorkspace();
 }
 

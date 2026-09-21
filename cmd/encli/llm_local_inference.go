@@ -674,7 +674,15 @@ func prefetchLocalInference(ctx context.Context, cfg *config, trigger localPrefe
 	localPrefetchCancel, localPrefetchFor = cancel, agentCfg.Local
 	localPrefetchMu.Unlock()
 
+	// Marked as running here rather than inside the goroutine: the handler that
+	// started this answers within milliseconds, and its answer is what tells the
+	// browser to start watching. Leaving the announcement to the goroutine loses
+	// that race, the panel reports "not downloaded yet", and the operator who
+	// just chose local inference watches a screen that never changes.
+	finishedProgress := localAssetsManager.beginProgress()
+
 	go func() {
+		defer finishedProgress()
 		defer func() {
 			// Deregister, but only while this is still the prefetch on record:
 			// a newer one may have replaced it, and clearing that would leave it

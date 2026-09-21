@@ -762,6 +762,12 @@ type localAssetManager struct {
 	listenMu  sync.Mutex
 	listeners map[int]func(string)
 	nextID    int
+
+	// progressMu guards the running/line pair, which is what a caller with no
+	// listener — the -web settings panel — reads to describe what is happening.
+	progressMu sync.Mutex
+	running    int
+	line       string
 }
 
 var localAssetsManager = &localAssetManager{}
@@ -789,10 +795,47 @@ func (m *localAssetManager) notify(format string, args ...any) {
 	line := fmt.Sprintf(format, args...)
 	debugf("local inference: %s", line)
 
+	m.progressMu.Lock()
+	m.line = line
+	m.progressMu.Unlock()
+
 	m.listenMu.Lock()
 	defer m.listenMu.Unlock()
 	for _, listener := range m.listeners {
 		listener(line)
+	}
+}
+
+// progress reports whether an acquisition is under way and what it last said.
+//
+// It exists because the browser has no listener to subscribe: the prefetch is
+// started by a handler that returns long before the download does, so the panel
+// has nothing to show unless the state is readable after the fact. Without it a
+// first run looks frozen — the operator picks local inference, the wizard closes,
+// and for several minutes nothing anywhere says a gigabyte is on its way.
+func (m *localAssetManager) progress() (line string, running bool) {
+	m.progressMu.Lock()
+	defer m.progressMu.Unlock()
+	return m.line, m.running > 0
+}
+
+// beginProgress marks one acquisition as under way and returns the function that
+// marks it finished. The counter, rather than a flag, is what keeps a short
+// cached-everything call from declaring a long download over.
+func (m *localAssetManager) beginProgress() func() {
+	m.progressMu.Lock()
+	m.running++
+	m.progressMu.Unlock()
+
+	return func() {
+		m.progressMu.Lock()
+		defer m.progressMu.Unlock()
+		m.running--
+		if m.running == 0 {
+			// Nothing is running, so the last line describes the past. Leaving it
+			// would have the panel report a download that has already finished.
+			m.line = ""
+		}
 	}
 }
 
@@ -801,6 +844,9 @@ func (m *localAssetManager) notify(format string, args ...any) {
 func (m *localAssetManager) prepare(ctx context.Context, cfg localLLMConfig, onProgress func(string)) (localAssets, error) {
 	unsubscribe := m.subscribe(onProgress)
 	defer unsubscribe()
+
+	finished := m.beginProgress()
+	defer finished()
 
 	m.prepareMu.Lock()
 	defer m.prepareMu.Unlock()
