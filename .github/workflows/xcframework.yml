@@ -19,6 +19,15 @@ jobs:
     runs-on: macos-15
     timeout-minutes: 20
     steps:
+      - name: Check enkapp credentials
+        env:
+          ENKAPP_PAT: ${{ secrets.ENKAPP_PAT }}
+        run: |
+          if [ -z "$ENKAPP_PAT" ]; then
+            echo "::error::Secret ENKAPP_PAT is not set. Create a fine-grained PAT with Contents: Read and write on skrashevich/enkapp and add it via: gh secret set ENKAPP_PAT --repo skrashevich/encx-cli"
+            exit 1
+          fi
+
       - name: Checkout encx-cli
         uses: actions/checkout@v7
 
