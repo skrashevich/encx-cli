@@ -38,6 +38,8 @@ type webHub struct {
 	approvals  map[string]*approvalGate
 	codexMu    sync.Mutex
 	codexLogin *codexLoginManager
+	polzaMu    sync.Mutex
+	polza      *polzaManager
 }
 
 func (h *webHub) publishSSE(chatID, eventType string, payload any) {
@@ -94,6 +96,13 @@ func (h *webHub) mount(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/v1/agent/config", h.httpAgentConfig)
 
 	mux.HandleFunc("/api/v1/llm/settings", h.httpLLMSettings)
+	mux.HandleFunc("POST /api/v1/llm/polza/login", h.httpPolzaLoginStart)
+	mux.HandleFunc("GET /api/v1/llm/polza/login/{id}", h.httpPolzaLoginStatus)
+	mux.HandleFunc("DELETE /api/v1/llm/polza/login/{id}", h.httpPolzaLoginCancel)
+	mux.HandleFunc("POST /api/v1/llm/polza/login/{id}/code", h.httpPolzaLoginCode)
+	mux.HandleFunc("GET /api/v1/llm/polza/models", h.httpPolzaModels)
+	mux.HandleFunc("POST /api/v1/llm/polza/connect", h.httpPolzaConnect)
+	mux.HandleFunc("POST /api/v1/llm/polza/check", h.httpPolzaCheck)
 	mux.HandleFunc("GET /api/v1/llm/codex/status", h.httpCodexStatus)
 	mux.HandleFunc("POST /api/v1/llm/codex/logout", h.httpCodexLogout)
 	mux.HandleFunc("POST /api/v1/llm/codex/login", h.httpCodexLoginStart)
@@ -153,6 +162,7 @@ func startWebServer(ctx context.Context, cfg *config, addr string, registry *Aut
 		sse:      newSSEHub(),
 		runTurn:  runWebChatTurn,
 	}
+	defer hub.closePolza()
 	srv := &http.Server{
 		Addr:    addr,
 		Handler: hub.newMux(),

@@ -1487,6 +1487,224 @@ function transportLabel(method) {
 /** Вкладка, открытая при загрузке: сохранённое значение важнее действующего,
  * чтобы форма показывала то, что она же и перезапишет. Пустое сохранённое
  * значение остаётся пустым — при сохранении оно не превратится в «apikey». */
+/* Polza keeps its inputs separate from custom providers, including unsaved keys. */
+const POLZA_BASE_URL = 'https://polza.ai/api/v1';
+const POLZA_PANELS = ['llm', 'onboarding-llm'];
+let polzaCatalog = null;
+let polzaCatalogLoading = false;
+let polzaFlow = null;
+let polzaBusy = false;
+
+function isPolzaURL(value) {
+  return String(value || '').replace(/\/+$/, '') === POLZA_BASE_URL;
+}
+
+function polzaInitialMethod(data) {
+  const method = initialAuthMethod(data) || String(data?.effective?.auth_method?.value || data?.agent?.auth_method || '');
+  const base = data?.effective?.base_url?.value || data?.stored?.base_url || data?.agent?.base_url;
+  if (method === 'apikey' && isPolzaURL(base)) return 'polza';
+  const stored = data?.stored || {};
+  const configured = stored.auth_method || stored.base_url || stored.model || stored.has_api_key ||
+    data?.effective?.api_key?.has_value || data?.codex?.signed_in ||
+    (data?.env_overrides || []).length || (method && !['codex', 'apikey'].includes(method));
+  return configured ? (method || 'apikey') : 'polza';
+}
+
+function polzaResult(pre, text, tone = '') {
+  setOnboardingResult(`${pre}-polza-result`, text, tone);
+}
+
+async function loadPolzaModels(retry = false) {
+  if (polzaCatalogLoading || (polzaCatalog && !retry)) return;
+  polzaCatalogLoading = true;
+  try {
+    const data = await api('/llm/polza/models');
+    if (!data.models?.length) throw new Error('Нет доступных моделей с поддержкой инструментов.');
+    polzaCatalog = data;
+    for (const pre of POLZA_PANELS) {
+      const select = $(`${pre}-polza-model`);
+      if (!select) continue;
+      const selected = select.value || (polzaInitialMethod(state.llm) === 'polza' ? state.llm?.stored?.model : '') || data.default_model;
+      select.innerHTML = data.models.map(m => `<option value="${escapeHtml(m.id)}">${escapeHtml(m.name || m.id)}</option>`).join('');
+      select.value = data.models.some(m => m.id === selected) ? selected : data.default_model;
+      if (!select.value) select.selectedIndex = 0;
+      select.disabled = false;
+      $(`${pre}-polza-models-retry`).hidden = true;
+    }
+  } catch (e) {
+    for (const pre of POLZA_PANELS) {
+      polzaResult(pre, `Модели: ${e.message || String(e)}`, 'err');
+      $(`${pre}-polza-models-retry`).hidden = false;
+    }
+  } finally { polzaCatalogLoading = false; }
+}
+
+function polzaModel(pre) {
+  const model = $(`${pre}-polza-model`)?.value || '';
+  if (!model) throw new Error('Дождитесь загрузки и выберите модель.');
+  return model;
+}
+
+function showPolzaBalance(pre, data) {
+  const available = String(data.available ?? '—');
+  const amount = String(data.amount ?? '—');
+  const exhausted = Number(available) <= 0;
+  polzaResult(pre, `Баланс: ${amount} ₽ · Доступно: ${available} ₽.${exhausted ? ' Пополните баланс или проверьте лимит ключа.' : ''}${data.warning ? ` ${data.warning}` : ''}`, exhausted ? '' : 'ok');
+}
+
+function setPolzaBusy(value) {
+  polzaBusy = value;
+  for (const pre of POLZA_PANELS) {
+    for (const action of ['login', 'connect', 'check']) $(`${pre}-polza-${action}`).disabled = value || !!polzaFlow;
+    $(`${pre}-polza-cancel`).hidden = !polzaFlow || polzaFlow.pre !== pre;
+  }
+}
+
+async function refreshPolzaSettings(flow = null) {
+  const data = await api('/llm/settings');
+  if (flow && polzaFlow !== flow) return false;
+  applyLLMSnapshot(data);
+  fillOnboardingLLM(data);
+  for (const pre of POLZA_PANELS) {
+    $(`${pre}-polza-key`).value = '';
+    const select = $(`${pre}-polza-model`);
+    if (polzaCatalog?.models.some(m => m.id === data?.stored?.model)) select.value = data.stored.model;
+  }
+  void loadAgentConfig();
+  return true;
+}
+
+async function connectPolza(pre) {
+  if (polzaBusy || polzaFlow) { polzaResult(pre, 'Сначала завершите или отмените текущее подключение.'); return false; }
+  setPolzaBusy(true);
+  try {
+    const data = await api('/llm/polza/connect', { method: 'POST', body: {
+      api_key: ($(`${pre}-polza-key`)?.value || '').trim(), model: polzaModel(pre),
+    } });
+    await refreshPolzaSettings();
+    showPolzaBalance(pre, data);
+    return true;
+  } catch (e) { polzaResult(pre, e.message || String(e), 'err'); return false; }
+  finally { setPolzaBusy(false); }
+}
+
+async function checkPolza(pre) {
+  if (polzaBusy || polzaFlow) return;
+  setPolzaBusy(true);
+  polzaResult(pre, 'Проверяем сохранённое подключение и баланс…');
+  try { showPolzaBalance(pre, await api('/llm/polza/check', { method: 'POST', body: {} })); }
+  catch (e) { polzaResult(pre, e.message || String(e), 'err'); }
+  finally { setPolzaBusy(false); }
+}
+
+async function cancelPolzaLogin() {
+  const flow = polzaFlow;
+  if (!flow) return;
+  polzaFlow = null;
+  clearTimeout(flow.timer);
+  flow.popup?.close();
+  $(`${flow.pre}-polza-authorize`).hidden = true;
+  $(`${flow.pre}-polza-callback-details`).hidden = true;
+  setPolzaBusy(false);
+  polzaResult(flow.pre, 'Подключение отменено.');
+  if (flow.id) {
+    try { await api(`/llm/polza/login/${encodeURIComponent(flow.id)}`, { method: 'DELETE' }); }
+    catch (e) { polzaResult(flow.pre, `Не удалось подтвердить отмену на сервере: ${e.message || e}`, 'err'); }
+  }
+}
+
+async function pollPolzaLogin(flow) {
+  if (polzaFlow !== flow) return;
+  try {
+    if (Date.now() > flow.deadline) throw new Error('Время ожидания истекло. Подключите аккаунт ещё раз.');
+    const data = await api(`/llm/polza/login/${encodeURIComponent(flow.id)}`);
+    if (polzaFlow !== flow) return;
+    if (data.status === 'success') {
+      if (!(await refreshPolzaSettings(flow))) return;
+      polzaFlow = null;
+      flow.popup?.close();
+      $(`${flow.pre}-polza-authorize`).hidden = true;
+      $(`${flow.pre}-polza-callback-details`).hidden = true;
+      setPolzaBusy(false);
+      await checkPolza(flow.pre);
+      return;
+    }
+    if (data.status !== 'pending') throw new Error(data.error || 'Не удалось подключить аккаунт.');
+    flow.timer = setTimeout(() => void pollPolzaLogin(flow), 1500);
+  } catch (e) {
+    if (polzaFlow !== flow) return;
+    await cancelPolzaLogin();
+    polzaResult(flow.pre, e.message || String(e), 'err');
+  }
+}
+
+async function startPolzaLogin(pre) {
+  if (polzaFlow || polzaBusy) return;
+  let model;
+  try { model = polzaModel(pre); } catch (e) { polzaResult(pre, e.message, 'err'); return; }
+  // Open before awaiting the server so browser popup rules retain user activation.
+  const popup = window.open('about:blank', '_blank');
+  if (popup) popup.opener = null;
+  const flow = { pre, popup, id: '', deadline: Date.now() + 10 * 60 * 1000 };
+  polzaFlow = flow;
+  setPolzaBusy(false);
+  polzaResult(pre, 'Ожидаем вход в Polza.ai…');
+  try {
+    const data = await api('/llm/polza/login', { method: 'POST', body: { model } });
+    if (polzaFlow !== flow) {
+      await api(`/llm/polza/login/${encodeURIComponent(data.id)}`, { method: 'DELETE' });
+      return;
+    }
+    flow.id = data.id;
+    const url = new URL(data.authorize_url);
+    if (url.protocol !== 'https:') throw new Error('Сервер вернул небезопасный адрес входа.');
+    const link = $(`${pre}-polza-authorize`);
+    link.href = url.href;
+    link.hidden = false;
+    $(`${pre}-polza-callback-details`).hidden = false;
+    if (popup && !popup.closed) popup.location.href = url.href;
+    void pollPolzaLogin(flow);
+  } catch (e) {
+    if (polzaFlow !== flow) return;
+    await cancelPolzaLogin();
+    polzaResult(pre, e.message || String(e), 'err');
+  }
+}
+
+async function submitPolzaCode(pre) {
+  const flow = polzaFlow;
+  if (!flow?.id || flow.pre !== pre) return;
+  try {
+    await api(`/llm/polza/login/${encodeURIComponent(flow.id)}/code`, { method: 'POST', body: { code: ($(`${pre}-polza-code`).value || '').trim() } });
+    $(`${pre}-polza-code`).value = '';
+    // The existing poller is the single completion path.
+  } catch (e) { if (polzaFlow === flow) polzaResult(pre, e.message || String(e), 'err'); }
+}
+
+function bindPolza() {
+  for (const pre of POLZA_PANELS) {
+    const selectTab = pre === 'llm' ? selectLLMTab : selectOnboardingLLMTab;
+    $(`${pre}-tab-polza`).addEventListener('click', () => selectTab('polza'));
+    const methods = ['polza', 'codex', 'apikey'];
+    for (const [index, method] of methods.entries()) {
+      $(`${pre}-tab-${method}`).addEventListener('keydown', e => {
+        if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(e.key)) return;
+        e.preventDefault();
+        const next = e.key === 'Home' ? 0 : e.key === 'End' ? 2 : (index + (e.key === 'ArrowRight' ? 1 : 2)) % 3;
+        selectTab(methods[next]);
+        $(`${pre}-tab-${methods[next]}`).focus();
+      });
+    }
+    $(`${pre}-polza-login`).addEventListener('click', () => void startPolzaLogin(pre));
+    $(`${pre}-polza-cancel`).addEventListener('click', () => void cancelPolzaLogin());
+    $(`${pre}-polza-connect`).addEventListener('click', () => void connectPolza(pre));
+    $(`${pre}-polza-check`).addEventListener('click', () => void checkPolza(pre));
+    $(`${pre}-polza-submit`).addEventListener('click', () => void submitPolzaCode(pre));
+    $(`${pre}-polza-models-retry`).addEventListener('click', () => void loadPolzaModels(true));
+    $(`${pre}-polza-code`).addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); void submitPolzaCode(pre); } });
+  }
+}
+
 function initialAuthMethod(data) {
   const stored = String(data?.stored?.auth_method || '').trim();
   if (stored) return stored;
@@ -1582,7 +1800,7 @@ function applyLLMSnapshot(data, opts = {}) {
   state.llm = data || null;
   if (!opts.keepEdits) {
     state.llmEdited = { base_url: false, model: false };
-    state.llmAuth = initialAuthMethod(data);
+    state.llmAuth = polzaInitialMethod(data);
     const key = $('llm-api-key');
     if (key) key.value = '';
   }
@@ -1597,9 +1815,10 @@ function setTabState(btn, active, reachable) {
 }
 
 function selectLLMTab(method) {
+  if (polzaFlow && method !== 'polza') void cancelPolzaLogin();
   state.llmAuth = method;
   renderLLMSettings();
-  const pane = $(method === 'codex' ? 'llm-pane-codex' : 'llm-pane-apikey');
+  const pane = $(`llm-pane-${method}`);
   pane?.focus?.();
 }
 
@@ -1680,14 +1899,17 @@ function renderLLMSettings() {
   const stored = data?.stored || {};
   const method = state.llmAuth;
   const isCodex = method === 'codex';
-  const isOther = method !== '' && method !== 'codex' && method !== 'apikey';
+  const isOther = method !== '' && method !== 'codex' && method !== 'apikey' && method !== 'polza';
 
   setTabState($('llm-tab-codex'), isCodex, isOther);
-  setTabState($('llm-tab-apikey'), !isCodex && !isOther, isOther);
+  setTabState($('llm-tab-apikey'), method === 'apikey' || !method, isOther);
+  setTabState($('llm-tab-polza'), method === 'polza', isOther);
+  if ($('llm-pane-polza')) $('llm-pane-polza').hidden = method !== 'polza';
+  if (method === 'polza') void loadPolzaModels();
   const codexPane = $('llm-pane-codex');
   const apikeyPane = $('llm-pane-apikey');
   if (codexPane) codexPane.hidden = !isCodex;
-  if (apikeyPane) apikeyPane.hidden = isCodex || isOther;
+  if (apikeyPane) apikeyPane.hidden = isCodex || isOther || method === 'polza';
 
   const note = $('llm-transport-note');
   if (note) {
@@ -1791,6 +2013,7 @@ async function putLLMSettings(extra, successMsg) {
 }
 
 async function saveLLMSettings() {
+  if (state.llmAuth === 'polza') { await connectPolza('llm'); return; }
   await putLLMSettings(undefined, 'Настройки LLM сохранены.');
 }
 
@@ -1801,6 +2024,11 @@ async function clearLLMAPIKey() {
 
 async function resetLLMSettings() {
   if (!window.confirm('Сбросить все сохранённые настройки LLM?')) return;
+  await cancelPolzaLogin();
+  for (const pre of POLZA_PANELS) {
+    $(`${pre}-polza-key`).value = '';
+    polzaResult(pre, '');
+  }
   setLLMBusy(true);
   try {
     const data = await api('/llm/settings', { method: 'DELETE' });
@@ -2052,14 +2280,7 @@ function bindLLMSettings() {
   });
   $('llm-tab-codex')?.addEventListener('click', () => selectLLMTab('codex'));
   $('llm-tab-apikey')?.addEventListener('click', () => selectLLMTab('apikey'));
-  for (const id of ['llm-tab-codex', 'llm-tab-apikey']) {
-    $(id)?.addEventListener('keydown', (e) => {
-      if (e.key !== 'ArrowLeft' && e.key !== 'ArrowRight') return;
-      e.preventDefault();
-      selectLLMTab(state.llmAuth === 'codex' ? 'apikey' : 'codex');
-      $(state.llmAuth === 'codex' ? 'llm-tab-codex' : 'llm-tab-apikey')?.focus();
-    });
-  }
+  bindPolza();
   $('llm-base-url')?.addEventListener('input', () => {
     state.llmEdited.base_url = true;
   });
@@ -2226,23 +2447,26 @@ async function goToOnboardingStep(step) {
 /* —— Шаг «Модель» —— */
 
 function onboardingLLMTab() {
-  return state.onboarding.llmAuth === 'apikey' ? 'apikey' : 'codex';
+  return state.onboarding.llmAuth;
 }
 
 function renderOnboardingLLMTabs() {
-  const isCodex = onboardingLLMTab() === 'codex';
-  setTabState($('onboarding-llm-tab-codex'), isCodex, false);
-  setTabState($('onboarding-llm-tab-apikey'), !isCodex, false);
-  const codexPane = $('onboarding-llm-pane-codex');
-  if (codexPane) codexPane.hidden = !isCodex;
-  const apikeyPane = $('onboarding-llm-pane-apikey');
-  if (apikeyPane) apikeyPane.hidden = isCodex;
+  const method = onboardingLLMTab();
+  for (const kind of ['polza', 'codex', 'apikey']) {
+    setTabState($(`onboarding-llm-tab-${kind}`), method === kind, false);
+    const pane = $(`onboarding-llm-pane-${kind}`);
+    if (pane) pane.hidden = method !== kind;
+  }
+  if (method === 'polza') void loadPolzaModels();
+  const test = $('btn-onboarding-llm-test');
+  if (test) test.textContent = method === 'polza' ? 'Проверить баланс' : 'Проверить настройки';
 }
 
 function selectOnboardingLLMTab(method) {
+  if (polzaFlow && method !== 'polza') void cancelPolzaLogin();
   state.onboarding.llmAuth = method;
   renderOnboardingLLMTabs();
-  $(method === 'codex' ? 'onboarding-llm-pane-codex' : 'onboarding-llm-pane-apikey')?.focus?.();
+  $(`onboarding-llm-pane-${method}`)?.focus?.();
 }
 
 function onboardingKeyHint(keyStatus) {
@@ -2270,8 +2494,7 @@ function fillOnboardingLLM(data, opts = {}) {
   const defaults = data?.defaults || {};
   const keyStatus = effective.api_key || {};
   if (!opts.keepEdits) {
-    const method = initialAuthMethod(data);
-    state.onboarding.llmAuth = method === 'apikey' || (!method && keyStatus.has_value) ? 'apikey' : 'codex';
+    state.onboarding.llmAuth = polzaInitialMethod(data);
   }
 
   const base = $('onboarding-llm-base-url');
@@ -2315,6 +2538,7 @@ async function loadOnboardingLLM() {
  * OpenAI-провайдера очищаются: подписка их не использует, а сохранённая модель
  * провайдера подменила бы модель подписки. */
 async function saveOnboardingLLM() {
+  if (onboardingLLMTab() === 'polza') return connectPolza('onboarding-llm');
   const isCodex = onboardingLLMTab() === 'codex';
   try {
     const data = await api('/llm/settings', {
@@ -2341,7 +2565,8 @@ async function saveOnboardingLLM() {
  * сохранённого и окружения, поэтому введённое, но не сохранённое сюда не
  * попадёт — и поля не затираются, чтобы ввод не пропал. */
 async function testOnboardingLLM() {
-  setOnboardingResult('onboarding-llm-result', 'Проверяем подключение…', '');
+  if (onboardingLLMTab() === 'polza') { await checkPolza('onboarding-llm'); return; }
+  setOnboardingResult('onboarding-llm-result', 'Проверяем сохранённые настройки…', '');
   try {
     const data = await api('/llm/settings');
     applyLLMSnapshot(data, { keepEdits: true });
@@ -2355,7 +2580,7 @@ async function testOnboardingLLM() {
     const model = String(agent.model || '').trim() || '—';
     setOnboardingResult(
       'onboarding-llm-result',
-      `${transportLabel(agent.auth_method)} · модель ${model} · ${where}`,
+      `Настройки определены: ${transportLabel(agent.auth_method)} · модель ${model} · ${where}. Запрос к модели не выполнялся.`,
       'ok',
     );
   } catch (e) {

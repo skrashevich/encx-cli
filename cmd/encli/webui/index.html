@@ -128,12 +128,46 @@
       <div class="modal-body">
         <div class="llm-transport">
           <div class="llm-tabs" role="tablist" aria-label="Способ подключения">
+            <button type="button" class="llm-tab" id="llm-tab-polza" role="tab" aria-selected="false" aria-controls="llm-pane-polza" tabindex="-1">Polza.ai</button>
             <button type="button" class="llm-tab" id="llm-tab-codex" role="tab" aria-selected="false" aria-controls="llm-pane-codex" tabindex="-1">Подписка ChatGPT</button>
             <button type="button" class="llm-tab is-active" id="llm-tab-apikey" role="tab" aria-selected="true" aria-controls="llm-pane-apikey">OpenAI-совместимый провайдер</button>
           </div>
           <div class="llm-override-slot" id="llm-override-auth_method"></div>
           <p class="llm-note" id="llm-transport-note" hidden></p>
         </div>
+
+        <section class="llm-pane polza-pane" id="llm-pane-polza" role="tabpanel" aria-labelledby="llm-tab-polza" tabindex="0" hidden>
+          <p class="polza-intro">Нет подписки ChatGPT или API-ключа? Подключите модель через Polza.ai. Использование платное, оплата списывается с баланса в рублях.</p>
+          <p class="llm-hint">Автор приложения не аффилиирован с Polza.ai. Все платежи поступают напрямую в Polza.ai, минуя приложение.</p>
+          <p class="llm-hint">При регистрации по реферальной ссылке автор получает небольшое вознаграждение. Можно зарегистрироваться и без неё — это не влияет на стоимость, доступ к моделям или работу приложения.</p>
+          <p class="llm-hint"><a href="https://polza.ai/?referral=6GWIX1KxUI" target="_blank" rel="noopener noreferrer">Зарегистрироваться по реферальной ссылке</a> · <a href="https://polza.ai/" target="_blank" rel="noopener noreferrer">Зарегистрироваться без неё</a></p>
+          <p class="llm-hint">После регистрации вернитесь сюда и нажмите «Подключить аккаунт».</p>
+          <div class="llm-field">
+            <label class="llm-field-label" for="llm-polza-model">Модель с поддержкой инструментов</label>
+            <select id="llm-polza-model" class="llm-input" disabled><option value="">Загружаем модели…</option></select>
+            <button type="button" class="btn btn-ghost btn-sm" id="llm-polza-models-retry" hidden>Повторить загрузку моделей</button>
+          </div>
+          <div class="llm-actions">
+            <button type="button" class="btn btn-primary" id="llm-polza-login">Подключить аккаунт</button>
+            <button type="button" class="btn btn-ghost" id="llm-polza-cancel" hidden>Отменить вход</button>
+            <button type="button" class="btn btn-secondary" id="llm-polza-check">Проверить баланс</button>
+            <a class="btn btn-ghost" href="https://polza.ai/dashboard" target="_blank" rel="noopener noreferrer">Пополнить баланс</a>
+          </div>
+          <p id="llm-polza-result" class="onboarding-result" role="status" aria-live="polite"></p>
+          <a id="llm-polza-authorize" target="_blank" rel="noopener noreferrer" hidden>Открыть страницу подключения</a>
+          <details class="llm-details" id="llm-polza-callback-details" hidden>
+            <summary>Завершить вход вручную</summary>
+            <p class="llm-hint">Если автоматический возврат не сработал, вставьте полный адрес страницы после авторизации.</p>
+            <label class="llm-field-label" for="llm-polza-code">Полный адрес возврата</label>
+            <div class="llm-field-row"><input id="llm-polza-code" type="text" class="llm-input" autocomplete="off" spellcheck="false"><button type="button" class="btn btn-secondary" id="llm-polza-submit">Продолжить</button></div>
+          </details>
+          <details class="llm-details">
+            <summary>Подключить API-ключ вручную</summary>
+            <p class="llm-hint">Создайте ключ в кабинете Polza.ai и вставьте его сюда. Пустое поле использует только уже сохранённый ключ Polza.ai.</p>
+            <label class="llm-field-label" for="llm-polza-key">API-ключ Polza.ai</label>
+            <div class="llm-field-row"><input type="password" id="llm-polza-key" class="llm-input" autocomplete="off" spellcheck="false"><button type="button" class="btn btn-secondary" id="llm-polza-connect">Подключить ключ</button></div>
+          </details>
+        </section>
 
         <section class="llm-pane" id="llm-pane-codex" role="tabpanel" aria-labelledby="llm-tab-codex" tabindex="0" hidden>
           <div class="llm-codex-status" id="llm-codex-status" aria-live="polite"></div>
@@ -233,12 +267,46 @@
         <section class="onboarding-pane" id="onboarding-pane-llm" tabindex="-1" hidden>
           <div class="llm-transport">
             <div class="llm-tabs" role="tablist" aria-label="Способ подключения">
-              <button type="button" class="llm-tab is-active" id="onboarding-llm-tab-codex" role="tab" aria-selected="true" aria-controls="onboarding-llm-pane-codex">Подписка ChatGPT</button>
+              <button type="button" class="llm-tab" id="onboarding-llm-tab-polza" role="tab" aria-selected="false" aria-controls="onboarding-llm-pane-polza" tabindex="-1">Polza.ai</button>
+            <button type="button" class="llm-tab is-active" id="onboarding-llm-tab-codex" role="tab" aria-selected="true" aria-controls="onboarding-llm-pane-codex">Подписка ChatGPT</button>
               <button type="button" class="llm-tab" id="onboarding-llm-tab-apikey" role="tab" aria-selected="false" aria-controls="onboarding-llm-pane-apikey" tabindex="-1">OpenAI-совместимый провайдер</button>
             </div>
           </div>
 
-          <section class="llm-pane" id="onboarding-llm-pane-codex" role="tabpanel" aria-labelledby="onboarding-llm-tab-codex" tabindex="0">
+          <section class="llm-pane polza-pane" id="onboarding-llm-pane-polza" role="tabpanel" aria-labelledby="onboarding-llm-tab-polza" tabindex="0" hidden>
+          <p class="polza-intro">Нет подписки ChatGPT или API-ключа? Подключите модель через Polza.ai. Использование платное, оплата списывается с баланса в рублях.</p>
+          <p class="llm-hint">Автор приложения не аффилиирован с Polza.ai. Все платежи поступают напрямую в Polza.ai, минуя приложение.</p>
+          <p class="llm-hint">При регистрации по реферальной ссылке автор получает небольшое вознаграждение. Можно зарегистрироваться и без неё — это не влияет на стоимость, доступ к моделям или работу приложения.</p>
+          <p class="llm-hint"><a href="https://polza.ai/?referral=6GWIX1KxUI" target="_blank" rel="noopener noreferrer">Зарегистрироваться по реферальной ссылке</a> · <a href="https://polza.ai/" target="_blank" rel="noopener noreferrer">Зарегистрироваться без неё</a></p>
+          <p class="llm-hint">После регистрации вернитесь сюда и нажмите «Подключить аккаунт».</p>
+          <div class="llm-field">
+            <label class="llm-field-label" for="onboarding-llm-polza-model">Модель с поддержкой инструментов</label>
+            <select id="onboarding-llm-polza-model" class="llm-input" disabled><option value="">Загружаем модели…</option></select>
+            <button type="button" class="btn btn-ghost btn-sm" id="onboarding-llm-polza-models-retry" hidden>Повторить загрузку моделей</button>
+          </div>
+          <div class="llm-actions">
+            <button type="button" class="btn btn-primary" id="onboarding-llm-polza-login">Подключить аккаунт</button>
+            <button type="button" class="btn btn-ghost" id="onboarding-llm-polza-cancel" hidden>Отменить вход</button>
+            <button type="button" class="btn btn-secondary" id="onboarding-llm-polza-check">Проверить баланс</button>
+            <a class="btn btn-ghost" href="https://polza.ai/dashboard" target="_blank" rel="noopener noreferrer">Пополнить баланс</a>
+          </div>
+          <p id="onboarding-llm-polza-result" class="onboarding-result" role="status" aria-live="polite"></p>
+          <a id="onboarding-llm-polza-authorize" target="_blank" rel="noopener noreferrer" hidden>Открыть страницу подключения</a>
+          <details class="llm-details" id="onboarding-llm-polza-callback-details" hidden>
+            <summary>Завершить вход вручную</summary>
+            <p class="llm-hint">Если автоматический возврат не сработал, вставьте полный адрес страницы после авторизации.</p>
+            <label class="llm-field-label" for="onboarding-llm-polza-code">Полный адрес возврата</label>
+            <div class="llm-field-row"><input id="onboarding-llm-polza-code" type="text" class="llm-input" autocomplete="off" spellcheck="false"><button type="button" class="btn btn-secondary" id="onboarding-llm-polza-submit">Продолжить</button></div>
+          </details>
+          <details class="llm-details">
+            <summary>Подключить API-ключ вручную</summary>
+            <p class="llm-hint">Создайте ключ в кабинете Polza.ai и вставьте его сюда. Пустое поле использует только уже сохранённый ключ Polza.ai.</p>
+            <label class="llm-field-label" for="onboarding-llm-polza-key">API-ключ Polza.ai</label>
+            <div class="llm-field-row"><input type="password" id="onboarding-llm-polza-key" class="llm-input" autocomplete="off" spellcheck="false"><button type="button" class="btn btn-secondary" id="onboarding-llm-polza-connect">Подключить ключ</button></div>
+          </details>
+        </section>
+
+        <section class="llm-pane" id="onboarding-llm-pane-codex" role="tabpanel" aria-labelledby="onboarding-llm-tab-codex" tabindex="0">
             <div class="llm-codex-status" id="onboarding-codex-status" aria-live="polite"></div>
             <div class="llm-actions">
               <button type="button" class="btn btn-primary" id="btn-onboarding-codex-login">Войти через ChatGPT</button>
@@ -276,7 +344,7 @@
           <div class="llm-override-slot" id="onboarding-llm-overrides"></div>
 
           <div class="llm-actions">
-            <button type="button" class="btn btn-secondary" id="btn-onboarding-llm-test">Проверить подключение</button>
+            <button type="button" class="btn btn-secondary" id="btn-onboarding-llm-test">Проверить настройки</button>
           </div>
           <div class="onboarding-result" id="onboarding-llm-result" aria-live="polite"></div>
         </section>

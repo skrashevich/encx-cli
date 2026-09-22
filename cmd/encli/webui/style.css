@@ -2287,3 +2287,9 @@ html[data-theme="light"] .onboarding-step.is-active .onboarding-step-num {
     transition-duration: 0.01ms !important;
   }
 }
+
+.polza-intro { margin: 0 0 0.75rem; line-height: 1.6; }
+.polza-pane .llm-hint a, .polza-pane > a { color: var(--amber); text-underline-offset: 3px; }
+.polza-pane .llm-actions { flex-wrap: wrap; }
+.polza-pane select.llm-input { width: 100%; }
+.polza-pane .onboarding-result { margin-top: 0.75rem; }
