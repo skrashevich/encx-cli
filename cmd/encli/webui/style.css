@@ -47,30 +47,35 @@
   --ease-out: cubic-bezier(0.22, 1, 0.36, 1);
 }
 
+/* Светлая тема: нейтральные поверхности и один зелёный акцент. */
 html[data-theme="light"] {
-  --bg-void: #e8ebe6;
-  --bg-deep: #f2f4f1;
-  --bg-panel: #fafbf9;
+  color-scheme: light;
+  --bg-void: #f6f8fa;
+  --bg-deep: #f1f4f6;
+  --bg-panel: #ffffff;
   --bg-elevated: #ffffff;
-  --bg-hover: #eef2ef;
+  --bg-hover: #eaf0f2;
 
-  --border: rgba(26, 48, 40, 0.12);
-  --border-strong: rgba(26, 48, 40, 0.22);
+  --border: #dce3e7;
+  --border-strong: #b8c6cc;
 
-  --text: #14201c;
-  --text-muted: #4a6358;
-  --text-faint: #8aa399;
+  --text: #24343b;
+  --text-muted: #52656e;
+  --text-faint: #637680;
 
-  --amber: #b8860b;
-  --amber-deep: #8f6508;
-  --amber-glow: rgba(184, 134, 11, 0.15);
-  --teal: #2d7a66;
-  --teal-soft: rgba(45, 122, 102, 0.12);
+  /* Существующие имена акцента общие для обеих тем. */
+  --amber: #176b58;
+  --amber-deep: #105442;
+  --amber-glow: rgba(23, 107, 88, 0.10);
+  --teal: #176b58;
+  --teal-soft: #e5f1ec;
 
-  --shadow-soft: 0 12px 40px rgba(20, 32, 28, 0.08);
-  --shadow-inset: inset 0 1px 0 rgba(255, 255, 255, 0.8);
-  --modal-scrim: rgba(20, 32, 28, 0.52);
+  --success: #216e4e;
+  --danger: #b53636;
   --danger-text: #a8291c;
+  --shadow-soft: 0 16px 48px rgba(36, 52, 59, 0.12);
+  --shadow-inset: none;
+  --modal-scrim: rgba(36, 52, 59, 0.32);
 }
 
 html,
@@ -1613,8 +1618,7 @@ body.is-modal-open {
   border-color: color-mix(in srgb, var(--amber) 45%, var(--border));
 }
 
-/* На светлой теме янтарь по янтарному фону не добирает контраста для текста
-   вкладки — затемняем именно надпись, фон и рамка остаются прежними. */
+/* Контраст активной вкладки на светлой подложке. */
 html[data-theme="light"] .llm-tab.is-active {
   color: color-mix(in srgb, var(--amber-deep) 80%, #000);
 }
@@ -1988,8 +1992,7 @@ html[data-theme="light"] .llm-tab.is-active {
   box-shadow: 0 0 0 3px var(--amber-glow);
 }
 
-/* Тот же случай, что и у .llm-tab.is-active: на светлой теме янтарная
-   надпись по янтарной подложке не добирает контраста. */
+/* Контраст активного шага на светлой подложке. */
 html[data-theme="light"] .onboarding-step.is-active,
 html[data-theme="light"] .onboarding-step.is-active .onboarding-step-num {
   color: color-mix(in srgb, var(--amber-deep) 80%, var(--text));
@@ -2225,3 +2228,119 @@ html[data-theme="light"] .onboarding-step.is-active .onboarding-step-num {
 .polza-pane .llm-actions { flex-wrap: wrap; }
 .polza-pane select.llm-input { width: 100%; }
 .polza-pane .onboarding-result { margin-top: 0.75rem; }
+
+/* Светлая тема не наследует фактуру и свечение ночного терминала. */
+html[data-theme="light"] body::before {
+  background: var(--bg-void);
+}
+
+html[data-theme="light"] .grain,
+html[data-theme="light"] .messages-wrap::before {
+  display: none;
+}
+
+html[data-theme="light"] .sidebar {
+  background: var(--bg-deep);
+}
+
+html[data-theme="light"] .brand-mark,
+html[data-theme="light"] .dot-running {
+  box-shadow: none;
+}
+
+html[data-theme="light"] .chat-item.active {
+  background: var(--teal-soft);
+  border-color: transparent;
+  border-left-color: var(--teal);
+}
+
+html[data-theme="light"] .search-input,
+html[data-theme="light"] .field-inline select,
+html[data-theme="light"] .login-form input {
+  background-color: var(--bg-panel);
+}
+
+html[data-theme="light"] .field-inline select {
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' fill='%2352656e' viewBox='0 0 16 16'%3E%3Cpath d='M8 11L3 6h10l-5 5z'/%3E%3C/svg%3E");
+}
+
+html[data-theme="light"] .top-bar,
+html[data-theme="light"] .composer {
+  background: var(--bg-panel);
+  backdrop-filter: none;
+}
+
+html[data-theme="light"] .auth-panel {
+  background: var(--bg-deep);
+  border-color: transparent;
+}
+
+html[data-theme="light"] .field-inline label,
+html[data-theme="light"] .msg-role,
+html[data-theme="light"] .running-pill,
+html[data-theme="light"] .agent-status-phase,
+html[data-theme="light"] .approval-kicker {
+  text-transform: none;
+  letter-spacing: normal;
+}
+
+html[data-theme="light"] .field-inline label,
+html[data-theme="light"] .msg-role {
+  font-size: 0.75rem;
+}
+
+html[data-theme="light"] .msg {
+  background: var(--bg-panel);
+  backdrop-filter: none;
+}
+
+html[data-theme="light"] .msg.user {
+  background: var(--teal-soft);
+  border-color: #cddfd6;
+}
+
+html[data-theme="light"] .msg.streaming {
+  box-shadow: 0 0 0 2px var(--amber-glow);
+}
+
+html[data-theme="light"] .btn-primary,
+html[data-theme="light"] .btn-accent {
+  background: var(--teal);
+  border-color: var(--teal);
+  color: #ffffff;
+  box-shadow: none;
+}
+
+html[data-theme="light"] .btn-primary:hover:not(:disabled),
+html[data-theme="light"] .btn-accent:hover:not(:disabled) {
+  background: var(--amber-deep);
+  border-color: var(--amber-deep);
+  filter: none;
+  box-shadow: none;
+}
+
+html[data-theme="light"] .tool-chip.done {
+  opacity: 1;
+  background: var(--bg-deep);
+}
+
+html[data-theme="light"] .agent-status-bar:not([hidden]),
+html[data-theme="light"] .approval-bar:not([hidden]),
+html[data-theme="light"] .tool-chip-tooltip {
+  box-shadow: 0 4px 16px rgba(36, 52, 59, 0.08);
+}
+
+html[data-theme="light"] .btn:focus-visible {
+  outline: 2px solid var(--teal);
+  outline-offset: 3px;
+}
+
+@media (max-width: 760px) {
+  html[data-theme="light"] .sidebar {
+    box-shadow: none;
+  }
+
+  html[data-theme="light"][data-sidebar="open"] .sidebar {
+    box-shadow: var(--shadow-soft);
+  }
+}
