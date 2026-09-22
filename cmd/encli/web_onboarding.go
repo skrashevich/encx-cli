@@ -3,7 +3,6 @@ package main
 import (
 	"bytes"
 	"cmp"
-	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -68,19 +67,7 @@ func (h *webHub) httpOnboardingComplete(w http.ResponseWriter, r *http.Request) 
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
 	}
-
-	// Finishing the wizard is the other moment the choice of transport settles,
-	// and -web waits for exactly that before fetching the weights: the start it
-	// skipped on a bare machine happens here instead. An operator who chose a
-	// cloud provider gets the opposite — whatever was already coming down for
-	// local inference is abandoned rather than paid for in full.
-	payload := h.onboardingStatusPayload()
-	if agentCfg, err := resolveAgentConfig(h.cfg); err == nil && agentCfg.AuthMethod == authMethodLocal {
-		startLocalPrefetch(context.WithoutCancel(r.Context()), h.cfg, prefetchWhenInvited, nil)
-	} else if err == nil {
-		stopLocalPrefetch()
-	}
-	writeJSON(w, http.StatusOK, payload)
+	writeJSON(w, http.StatusOK, h.onboardingStatusPayload())
 }
 
 func (h *webHub) httpOnboardingReset(w http.ResponseWriter, r *http.Request) {
@@ -120,29 +107,11 @@ func (h *webHub) onboardingStatusPayload() onboardingStatusPayload {
 
 // onboardingLLMStep is done when resolveAgentConfig would hand the agent a
 // working transport, which is the same question the first wizard step asks.
-//
-// Local inference is the fallback every machine resolves to, so treating it as
-// "configured" would close this step on a bare machine and never mention the
-// choice. It counts only once the weights are actually on disk: until then the
-// agent cannot answer anything offline, and the operator is owed both the size
-// of the pending download and the chance to pick a cloud provider instead.
 func (h *webHub) onboardingLLMStep() onboardingStep {
 	step := onboardingStep{ID: "llm", Title: "LLM transport"}
 	agentCfg, err := resolveAgentConfig(h.cfg)
 	if err != nil {
 		step.Detail = err.Error()
-		return step
-	}
-	if agentCfg.AuthMethod == authMethodLocal {
-		path, cached := localModelCached(agentCfg.Local.modelRef)
-		if !cached {
-			step.Detail = fmt.Sprintf(
-				"no cloud provider configured; the agent would run locally and download %s on first use",
-				localModelDisplayName(agentCfg.Local.modelRef))
-			return step
-		}
-		step.Done = true
-		step.Detail = fmt.Sprintf("%s, model %s", authMethodLocal, path)
 		return step
 	}
 	step.Done = true

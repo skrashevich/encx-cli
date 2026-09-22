@@ -1,7 +1,6 @@
 package main
 
 import (
-	"context"
 	"errors"
 	"io"
 	"os"
@@ -26,17 +25,12 @@ func isolateLLMEnv(t *testing.T) string {
 		"LLM_MODEL", "OPENROUTER_MODEL", "LLM_BASE_URL", "OPENROUTER_BASE_URL",
 		"GIGACHAT_CREDENTIALS", "GIGACHAT_SCOPE", "GIGACHAT_AUTH_URL",
 		"GIGACHAT_BASE_URL", "GIGACHAT_MODEL", "GIGACHAT_CA_BUNDLE", "GIGACHAT_INSECURE",
-		"LLM_LOCAL_MODEL", "LLM_LOCAL_LIB", "YZMA_LIB", "LLM_LOCAL_CONTEXT",
 	} {
 		t.Setenv(key, "")
 	}
 	dir := t.TempDir()
 	path := filepath.Join(dir, "codex-auth.json")
 	t.Setenv(codexAuthFileEnvVar, path)
-	// Local inference is the fallback transport, so its cache decides what these
-	// tests see. Pointed at a temporary directory, a developer who has already
-	// downloaded the weights gets the same result as a clean machine.
-	t.Setenv(llmLocalDirEnvVar, filepath.Join(dir, "local-llm"))
 	// The settings file is resolved under sessionDir() by default, so without
 	// this every resolveAgentConfig test would read the developer's real one.
 	t.Setenv(llmSettingsFileEnvVar, filepath.Join(dir, "llm-settings.json"))
@@ -44,15 +38,6 @@ func isolateLLMEnv(t *testing.T) string {
 	resetGigaChatTokenStores()
 	t.Cleanup(resetCodexTokenStores)
 	t.Cleanup(resetGigaChatTokenStores)
-
-	// The -web handlers start the model download themselves now. Left alone,
-	// every test that touches them would reach for 400 MB over the network.
-	previous := startLocalPrefetch
-	startLocalPrefetch = func(context.Context, *config, localPrefetchTrigger, func(string)) {}
-	t.Cleanup(func() {
-		startLocalPrefetch = previous
-		stopLocalPrefetch()
-	})
 	return path
 }
 
@@ -986,82 +971,21 @@ func TestResolveAgentConfigAPIKeyOptOutIgnoresTheCredential(t *testing.T) {
 	}
 }
 
-// A machine with no cloud provider configured gets the agent anyway, running on
-// this machine. That is the whole point of the local transport: encli is useful
-// before anyone has an API key.
-func TestResolveAgentConfigFallsBackToLocalInference(t *testing.T) {
+func TestResolveAgentConfigMissingKeyPointsAtCodexLogin(t *testing.T) {
 	isolateLLMEnv(t)
-
-	got, err := resolveAgentConfig(&config{})
-	if err != nil {
-		t.Fatalf("resolveAgentConfig: %v", err)
+	_, err := resolveAgentConfig(&config{})
+	if err == nil {
+		t.Fatal("resolveAgentConfig succeeded without any credential")
 	}
-	if got.AuthMethod != authMethodLocal {
-		t.Fatalf("auth method = %q, want %q", got.AuthMethod, authMethodLocal)
-	}
-	if got.Local.modelRef != defaultLocalModelURL {
-		t.Errorf("local model = %q, want the built-in default", got.Local.modelRef)
-	}
-	if got.Model != localModelDisplayName(defaultLocalModelURL) {
-		t.Errorf("model = %q, want the weight file's name", got.Model)
-	}
-}
-
-// The fallback is a last resort, not a preference: anything the operator did
-// configure still wins.
-func TestResolveAgentConfigPrefersCloudTransportsOverLocal(t *testing.T) {
-	t.Run("api key", func(t *testing.T) {
-		isolateLLMEnv(t)
-		t.Setenv("LLM_API_KEY", "sk-test")
-
-		got, err := resolveAgentConfig(&config{})
-		if err != nil {
-			t.Fatalf("resolveAgentConfig: %v", err)
-		}
-		if got.AuthMethod != "" || got.APIKey != "sk-test" {
-			t.Fatalf("config = %+v, want the plain API-key transport", got)
-		}
-	})
-
-	t.Run("codex sign-in", func(t *testing.T) {
-		isolateLLMEnv(t)
-		writeTestCodexCredential(t, &codexCredential{AccessToken: "access-1"})
-
-		got, err := resolveAgentConfig(&config{})
-		if err != nil {
-			t.Fatalf("resolveAgentConfig: %v", err)
-		}
-		if got.AuthMethod != authMethodCodex {
-			t.Fatalf("auth method = %q, want %q", got.AuthMethod, authMethodCodex)
-		}
-	})
-}
-
-// An explicit choice of local inference is honoured even when a cloud
-// credential is lying around.
-func TestResolveAgentConfigHonoursAnExplicitLocalChoice(t *testing.T) {
-	isolateLLMEnv(t)
-	writeTestCodexCredential(t, &codexCredential{AccessToken: "access-1"})
-	t.Setenv("LLM_LOCAL_MODEL", "/models/custom.gguf")
-
-	for _, requested := range []string{"local", "LOCAL"} {
-		got, err := resolveAgentConfig(&config{llmAuth: requested})
-		if err != nil {
-			t.Fatalf("resolveAgentConfig(%q): %v", requested, err)
-		}
-		if got.AuthMethod != authMethodLocal {
-			t.Fatalf("auth method for %q = %q, want %q", requested, got.AuthMethod, authMethodLocal)
-		}
-		if got.Local.modelRef != "/models/custom.gguf" || got.Model != "custom.gguf" {
-			t.Fatalf("config for %q = %+v, want the configured weights", requested, got)
-		}
+	if !strings.Contains(err.Error(), "LLM_API_KEY") || !strings.Contains(err.Error(), "codex-login") {
+		t.Fatalf("error = %v, want both transports mentioned", err)
 	}
 }
 
 func TestResolveAgentConfigRejectsAnUnknownAuthMethod(t *testing.T) {
 	isolateLLMEnv(t)
 	_, err := resolveAgentConfig(&config{llmAuth: "chatgpt"})
-	if err == nil || !strings.Contains(err.Error(), "local, apikey, codex or gigachat") {
+	if err == nil || !strings.Contains(err.Error(), "apikey, codex or gigachat") {
 		t.Fatalf("error = %v, want the accepted values", err)
 	}
 }
@@ -1070,7 +994,7 @@ func TestNewPicoProviderBuildsACodexProvider(t *testing.T) {
 	isolateLLMEnv(t)
 	writeTestCodexCredential(t, &codexCredential{AccessToken: "access-1", AccountID: "acct-1"})
 
-	provider, err := newPicoProvider(t.Context(), AgentConfig{AuthMethod: authMethodCodex, Model: defaultCodexModel}, AgentCallbacks{})
+	provider, err := newPicoProvider(AgentConfig{AuthMethod: authMethodCodex, Model: defaultCodexModel})
 	if err != nil {
 		t.Fatalf("newPicoProvider: %v", err)
 	}
@@ -1081,7 +1005,7 @@ func TestNewPicoProviderBuildsACodexProvider(t *testing.T) {
 
 func TestNewPicoProviderCodexNeedsACredential(t *testing.T) {
 	isolateLLMEnv(t)
-	_, err := newPicoProvider(t.Context(), AgentConfig{AuthMethod: authMethodCodex}, AgentCallbacks{})
+	_, err := newPicoProvider(AgentConfig{AuthMethod: authMethodCodex})
 	if !errors.Is(err, errNoCodexCredential) {
 		t.Fatalf("error = %v, want errNoCodexCredential", err)
 	}
@@ -1089,11 +1013,11 @@ func TestNewPicoProviderCodexNeedsACredential(t *testing.T) {
 
 func TestNewPicoProviderKeepsTheHTTPPathForAPIKeys(t *testing.T) {
 	isolateLLMEnv(t)
-	provider, err := newPicoProvider(t.Context(), AgentConfig{
+	provider, err := newPicoProvider(AgentConfig{
 		APIKey:  "sk-test",
 		Model:   defaultLLMModel,
 		BaseURL: defaultLLMBaseURL,
-	}, AgentCallbacks{})
+	})
 	if err != nil {
 		t.Fatalf("newPicoProvider: %v", err)
 	}

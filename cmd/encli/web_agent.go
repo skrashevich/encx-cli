@@ -38,30 +38,16 @@ func resolveAgentConfig(cfg *config) (AgentConfig, error) {
 	// are deliberate statements of intent — in particular a local proxy needs no
 	// key, so a credential left over from an earlier `codex-login` must not
 	// silently redirect that setup to chatgpt.com.
-	//
-	// When nothing at all is configured the agent runs on this machine. That is
-	// the last resort rather than a preference: every cloud transport an operator
-	// did set up outranks it, because a model that fits on a laptop is no match
-	// for one that does not.
 	if authMethod == "" && apiKey == "" && endpoint == "" {
 		switch {
 		case hasCodexCredential():
 			authMethod = authMethodCodex
 		case hasGigaChatCredentials():
 			authMethod = authMethodGigaChat
-		default:
-			authMethod = authMethodLocal
 		}
 	}
 
 	switch authMethod {
-	case authMethodLocal:
-		local := localConfigFrom(stored)
-		return AgentConfig{
-			AuthMethod: authMethodLocal,
-			Model:      localModelDisplayName(local.modelRef),
-			Local:      local,
-		}, nil
 	case authMethodCodex:
 		if _, err := loadCodexCredential(); err != nil {
 			return AgentConfig{}, err
@@ -82,7 +68,7 @@ func resolveAgentConfig(cfg *config) (AgentConfig, error) {
 		}, nil
 	case "", authMethodAPIKey:
 	default:
-		return AgentConfig{}, fmt.Errorf("unknown LLM auth method %q: use local, apikey, codex or gigachat", authMethod)
+		return AgentConfig{}, fmt.Errorf("unknown LLM auth method %q: use apikey, codex or gigachat", authMethod)
 	}
 
 	baseURL := cmp.Or(endpoint, defaultLLMBaseURL)
@@ -90,7 +76,6 @@ func resolveAgentConfig(cfg *config) (AgentConfig, error) {
 		return AgentConfig{}, fmt.Errorf(
 			"LLM_API_KEY (or OPENROUTER_API_KEY) is required for agent mode; " +
 				"alternatively sign in to a ChatGPT subscription with 'encli codex-login', " +
-				"run the agent on this machine with LLM_AUTH=local, " +
 				"or configure a provider in the -web LLM settings panel")
 	}
 	return AgentConfig{

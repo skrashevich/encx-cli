@@ -426,11 +426,11 @@ func TestNewPicoProviderBuildsAGigaChatProvider(t *testing.T) {
 	isolateLLMEnv(t)
 	t.Setenv("GIGACHAT_CREDENTIALS", "key-1")
 
-	provider, err := newPicoProvider(t.Context(), AgentConfig{
+	provider, err := newPicoProvider(AgentConfig{
 		AuthMethod: authMethodGigaChat,
 		Model:      defaultGigaChatModel,
 		BaseURL:    defaultGigaChatBaseURL,
-	}, AgentCallbacks{})
+	})
 	if err != nil {
 		t.Fatalf("newPicoProvider: %v", err)
 	}

@@ -1,7 +1,6 @@
 package main
 
 import (
-	"context"
 	"encoding/json"
 	"io"
 	"net/http"
@@ -69,8 +68,7 @@ func TestWebLLMSettingsGetReportsTheWholePanel(t *testing.T) {
 	}
 	if payload.Defaults["base_url"] != defaultLLMBaseURL ||
 		payload.Defaults["model"] != defaultLLMModel ||
-		payload.Defaults["codex_model"] != defaultCodexModel ||
-		payload.Defaults["local_model"] != defaultLocalModelURL {
+		payload.Defaults["codex_model"] != defaultCodexModel {
 		t.Errorf("defaults = %+v", payload.Defaults)
 	}
 	if payload.Effective.BaseURL.Source != llmSourceDefault || payload.Effective.BaseURL.Value != defaultLLMBaseURL {
@@ -91,18 +89,10 @@ func TestWebLLMSettingsGetReportsTheWholePanel(t *testing.T) {
 	if payload.Codex.SignedIn || payload.Codex.Path != codexAuthFile() {
 		t.Errorf("codex = %+v", payload.Codex)
 	}
-	// Nothing is configured, so the agent falls back to running on this machine.
-	// The panel reports that outcome rather than an error, and says the weights
-	// are not downloaded yet.
-	if payload.Agent.Error != "" || payload.Agent.AuthMethod != authMethodLocal {
-		t.Errorf("agent = %+v, want the local transport", payload.Agent)
-	}
-	if payload.Local.ModelCached || payload.Local.ModelPath == "" || payload.Local.CacheDir == "" {
-		t.Errorf("local = %+v, want an uncached model with its path named", payload.Local)
-	}
-	if payload.Effective.LocalModel.Value != defaultLocalModelURL ||
-		payload.Effective.LocalModel.Source != llmSourceDefault {
-		t.Errorf("effective local model = %+v, want the built-in default", payload.Effective.LocalModel)
+	// Nothing is configured, so the agent summary has to carry the reason rather
+	// than pretend a transport exists.
+	if payload.Agent.Error == "" {
+		t.Errorf("agent = %+v, want the missing-transport error", payload.Agent)
 	}
 	for _, method := range llmSettableAuthMethods {
 		if !strings.Contains(raw, `"`+method+`"`) {
@@ -172,118 +162,6 @@ func TestWebLLMSettingsPutStoresTheTransport(t *testing.T) {
 	}
 	if payload.Agent.BaseURL != "https://api.example.com/v1" || payload.Agent.Model != "gpt-4o" {
 		t.Fatalf("agent = %+v", payload.Agent)
-	}
-}
-
-// Local inference is configured from the same form, and its two fields describe
-// files on this machine rather than a remote endpoint — so they have to survive
-// the round trip independently of base_url and model.
-func TestWebLLMSettingsPutStoresTheLocalTransport(t *testing.T) {
-	srv := newLLMSettingsTestServer(t)
-	model := filepath.Join(t.TempDir(), "own.gguf")
-	if err := os.WriteFile(model, []byte("weights"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-
-	status, payload, raw := llmSettingsRequest(t, srv, http.MethodPut,
-		`{"auth_method":"local","local_model":" `+model+` ","local_lib_path":" /opt/llama "}`)
-	if status != http.StatusOK {
-		t.Fatalf("PUT status = %d, body %s", status, raw)
-	}
-	if payload.Stored.AuthMethod != authMethodLocal ||
-		payload.Stored.LocalModel != model ||
-		payload.Stored.LocalLibPath != "/opt/llama" {
-		t.Fatalf("stored = %+v", payload.Stored)
-	}
-
-	onDisk, err := loadLLMSettings()
-	if err != nil {
-		t.Fatalf("loadLLMSettings: %v", err)
-	}
-	if onDisk.LocalModel != model || onDisk.LocalLibPath != "/opt/llama" {
-		t.Fatalf("settings on disk = %+v", onDisk)
-	}
-
-	// The panel now has to describe the local transport, and report that the
-	// weights are already there rather than a download waiting to happen.
-	if payload.Agent.Error != "" || payload.Agent.AuthMethod != authMethodLocal || payload.Agent.Model != "own.gguf" {
-		t.Fatalf("agent = %+v", payload.Agent)
-	}
-	if !payload.Local.ModelCached || payload.Local.ModelPath != model {
-		t.Fatalf("local = %+v, want the configured file reported as present", payload.Local)
-	}
-	if payload.Local.LibPath != "/opt/llama" {
-		t.Errorf("local lib path = %q, want the configured directory", payload.Local.LibPath)
-	}
-}
-
-// -web starts downloading the weights at launch. The moment the operator picks a
-// cloud transport, that download stops being preparation and becomes hundreds of
-// megabytes on a connection that may well be metered.
-func TestWebLLMSettingsPutStopsAPointlessPrefetch(t *testing.T) {
-	srv := newLLMSettingsTestServer(t)
-
-	// Stand in for a prefetch that is running, which is what the handler reaches
-	// for. The configuration has to match what the panel will resolve to, or the
-	// handler is entitled to replace it as a stale one.
-	stopped := 0
-	watchPrefetch := func() {
-		localPrefetchMu.Lock()
-		defer localPrefetchMu.Unlock()
-		localPrefetchCancel = func() { stopped++ }
-		localPrefetchFor = localConfigFrom(llmSettings{})
-	}
-	t.Cleanup(stopLocalPrefetch)
-
-	watchPrefetch()
-	status, payload, raw := llmSettingsRequest(t, srv, http.MethodPut, `{"auth_method":"codex"}`)
-	if status != http.StatusOK {
-		t.Fatalf("PUT status = %d, body %s", status, raw)
-	}
-	if payload.Stored.AuthMethod != authMethodCodex {
-		t.Fatalf("stored = %+v", payload.Stored)
-	}
-	if stopped != 1 {
-		t.Fatalf("the local download was stopped %d times, want once", stopped)
-	}
-
-	// Choosing local is the opposite case: the download is exactly what the
-	// operator has just asked for, so it is left to finish rather than restarted
-	// from zero.
-	watchPrefetch()
-	if status, _, raw := llmSettingsRequest(t, srv, http.MethodPut, `{"auth_method":"local"}`); status != http.StatusOK {
-		t.Fatalf("PUT status = %d, body %s", status, raw)
-	}
-	if stopped != 1 {
-		t.Errorf("choosing local restarted the download it was already making")
-	}
-}
-
-// -web does not prefetch on the bare-machine fallback: the first-run wizard
-// deliberately leaves its LLM step open there so the operator is shown the size
-// of the download before it happens. Choosing local in the panel IS that choice,
-// so the download starts then rather than on the first message.
-func TestWebLLMSettingsPutStartsThePrefetchOnAnExplicitChoice(t *testing.T) {
-	srv := newLLMSettingsTestServer(t)
-
-	// Nothing chosen yet: local is only where the fallback lands.
-	if localTransportChosen(&config{}) {
-		t.Fatal("a bare machine reports local inference as chosen")
-	}
-
-	var started int
-	startLocalPrefetch = func(context.Context, *config, localPrefetchTrigger, func(string)) { started++ }
-
-	if status, payload, raw := llmSettingsRequest(t, srv, http.MethodPut, `{"auth_method":"local"}`); status != http.StatusOK {
-		t.Fatalf("PUT status = %d, body %s", status, raw)
-	} else if payload.Stored.AuthMethod != authMethodLocal {
-		t.Fatalf("stored = %+v", payload.Stored)
-	}
-	if !localTransportChosen(&config{}) {
-		t.Error("a stored auth_method of local does not count as chosen")
-	}
-	if started != 1 {
-		t.Errorf("choosing local in the panel started the download %d times, want once", started)
 	}
 }
 

@@ -52,13 +52,8 @@ type AgentConfig struct {
 
 	// AuthMethod selects the transport: empty or "apikey" uses APIKey against
 	// BaseURL, "codex" uses the ChatGPT subscription stored by codex-login,
-	// "gigachat" uses the GigaChat authorization key in GIGACHAT_CREDENTIALS,
-	// "local" runs llama.cpp on this machine.
+	// "gigachat" uses the GigaChat authorization key in GIGACHAT_CREDENTIALS.
 	AuthMethod string
-
-	// Local carries the resolved local-inference setup. It is only read when
-	// AuthMethod is "local".
-	Local localLLMConfig
 
 	// Provider overrides HTTP provider construction. It is used by tests and by
 	// callers that already own a PicoClaw provider.
@@ -693,20 +688,11 @@ func (*picoLevelReviewNudgeTool) Execute(_ context.Context, args map[string]any)
 	return toolshared.SilentResult(message)
 }
 
-// newPicoProvider builds the transport for one agent run.
-//
-// It takes a context and the callbacks because the local transport may have to
-// download hundreds of megabytes before it can answer anything, and a first run
-// that reports nothing for several minutes is indistinguishable from a hang.
-func newPicoProvider(ctx context.Context, agentCfg AgentConfig, cb AgentCallbacks) (providers.LLMProvider, error) {
+func newPicoProvider(agentCfg AgentConfig) (providers.LLMProvider, error) {
 	if agentCfg.Provider != nil {
 		return agentCfg.Provider, nil
 	}
 	switch agentCfg.AuthMethod {
-	case authMethodLocal:
-		return newLocalProvider(ctx, agentCfg.Local, func(line string) {
-			emitStatus(cb, "model", line)
-		})
 	case authMethodCodex:
 		return newCodexProvider()
 	case authMethodGigaChat:
@@ -739,14 +725,11 @@ func newPicoProvider(ctx context.Context, agentCfg AgentConfig, cb AgentCallback
 // GigaChat is skipped too, for the opposite reason: it does bill per token, but
 // in its own units against a prepaid balance rather than in the dollars the
 // report would print, so no cost line is better than a wrong one.
-//
-// Local inference is not billed at all, and the catalog has never heard of a
-// GGUF file on someone's disk.
 func resolveAgentPricing(ctx context.Context, agentCfg AgentConfig) *llmPricing {
 	switch agentCfg.AuthMethod {
 	case authMethodCodex:
 		return &llmPricing{isSubscription: true}
-	case authMethodGigaChat, authMethodLocal:
+	case authMethodGigaChat:
 		return nil
 	}
 	return fetchLLMPricing(ctx, agentCfg.BaseURL, agentCfg.APIKey, agentCfg.Model)
@@ -956,7 +939,7 @@ func runAgentLoop(ctx context.Context, agentCfg AgentConfig, input *AgentRunInpu
 	if err != nil {
 		return input.Messages, err
 	}
-	delegate, err := newPicoProvider(ctx, agentCfg, cb)
+	delegate, err := newPicoProvider(agentCfg)
 	if err != nil {
 		emitAgent(cb, AgentEvent{Type: agentEventError, Err: err, Message: err.Error()})
 		return input.Messages, err

@@ -1,7 +1,6 @@
 package main
 
 import (
-	"context"
 	"encoding/json"
 	"io"
 	"net/http"
@@ -226,60 +225,5 @@ func TestSaveOnboardingStateFilePermissions(t *testing.T) {
 	}
 	if perm := dirInfo.Mode().Perm(); perm != 0700 {
 		t.Fatalf("state dir mode = %v, want 0700", perm)
-	}
-}
-
-// -web holds the download back until the operator has been shown the choice of
-// transport, and finishing the wizard is that moment: the start it skipped on a
-// bare machine has to happen here, or someone who left local inference as it was
-// pays for it on their first message instead.
-func TestWebOnboardingCompleteStartsTheLocalDownload(t *testing.T) {
-	srv := newOnboardingTestServer(t)
-
-	// Before the wizard has offered the choice, the gate holds the download back.
-	if localPrefetchInvited(&config{}) {
-		t.Fatal("a bare machine reports the choice of transport as already offered")
-	}
-
-	var started int
-	startLocalPrefetch = func(_ context.Context, _ *config, trigger localPrefetchTrigger, _ func(string)) {
-		if trigger != prefetchWhenInvited {
-			t.Errorf("trigger = %v, want the gated one", trigger)
-		}
-		started++
-	}
-
-	if status, payload, raw := onboardingRequest(t, srv, http.MethodPost, "/api/v1/onboarding/complete", ""); status != http.StatusOK {
-		t.Fatalf("POST complete status = %d, body %s", status, raw)
-	} else if !payload.Completed {
-		t.Fatalf("payload = %+v, want the wizard completed", payload)
-	}
-
-	if started != 1 {
-		t.Errorf("finishing the wizard started the download %d times, want once", started)
-	}
-	if !localPrefetchInvited(&config{}) {
-		t.Error("the gate still holds after the wizard finished")
-	}
-}
-
-// An operator who used the wizard to configure a cloud provider gets the
-// opposite: whatever was already coming down for local inference is abandoned
-// rather than paid for in full.
-func TestWebOnboardingCompleteStopsAPointlessDownload(t *testing.T) {
-	srv := newOnboardingTestServer(t)
-	t.Setenv("LLM_API_KEY", "sk-test-key")
-
-	stopped := 0
-	localPrefetchMu.Lock()
-	localPrefetchCancel = func() { stopped++ }
-	localPrefetchFor = localConfigFrom(llmSettings{})
-	localPrefetchMu.Unlock()
-
-	if status, _, raw := onboardingRequest(t, srv, http.MethodPost, "/api/v1/onboarding/complete", ""); status != http.StatusOK {
-		t.Fatalf("POST complete status = %d, body %s", status, raw)
-	}
-	if stopped != 1 {
-		t.Errorf("the local download was stopped %d times, want once", stopped)
 	}
 }

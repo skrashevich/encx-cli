@@ -49,17 +49,12 @@ type config struct {
 	engine             string // legacy | new | auto (env: ENCX_ENGINE)
 	apiRequestInterval time.Duration
 	apiBaseURL         string // new-engine API host (env: ENCX_API_BASE_URL)
-	llmAuth            string // agent transport: local | apikey | codex | gigachat (env: LLM_AUTH)
+	llmAuth            string // agent transport: apikey (default) | codex | gigachat (env: LLM_AUTH)
 	codexDevice        bool   // codex-login: use the device-code flow
 	codexNoBrowser     bool   // codex-login: do not open a browser
 }
 
 func main() {
-	// A loaded llama.cpp model has to be released before the process exits; see
-	// shutdownLocalInference. This covers every path that returns from main, and
-	// fatal covers the ones that call os.Exit.
-	defer shutdownLocalInference()
-
 	if len(os.Args) < 2 {
 		if autoStartWebIfGUI(nil) {
 			return
@@ -110,10 +105,6 @@ func main() {
 			debugMode = cfg.debug
 			ctx, cancel := context.WithCancel(context.Background())
 			defer cancel()
-			// Silent on purpose: this is a full-screen TUI, and a progress line
-			// written to stderr would land on top of it. The chat reports the
-			// same progress as a status line if a message arrives mid-download.
-			prefetchLocalInference(ctx, cfg, prefetchWhenResolved, nil)
 			if err := cmdChat(ctx, cfg); err != nil && err != context.Canceled {
 				fatal("%v", err)
 			}
@@ -512,9 +503,6 @@ func runWebMode(flagArgs []string) {
 	debugMode = cfg.debug
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	prefetchLocalInference(ctx, cfg, prefetchWhenInvited, func(line string) {
-		fmt.Fprintf(os.Stderr, "encli: %s\n", line)
-	})
 	if err := cmdWeb(ctx, cfg, webAddr); err != nil && err != context.Canceled {
 		fatal("%v", err)
 	}
@@ -636,12 +624,9 @@ LLM mode:
   --llm <prompt>  Natural language command (uses OpenRouter API)
                   Example: encli --llm "скопируй игру 82033 в 82034"
   --readonly      Block agent tools that modify or delete data (LLM and -web)
-  -llm-auth       Transport: local to run llama.cpp on this machine, apikey for
-                  an OpenAI-compatible API, codex for a ChatGPT subscription,
+  -llm-auth       Transport: apikey (default), codex for a ChatGPT subscription,
                   or gigachat for the Sber GigaChat API
                   Run 'encli codex-login' once; without LLM_API_KEY it is implied
-                  With nothing configured at all, local is used and the default
-                  model is downloaded on first use
 
 TUI chat:
   -chat           Full-screen terminal chat with the built-in agent
@@ -680,11 +665,7 @@ Environment variables:
   LLM_BASE_URL         OpenAI-compatible API base URL (default: https://openrouter.ai/api/v1)
   LLM_API_KEY          API key for --llm mode (not required for localhost)
   LLM_MODEL            LLM model override (default: openai/gpt-oss-120b:free)
-  LLM_AUTH             Agent transport: local, apikey, codex or gigachat (see -llm-auth)
-  LLM_LOCAL_MODEL      GGUF weights for LLM_AUTH=local: a file path, or a URL fetched once
-  LLM_LOCAL_LIB        Directory with the llama.cpp shared libraries (alias: YZMA_LIB)
-  LLM_LOCAL_CONTEXT    Context window in tokens for local inference (default: %d)
-  ENCLI_LLM_LOCAL_DIR  Cache for the local model and libraries (default: ~/.config/encli/local-llm)
+  LLM_AUTH             Agent transport: apikey (default), codex or gigachat (see -llm-auth)
   ENCLI_CODEX_AUTH_FILE  ChatGPT credential path (default: ~/.config/encli/codex/auth.json)
   GIGACHAT_CREDENTIALS   GigaChat authorization key (base64 of "Client ID:Client Secret")
   GIGACHAT_SCOPE         GigaChat API version (default: GIGACHAT_API_PERS)
@@ -709,7 +690,7 @@ Examples:
   encli send-code -game-id 27053 "CODE123"
   encli hint -game-id 27053 42
   encli logout
-`, defaultLocalContextSize)
+`)
 }
 
 func printCommandHelp(cmd string) {
@@ -1933,10 +1914,6 @@ func fatal(format string, args ...any) {
 	if agentMode {
 		panic(agentFatalError{Message: msg})
 	}
-	// os.Exit runs no deferred call, so the model main deferred has to be
-	// released here instead — see shutdownLocalInference for what aborts if it
-	// is not.
-	shutdownLocalInference()
 	if jsonMode {
 		outputJSON(map[string]string{"error": msg})
 		os.Exit(1)
