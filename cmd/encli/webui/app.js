@@ -24,7 +24,7 @@ const state = {
   llmEdited: { base_url: false, model: false },
   codexFlow: null,
   codexPoll: null,
-  onboarding: { step: 'welcome', status: null, llmAuth: 'codex', engine: null, busy: false },
+  onboarding: { step: 'welcome', status: null, llmAuth: 'codex', busy: false },
 };
 
 const ROLE_RU = {
@@ -447,9 +447,7 @@ function isLoggedInOnDomain(domain) {
 async function ensureActiveChat() {
   if (state.activeId) return state.activeId;
   const domain = getSelectedDomain();
-  if (!domain || !isLoggedInOnDomain(domain)) return null;
   const gameId = getSelectedGameId();
-  if (!gameId) return null;
   try {
     const created = await api('/chats', {
       method: 'POST',
@@ -483,17 +481,6 @@ async function onChatContextChanged() {
 function renderComposerPlaceholder() {
   const input = $('message-input');
   if (!input) return;
-  const domain = getSelectedDomain();
-  if (!isLoggedInOnDomain(domain)) {
-    input.placeholder = 'Войдите на выбранный домен…';
-    return;
-  }
-  if (!state.activeId) {
-    input.placeholder = getSelectedGameId()
-      ? 'Создаём чат… или нажмите «Новый чат»'
-      : 'Выберите игру выше или нажмите «Новый чат» слева…';
-    return;
-  }
   if (state.agentRunning) {
     input.placeholder = state.agentStatus.message || 'Агент отвечает…';
     return;
@@ -645,19 +632,8 @@ function renderMessages() {
   wrap.innerHTML = '';
 
   if (!state.activeId) {
-    const domain = getSelectedDomain();
-    const gameId = getSelectedGameId();
-    let hint = '<p class="empty-hint-title">Чат не выбран</p>';
-    if (!isLoggedInOnDomain(domain)) {
-      hint +=
-        '<p class="empty-hint">Войдите на домен в панели справа, затем выберите игру — чат создастся автоматически.</p>';
-    } else if (!gameId) {
-      hint +=
-        '<p class="empty-hint">Выберите <strong>игру</strong> в списке над перепиской или нажмите <strong>Новый чат</strong> слева.</p>';
-    } else {
-      hint +=
-        '<p class="empty-hint">Игра выбрана — чат появится через мгновение или нажмите <strong>Новый чат</strong>.</p>';
-    }
+    const hint = '<p class="empty-hint-title">Чем помочь?</p>' +
+      '<p class="empty-hint">Напишите задачу агенту. Игру можно выбрать позже.</p>';
     const empty = document.createElement('div');
     empty.className = 'empty-state';
     empty.innerHTML = hint;
@@ -1047,10 +1023,7 @@ function syncRunningFromDetail() {
 function refreshSendState() {
   const hasChat = !!state.activeId;
   const busy = state.agentRunning;
-  const domain = getSelectedDomain();
-  const gameId = getSelectedGameId();
-  const canCompose =
-    !busy && (hasChat || (isLoggedInOnDomain(domain) && gameId > 0));
+  const canCompose = !busy;
   $('message-input').disabled = !canCompose;
   $('btn-send').disabled = !canCompose;
   const attachBtn = $('btn-attach');
@@ -1371,7 +1344,6 @@ async function sendMessage() {
   if (!state.activeId) {
     const id = await ensureActiveChat();
     if (!id) {
-      toast('Выберите игру и войдите на домен.', true);
       return;
     }
   }
@@ -2304,13 +2276,12 @@ function bindLLMSettings() {
 
 /* —— Мастер первого запуска —— */
 
-const ONBOARDING_STEPS = ['welcome', 'llm', 'engine', 'auth'];
+const ONBOARDING_STEPS = ['welcome', 'llm', 'auth'];
 
 const ONBOARDING_COPY = {
-  welcome: { title: 'Настройка encli', subtitle: 'Три шага до первого запроса агенту' },
-  llm: { title: 'Подключение к модели', subtitle: 'Шаг 1 из 3 — как агент обращается к языковой модели' },
-  engine: { title: 'Движок домена', subtitle: 'Шаг 2 из 3 — с каким API en.cx работать' },
-  auth: { title: 'Вход в en.cx', subtitle: 'Шаг 3 из 3 — учётная запись для доступа к играм' },
+  welcome: { title: 'Настройка encli', subtitle: 'Два шага до первого запроса агенту' },
+  llm: { title: 'Подключение к модели', subtitle: 'Шаг 1 из 2 — как агент обращается к языковой модели' },
+  auth: { title: 'Вход в en.cx', subtitle: 'Шаг 2 из 2 — учётная запись для доступа к играм' },
 };
 
 /** В мастере плашки «задано снаружи» лежат в одном слоте на шаг, поэтому каждая
@@ -2320,22 +2291,6 @@ const LLM_OVERRIDE_FIELD_RU = {
   base_url: 'base URL',
   model: 'модель',
   api_key: 'API-ключ',
-};
-
-const ENGINE_OVERRIDE_FLAGS = {
-  engine: '-engine',
-  api_base_url: '-api-base-url',
-};
-
-const ENGINE_OVERRIDE_FIELD_RU = {
-  engine: 'движок',
-  api_base_url: 'адрес API',
-};
-
-const ENGINE_MODE_RU = {
-  auto: 'автоопределение',
-  legacy: 'старый движок',
-  new: 'новый движок',
 };
 
 let onboardingLastFocus = null;
@@ -2437,8 +2392,6 @@ async function goToOnboardingStep(step) {
   if (step === 'llm') {
     renderOnboardingLLMTabs();
     await loadOnboardingLLM();
-  } else if (step === 'engine') {
-    await loadOnboardingEngine();
   } else if (step === 'auth') {
     prefillOnboardingAuth();
   }
@@ -2588,116 +2541,6 @@ async function testOnboardingLLM() {
   }
 }
 
-/* —— Шаг «Движок» —— */
-
-function onboardingEngineValue() {
-  const checked = document.querySelector('input[name="onboarding-engine"]:checked');
-  return String(checked?.value || 'auto');
-}
-
-function setOnboardingEngineValue(value) {
-  const radio = $(`onboarding-engine-${value}`);
-  if (!radio) return false;
-  radio.checked = true;
-  return true;
-}
-
-async function loadOnboardingEngine() {
-  try {
-    const data = await api('/engine/settings');
-    state.onboarding.engine = data;
-    const effective = data?.effective || {};
-    const stored = data?.stored || {};
-    // Как и на шаге модели: форма правит сохранённое, а действующее показывается
-    // подсказкой — чтобы движок и адрес из окружения не переехали в файл.
-    setOnboardingEngineValue(String(stored.engine || 'auto'));
-    const base = $('onboarding-engine-base-url');
-    if (base) {
-      const shown = String(effective.api_base_url?.value || '').trim();
-      if (shown) base.placeholder = shown;
-      base.value = String(stored.api_base_url || '');
-    }
-    renderOverridesInto(
-      'onboarding-engine-overrides',
-      data?.env_overrides,
-      ENGINE_OVERRIDE_FLAGS,
-      ENGINE_OVERRIDE_FIELD_RU,
-    );
-    const err = String(data?.error || '').trim();
-    if (err) setOnboardingError(`Настройки движка: ${err}`);
-  } catch (e) {
-    setOnboardingError(`Настройки движка: ${e.message || String(e)}`);
-  }
-}
-
-async function saveOnboardingEngine() {
-  try {
-    const data = await api('/engine/settings', {
-      method: 'PUT',
-      body: {
-        engine: onboardingEngineValue(),
-        api_base_url: ($('onboarding-engine-base-url')?.value || '').trim(),
-      },
-    });
-    state.onboarding.engine = data;
-    return true;
-  } catch (e) {
-    setOnboardingError(e.message || String(e));
-    return false;
-  }
-}
-
-/** Домен для проверки: введённый на шаге входа, иначе выбранный в основном
- * окне, иначе первый известный. Без домена endpoint ответит 400, поэтому мастер
- * говорит об этом сам, а не ходит за отказом. */
-function onboardingProbeDomain() {
-  const typed = ($('onboarding-auth-domain')?.value || '').trim();
-  if (typed) return typed;
-  const selected = getSelectedDomain();
-  if (selected) return selected;
-  const known = state.authDomains.find((d) => String(d.domain || '').trim());
-  if (known) return String(known.domain).trim();
-  const option = [...($('field-domain')?.options || [])].find((o) => o.value.trim());
-  return option ? option.value.trim() : '';
-}
-
-async function probeOnboardingEngine() {
-  const domain = onboardingProbeDomain();
-  if (!domain) {
-    setOnboardingResult(
-      'onboarding-engine-result',
-      'Проверять нечего: укажите домен на шаге «Вход» или выберите его в основном окне.',
-      'warn',
-    );
-    return;
-  }
-  setOnboardingResult('onboarding-engine-result', `Определяем движок ${domain}…`, '');
-  try {
-    const data = await api(`/engine/probe?domain=${encodeURIComponent(domain)}`);
-    if (!data?.ok) {
-      setOnboardingResult(
-        'onboarding-engine-result',
-        `Не удалось определить движок ${domain}: ${data?.error || 'неизвестная ошибка'}`,
-        'err',
-      );
-      return;
-    }
-    const detected = String(data.detected || '');
-    const configured = String(data.configured || '');
-    const detectedRU = ENGINE_MODE_RU[detected] || detected || '—';
-    const configuredRU = ENGINE_MODE_RU[configured] || configured || '—';
-    let text = `${domain}: определён ${detectedRU}, сейчас настроен ${configuredRU}.`;
-    let tone = 'ok';
-    if (detected && detected !== onboardingEngineValue() && setOnboardingEngineValue(detected)) {
-      text += ` Выбран вариант «${detectedRU}».`;
-      tone = 'warn';
-    }
-    setOnboardingResult('onboarding-engine-result', text, tone);
-  } catch (e) {
-    setOnboardingResult('onboarding-engine-result', e.message || String(e), 'err');
-  }
-}
-
 /* —— Шаг «Вход» —— */
 
 function prefillOnboardingAuth() {
@@ -2742,7 +2585,6 @@ async function onboardingNext() {
   setOnboardingBusy(true);
   try {
     if (step === 'llm' && !(await saveOnboardingLLM())) return;
-    if (step === 'engine' && !(await saveOnboardingEngine())) return;
   } finally {
     setOnboardingBusy(false);
   }
@@ -2784,7 +2626,7 @@ async function openOnboarding() {
   overlay.hidden = false;
   document.body.classList.add('is-modal-open');
   document.addEventListener('keydown', onOnboardingKeydown, true);
-  for (const id of ['onboarding-llm-result', 'onboarding-engine-result', 'onboarding-auth-status']) {
+  for (const id of ['onboarding-llm-result', 'onboarding-auth-status']) {
     setOnboardingResult(id, '', '');
   }
   await goToOnboardingStep('welcome');
@@ -2849,7 +2691,6 @@ function bindOnboarding() {
       void submitCodexCode();
     }
   });
-  $('btn-onboarding-engine-probe')?.addEventListener('click', () => void probeOnboardingEngine());
   $('onboarding-auth-form')?.addEventListener('submit', (e) => void onOnboardingAuthSubmit(e));
   $('btn-onboarding-auth-skip')?.addEventListener('click', () => void finishOnboarding(false));
 }
@@ -2936,9 +2777,7 @@ async function bootstrapWorkspace() {
     renderAuth();
     // Единственная ветка, где переписку не рисует никто другой: чатов нет и
     // игра не выбрана — то есть ровно состояние сразу после первой настройки.
-    // Без этого вызова область переписки остаётся пустой, и подсказка «выберите
-    // игру или нажмите Новый чат» не показывается вообще: оператор видит чистый
-    // экран и поле ввода, которое не принимает текст.
+    // Показываем приглашение написать задачу и включаем ввод первого сообщения.
     renderMessages();
     refreshSendState();
   }

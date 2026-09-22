@@ -8,8 +8,6 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
-
-	"github.com/skrashevich/encx-cli/encx"
 )
 
 // newOnboardingTestServer isolates everything the wizard reads: the home
@@ -77,10 +75,10 @@ func TestWebOnboardingRequiredOnACleanMachine(t *testing.T) {
 	if !payload.Required || payload.Completed {
 		t.Fatalf("payload = %+v, want the wizard required", payload)
 	}
-	if len(payload.Steps) != 3 {
-		t.Fatalf("steps = %+v, want llm, engine and auth", payload.Steps)
+	if len(payload.Steps) != 2 {
+		t.Fatalf("steps = %+v, want llm and auth", payload.Steps)
 	}
-	for _, id := range []string{"llm", "engine", "auth"} {
+	for _, id := range []string{"llm", "auth"} {
 		if step := onboardingStepByID(t, payload, id); step.Done {
 			t.Errorf("step %q = %+v, want not done on a bare machine", id, step)
 		}
@@ -150,27 +148,6 @@ func TestWebOnboardingResetMakesItRequiredAgain(t *testing.T) {
 	}
 	if _, err := os.Stat(onboardingFile()); !os.IsNotExist(err) {
 		t.Fatalf("stat %s after reset = %v, want the file gone", onboardingFile(), err)
-	}
-}
-
-// The built-in default is not a choice, so only an engine the operator actually
-// selected closes the step.
-func TestWebOnboardingEngineStepFollowsTheChoice(t *testing.T) {
-	srv := newOnboardingTestServer(t)
-
-	_, payload, _ := onboardingRequest(t, srv, http.MethodGet, "/api/v1/onboarding", "")
-	if step := onboardingStepByID(t, payload, "engine"); step.Done {
-		t.Fatalf("engine step = %+v, want not done while nothing is configured", step)
-	}
-
-	t.Setenv(encx.EngineEnvVar, "new")
-	_, payload, _ = onboardingRequest(t, srv, http.MethodGet, "/api/v1/onboarding", "")
-	step := onboardingStepByID(t, payload, "engine")
-	if !step.Done {
-		t.Fatalf("engine step = %+v, want done once %s selects one", step, encx.EngineEnvVar)
-	}
-	if step.Detail == "" {
-		t.Errorf("engine step = %+v, want the value and its source named", step)
 	}
 }
 

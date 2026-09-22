@@ -19,7 +19,6 @@ var onboardingUIIDs = []string{
 	// Шаги.
 	"onboarding-pane-welcome",
 	"onboarding-pane-llm",
-	"onboarding-pane-engine",
 	"onboarding-pane-auth",
 
 	// Шаг «Модель».
@@ -39,15 +38,6 @@ var onboardingUIIDs = []string{
 	"btn-onboarding-llm-test",
 	"onboarding-llm-result",
 	"onboarding-llm-overrides",
-
-	// Шаг «Движок».
-	"onboarding-engine-auto",
-	"onboarding-engine-legacy",
-	"onboarding-engine-new",
-	"onboarding-engine-base-url",
-	"btn-onboarding-engine-probe",
-	"onboarding-engine-result",
-	"onboarding-engine-overrides",
 
 	// Шаг «Вход».
 	"onboarding-auth-form",
@@ -126,19 +116,9 @@ func TestOnboardingMarkupWiring(t *testing.T) {
 	}
 
 	// Шаги индикатора: JS ищет их по data-step.
-	for _, step := range []string{"welcome", "llm", "engine", "auth"} {
+	for _, step := range []string{"welcome", "llm", "auth"} {
 		if !strings.Contains(html, `data-step="`+step+`"`) {
 			t.Errorf("webui/index.html: в #onboarding-steps нет шага data-step=%q", step)
-		}
-	}
-
-	// Радиогруппа движка: одно имя, три значения.
-	if got := strings.Count(html, `name="onboarding-engine"`); got != 3 {
-		t.Errorf("webui/index.html: radio name=\"onboarding-engine\" встречается %d раз, ожидается 3", got)
-	}
-	for _, value := range []string{"auto", "legacy", "new"} {
-		if !strings.Contains(html, `name="onboarding-engine" value="`+value+`"`) {
-			t.Errorf("webui/index.html: нет варианта движка value=%q", value)
 		}
 	}
 
@@ -147,7 +127,6 @@ func TestOnboardingMarkupWiring(t *testing.T) {
 		"onboarding-llm-base-url",
 		"onboarding-llm-api-key",
 		"onboarding-llm-model",
-		"onboarding-engine-base-url",
 		"onboarding-auth-domain",
 		"onboarding-auth-login",
 		"onboarding-auth-password",

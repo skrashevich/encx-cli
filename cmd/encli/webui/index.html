@@ -231,7 +231,7 @@
       <div class="modal-head onboarding-head">
         <div class="modal-head-text">
           <h2 class="modal-title" id="onboarding-title">Настройка encli</h2>
-          <p class="modal-subtitle" id="onboarding-subtitle">Три шага до первого запроса агенту</p>
+          <p class="modal-subtitle" id="onboarding-subtitle">Два шага до первого запроса агенту</p>
           <ol class="onboarding-steps" id="onboarding-steps">
             <li class="onboarding-step is-active" data-step="welcome">
               <span class="onboarding-step-num" aria-hidden="true">1</span>
@@ -241,12 +241,8 @@
               <span class="onboarding-step-num" aria-hidden="true">2</span>
               <span class="onboarding-step-label">Модель</span>
             </li>
-            <li class="onboarding-step" data-step="engine">
-              <span class="onboarding-step-num" aria-hidden="true">3</span>
-              <span class="onboarding-step-label">Движок</span>
-            </li>
             <li class="onboarding-step" data-step="auth">
-              <span class="onboarding-step-num" aria-hidden="true">4</span>
+              <span class="onboarding-step-num" aria-hidden="true">3</span>
               <span class="onboarding-step-label">Вход</span>
             </li>
           </ol>
@@ -256,10 +252,9 @@
       <div class="modal-body onboarding-body">
         <section class="onboarding-pane" id="onboarding-pane-welcome" tabindex="-1" hidden>
           <p class="onboarding-intro">encli — агент для работы с квестами en.cx: читает задания, ведёт переписку и выполняет действия на сайте вместо вас.</p>
-          <p class="onboarding-intro">Мастер проходит три шага и сохраняет настройки локально. Любой шаг можно пропустить и вернуться к нему позже.</p>
+          <p class="onboarding-intro">Мастер проходит два шага и сохраняет настройки локально. Любой шаг можно пропустить и вернуться к нему позже.</p>
           <ol class="onboarding-summary">
             <li><strong>Модель</strong> — как агент подключается к языковой модели.</li>
-            <li><strong>Движок</strong> — с каким API домена работать.</li>
             <li><strong>Вход</strong> — учётная запись en.cx для доступа к играм.</li>
           </ol>
         </section>
@@ -347,45 +342,6 @@
             <button type="button" class="btn btn-secondary" id="btn-onboarding-llm-test">Проверить настройки</button>
           </div>
           <div class="onboarding-result" id="onboarding-llm-result" aria-live="polite"></div>
-        </section>
-
-        <section class="onboarding-pane" id="onboarding-pane-engine" tabindex="-1" hidden>
-          <fieldset class="onboarding-options">
-            <legend class="llm-field-label">Движок домена</legend>
-            <label class="onboarding-option" for="onboarding-engine-auto">
-              <input type="radio" name="onboarding-engine" value="auto" id="onboarding-engine-auto" checked />
-              <span class="onboarding-option-text">
-                <span class="onboarding-option-title">Определить автоматически</span>
-                <span class="onboarding-option-desc">encli сам выберет движок по ответу домена</span>
-              </span>
-            </label>
-            <label class="onboarding-option" for="onboarding-engine-legacy">
-              <input type="radio" name="onboarding-engine" value="legacy" id="onboarding-engine-legacy" />
-              <span class="onboarding-option-text">
-                <span class="onboarding-option-title">Старый движок</span>
-                <span class="onboarding-option-desc">Классический ASP.NET-сайт en.cx</span>
-              </span>
-            </label>
-            <label class="onboarding-option" for="onboarding-engine-new">
-              <input type="radio" name="onboarding-engine" value="new" id="onboarding-engine-new" />
-              <span class="onboarding-option-text">
-                <span class="onboarding-option-title">Новый движок</span>
-                <span class="onboarding-option-desc">Новый REST API</span>
-              </span>
-            </label>
-          </fieldset>
-
-          <div class="llm-field">
-            <label class="llm-field-label" for="onboarding-engine-base-url">Адрес API (необязательно)</label>
-            <input type="text" id="onboarding-engine-base-url" class="llm-input" placeholder="https://domain.en.cx" autocomplete="off" spellcheck="false" />
-          </div>
-
-          <div class="llm-override-slot" id="onboarding-engine-overrides"></div>
-
-          <div class="llm-actions">
-            <button type="button" class="btn btn-secondary" id="btn-onboarding-engine-probe">Определить автоматически</button>
-          </div>
-          <div class="onboarding-result" id="onboarding-engine-result" aria-live="polite"></div>
         </section>
 
         <section class="onboarding-pane" id="onboarding-pane-auth" tabindex="-1" hidden>

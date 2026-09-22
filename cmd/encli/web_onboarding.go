@@ -8,8 +8,6 @@ import (
 	"io"
 	"net/http"
 	"time"
-
-	"github.com/skrashevich/encx-cli/encx"
 )
 
 // onboardingStep is one item of the wizard's checklist. Its ID is what the
@@ -79,7 +77,7 @@ func (h *webHub) httpOnboardingReset(w http.ResponseWriter, r *http.Request) {
 }
 
 // onboardingStatusPayload reports whether the wizard has to run and how far the
-// three things it configures already are.
+// two things it configures already are.
 //
 // A state file that will not parse is reported rather than propagated: refusing
 // the request would make the wizard unreachable, and the operator would have no
@@ -95,7 +93,6 @@ func (h *webHub) onboardingStatusPayload() onboardingStatusPayload {
 		Skipped:     state.Skipped,
 		Steps: []onboardingStep{
 			h.onboardingLLMStep(),
-			h.onboardingEngineStep(),
 			h.onboardingAuthStep(),
 		},
 	}
@@ -118,27 +115,6 @@ func (h *webHub) onboardingLLMStep() onboardingStep {
 	// An empty auth method is the plain API-key path; naming it keeps the detail
 	// readable instead of starting with a blank.
 	step.Detail = fmt.Sprintf("%s, model %s", cmp.Or(agentCfg.AuthMethod, authMethodAPIKey), agentCfg.Model)
-	return step
-}
-
-// onboardingEngineStep is done once the operator actually chose an engine. The
-// built-in default is not a choice, so default and unset both leave it open.
-func (h *webHub) onboardingEngineStep() onboardingStep {
-	step := onboardingStep{ID: "engine", Title: "Encounter engine"}
-
-	var cfgEngine string
-	if h.cfg != nil {
-		cfgEngine = h.cfg.engine
-	}
-	stored, err := loadEngineSettings()
-	if err != nil {
-		// loadEngineSettings returns empty settings alongside the error, so the
-		// resolution below still reports what would actually be used.
-		debugf("onboarding: engine settings: %v", err)
-	}
-	field := resolveEngineSettingField(cfgEngine, engineEnvVars, stored.Engine, string(encx.DefaultEngineMode))
-	step.Done = field.Source != llmSourceDefault && field.Source != llmSourceUnset
-	step.Detail = fmt.Sprintf("%s (%s)", field.Value, field.Source)
 	return step
 }
 
