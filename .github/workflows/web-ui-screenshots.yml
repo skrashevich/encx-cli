@@ -1,0 +1,54 @@
+name: Web UI screenshots
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'cmd/encli/webui/**'
+      - 'tools/screenshots/**'
+      - '.github/workflows/web-ui-screenshots.yml'
+  pull_request:
+    paths:
+      - 'cmd/encli/webui/**'
+      - 'tools/screenshots/**'
+      - '.github/workflows/web-ui-screenshots.yml'
+  workflow_dispatch:
+
+concurrency:
+  group: web-ui-screenshots-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  render:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: tools/screenshots/package-lock.json
+      - run: npm ci
+        working-directory: tools/screenshots
+      - run: npx playwright install --with-deps chromium
+        working-directory: tools/screenshots
+      - run: npm run render
+        working-directory: tools/screenshots
+      - uses: actions/upload-artifact@v4
+        with:
+          name: web-ui-screenshots
+          path: docs/screenshots/*.png
+      - name: Update README screenshots on main
+        if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+        run: |
+          git add docs/screenshots/*.png
+          if git diff --cached --quiet; then exit 0; fi
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git commit -m 'docs: regenerate web UI screenshots'
+          git push origin HEAD:main

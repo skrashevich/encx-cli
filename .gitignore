@@ -18,3 +18,5 @@ xcuserdata/
 docs/newengine/pdf/.cache/
 /bindings/php/lib/
 .tmp
+/tools/screenshots/node_modules/
+/docs/screenshots/.rendering/
