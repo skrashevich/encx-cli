@@ -160,8 +160,8 @@ Rules:
 - If a tool call fails, try to recover or report the error.
 - COPY BETWEEN DOMAINS: "copy here game 82864 from svk.en.cx" means source_game_id=82864, source_domain=svk.en.cx, target on the CURRENT domain. First inspect_game_scenario to read the source title and check access. If a target game is selected or explicitly specified, use it; otherwise create a target with admin_create_game (ask for missing required schedule details), then admin_copy_game with the returned target_game_id and original source_domain. Never read the source ID on the current domain or switch the destination to the source domain. Report completion only when verified=true. Missing source authentication requires logging into the source domain.
 - Prefer admin_* tools for game management (viewing levels, creating content). Player tools (levels, status, bonuses) are for games IN PROGRESS.
-- For reading level text, answers, hints, and other scenario content from the organizer side, prefer admin_level_content instead of player tools.
-- TASK DECOMPOSITION: Enumeration tools (admin_levels, game lists, directory listings) return IDs, names, and metadata only — not full content. If the user needs scenario text, per-level details, or an audit/summary across items, call the read tool (admin_level_content, read_local_file, etc.) for every relevant item before your final answer. A complete-looking table or summary built only from names is wrong.
+- For showing, summarizing, or auditing a whole game scenario, call admin_game_scenario directly. It returns full content for all levels; do not first enumerate and read every level separately. Use admin_level_content for a specific level or editable object IDs, and player tools only for the player view.
+- TASK DECOMPOSITION: Enumeration tools (admin_levels, game lists, directory listings) return IDs, names, and metadata only — not full content. If the user needs scenario text, per-level details, or an audit/summary across items, read the full content before your final answer: admin_game_scenario covers all game levels in one call; otherwise use the appropriate individual read tool. A complete-looking table or summary built only from names is wrong.
 - IRREVERSIBLE ACTIONS: admin_delete_game destroys a whole game and admin_wipe_game empties one. Call either only when the user's latest message asks for that game to be deleted or emptied, and never as a step towards something else (for example, do not delete a game to "recreate it cleanly" unless asked). Deleting is not a way to fix a mistake in a game you just created.
 - Starting/launching a game is NOT available via CLI — only through the web interface. Inform the user if they ask.
 - When asked to CREATE a game/levels, make them INTERESTING and DIFFERENT: give unique names, add tasks with creative quest text, add sectors with answers, add hints. Don't just create empty shells.
@@ -534,7 +534,7 @@ func repeatGuardedRead(name string) bool {
 	if _, ok := contentToolFields[name]; ok {
 		return true
 	}
-	return name == "admin_level_content"
+	return name == "admin_level_content" || name == "admin_game_scenario"
 }
 
 // repeatReadKey names a delivered read. Level content is keyed by the level it
@@ -543,7 +543,7 @@ func repeatGuardedRead(name string) bool {
 // session already knows, or adding a field the tool does not have — would
 // otherwise get a free pass through the guard for every spelling it invents.
 func repeatReadKey(name, argsJSON string, fallbackGame int) string {
-	if name != "admin_level_content" {
+	if name != "admin_level_content" && name != "admin_game_scenario" {
 		return name + "\x00" + argsJSON
 	}
 	var args map[string]any
@@ -553,6 +553,9 @@ func repeatReadKey(name, argsJSON string, fallbackGame int) string {
 	game := getAnyInt(args["game_id"])
 	if game == 0 {
 		game = fallbackGame
+	}
+	if name == "admin_game_scenario" {
+		return fmt.Sprintf("%s\x00game=%d", name, game)
 	}
 	if lvl := getAnyInt(args["level_number"]); lvl > 0 {
 		return fmt.Sprintf("%s\x00game=%d level=%d", name, game, lvl)
@@ -623,6 +626,8 @@ func (r *picoLegacyToolRuntime) afterToolResult(name, argsJSON, llmResult string
 	switch {
 	case name == "admin_level_content":
 		markLevelContentLoaded(session, name, argsJSON)
+	case name == "admin_game_scenario":
+		markScenarioContentLoaded(session, llmResult)
 	case name == "admin_levels":
 		recordLevelEnumeration(session, llmResult)
 	}
@@ -641,6 +646,9 @@ func repeatedReadRefusal(name string) string {
 		`same text. Use that earlier result. `
 	const shortened = `If that earlier result was shortened to fit the context, calling again cannot bring ` +
 		`it back: answer from what you still have and say which part you could not check.`
+	if name == "admin_game_scenario" {
+		return `{"error":"` + already + shortened + `"}`
+	}
 	if name == "admin_level_content" {
 		return `{"error":"` + already + `Another level needs a different level_number. ` + shortened + `"}`
 	}

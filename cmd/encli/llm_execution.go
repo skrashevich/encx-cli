@@ -239,6 +239,17 @@ func executeLLMToolCall(ctx context.Context, cfg *config, client *encx.Client, s
 		requireAdminAuth(ctx, cfg, client)
 		cmdAdminLevelContent(ctx, cfg, client, []string{strconv.Itoa(getInt("level_number"))})
 
+	case "admin_game_scenario":
+		if getInt("game_id") <= 0 {
+			fatal("game_id must be positive")
+		}
+		requireAdminAuth(ctx, cfg, client)
+		doc, err := client.GetAdminGameScenario(ctx, cfg.gameId)
+		if err != nil {
+			fatalEncx("Read game scenario", err)
+		}
+		outputJSON(doc)
+
 	case "inspect_scenario_file":
 		toolInspectScenario(getString("path"))
 	case "admin_import_scenario":

@@ -41,6 +41,8 @@ func formatToolCallForDisplay(session *llmSession, name, argsJSON string) string
 	switch name {
 	case "admin_levels":
 		return format(rt("Fetching level list", "Получаю список уровней"))
+	case "admin_game_scenario":
+		return format(rt("Reading complete game scenario", "Читаю весь сценарий игры"))
 	case "admin_level_content":
 		return format(rt("Reading level content", "Читаю содержимое уровня"))
 	case "admin_games":

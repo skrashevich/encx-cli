@@ -30,6 +30,11 @@ func prepareToolResultForLLM(name, result string) string {
 	if field, ok := contentToolFields[name]; ok {
 		return truncateToolContent(result, field)
 	}
+	// A scenario is the requested content, not metadata: generic summarization
+	// would silently cut tasks, answers, and entire levels.
+	if name == "admin_game_scenario" {
+		return result
+	}
 	if name == "admin_level_content" {
 		if len(result) <= 20000 {
 			return result
@@ -90,7 +95,7 @@ func summarizeToolResult(name, result string) (string, bool) {
 		return marshalToolSummary(map[string]any{
 			"count":  len(levels),
 			"levels": limitAdminLevels(levels, maxToolItemsForLLM),
-			"note":   "Names and IDs only — not task/scenario text. Use admin_level_content on each level before summarizing content.",
+			"note":   "Names and IDs only — not task/scenario text. Use admin_game_scenario to read the whole scenario, or admin_level_content for individual levels.",
 		}), true
 	case "levels":
 		var levels []encx.LevelSummary

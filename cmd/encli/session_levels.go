@@ -119,12 +119,12 @@ func buildLevelLoadNudge(session *llmSession, missing []int) string {
 	list := formatLevelNumberList(missing)
 	if session != nil && session.preferRussian {
 		return fmt.Sprintf(
-			"Сначала загрузи содержимое каждого уровня через admin_level_content (ещё не загружены: %s), затем дай итоговый ответ. Не подставляй названия уровней вместо прочитанного текста заданий.",
+			"Сначала прочитай весь сценарий через admin_game_scenario или недостающие уровни через admin_level_content (ещё не загружены: %s), затем дай итоговый ответ. Не подставляй названия уровней вместо прочитанного текста заданий.",
 			list,
 		)
 	}
 	return fmt.Sprintf(
-		"Load each level with admin_level_content before your final answer (still missing: %s). Do not substitute level names for unread task text.",
+		"Read the whole scenario with admin_game_scenario or missing levels with admin_level_content before your final answer (still missing: %s). Do not substitute level names for unread task text.",
 		list,
 	)
 }
@@ -145,7 +145,7 @@ func sessionLoadedLevelsBlock(session *llmSession) string {
 		missing := missingLevelsForContentSummary(session, "сводка")
 		if len(missing) > 0 {
 			return fmt.Sprintf(
-				"\nLevel list loaded (%d levels). Content not yet loaded for levels: %s — call admin_level_content for each before answering about scenario text.\n",
+				"\nLevel list loaded (%d levels). Content not yet loaded for levels: %s — call admin_game_scenario for the whole scenario or admin_level_content for missing levels before answering.\n",
 				len(session.enumeratedLevelNumbers),
 				formatLevelNumberList(missing),
 			)
@@ -160,7 +160,7 @@ func sessionLoadedLevelsBlock(session *llmSession) string {
 		parts[i] = strconv.Itoa(n)
 	}
 	return fmt.Sprintf(
-		"\nLevel content loaded via admin_level_content: %s.\n",
+		"\nLevel content loaded: %s.\n",
 		strings.Join(parts, ", "),
 	)
 }
@@ -237,4 +237,29 @@ func applyLoadedLevels(session *llmSession, levels []int) {
 			session.loadedLevelContent[n] = struct{}{}
 		}
 	}
+}
+
+// markScenarioContentLoaded replaces coverage with the levels actually returned.
+// An error or malformed result must never satisfy the completeness check.
+func markScenarioContentLoaded(session *llmSession, result string) {
+	if session == nil || toolResultLooksLikeError(result) {
+		return
+	}
+	var doc struct {
+		Levels []struct {
+			Number int `json:"number"`
+		} `json:"levels"`
+	}
+	if err := json.Unmarshal([]byte(result), &doc); err != nil || doc.Levels == nil {
+		return
+	}
+	session.loadedLevelContent = make(map[int]struct{}, len(doc.Levels))
+	session.enumeratedLevelNumbers = nil
+	for _, level := range doc.Levels {
+		if level.Number > 0 {
+			session.loadedLevelContent[level.Number] = struct{}{}
+			session.enumeratedLevelNumbers = append(session.enumeratedLevelNumbers, level.Number)
+		}
+	}
+	session.levelCompletionNudges = 0
 }

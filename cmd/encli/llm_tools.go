@@ -96,13 +96,18 @@ func getTools() []llmTool {
 		}},
 		{Type: "function", Function: llmFunction{
 			Name:        "admin_levels",
-			Description: "List all levels with their IDs (admin panel). Works for any game you author — use this to find level numbers/IDs, then use admin_level_content to inspect the actual task text, answers, bonuses, and hints.",
+			Description: "List all levels with their IDs (admin panel). Works for any game you author — use this to find level numbers/IDs, then use admin_game_scenario for the full scenario or admin_level_content for one level.",
 			Parameters:  json.RawMessage(`{"type":"object","properties":{"game_id":{"type":"integer","description":"Game ID"}},"required":["game_id"]}`),
 		}},
 		{Type: "function", Function: llmFunction{
 			Name:        "admin_level_content",
 			Description: "Read one level from the admin panel: task/scenario text, sector answers, bonuses, hints, comment, and settings. Use this when you need to verify that uploaded content matches the task, even if the game is not active and player APIs return no active level.",
 			Parameters:  json.RawMessage(`{"type":"object","properties":{"game_id":{"type":"integer","description":"Game ID"},"level_number":{"type":"integer","description":"Level number from admin_levels"}},"required":["game_id","level_number"]}`),
+		}},
+		{Type: "function", Function: llmFunction{
+			Name:        "admin_game_scenario",
+			Description: "Read the complete game scenario in one tool call: all levels, full task texts, answers, hints, penalty hints, bonuses and exported timings. Prefer this for showing, summarizing or auditing a whole scenario instead of calling admin_levels and admin_level_content for every level. Use admin_level_content only for an individual level or editable object IDs. Read-only; requires author access.",
+			Parameters:  json.RawMessage(`{"type":"object","properties":{"game_id":{"type":"integer","minimum":1,"description":"Game ID"}},"required":["game_id"]}`),
 		}},
 		{Type: "function", Function: llmFunction{
 			Name:        "inspect_scenario_file",
