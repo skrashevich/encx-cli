@@ -111,7 +111,7 @@ func cmdLLM(ctx context.Context, cfg *config, client *encx.Client, prompt string
 
 	messages := []llmMessage{
 		{Role: "system", Content: systemPrompt},
-		{Role: "user", Content: prompt},
+		{Role: "user", Content: stampedUserMessage(prompt)},
 	}
 
 	tools := getToolsForSession(session)

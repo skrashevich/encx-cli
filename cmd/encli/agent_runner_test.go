@@ -185,22 +185,50 @@ func TestRunAgentLoopKeepsApprovalGateWithPicoClaw(t *testing.T) {
 	}
 }
 
-func TestBuildSystemPromptStampsCurrentTime(t *testing.T) {
+func TestStampedUserMessageCarriesTheTime(t *testing.T) {
 	fixed := time.Date(2026, 9, 7, 14, 7, 0, 0, time.FixedZone("MSK", 3*60*60))
 	orig := systemPromptNow
 	systemPromptNow = func() time.Time { return fixed }
 	defer func() { systemPromptNow = orig }()
 
-	prompt := buildSystemPrompt(&config{domain: "tech.en.cx"}, &llmSession{})
+	stamped := stampedUserMessage("скопируй игру 82033")
 
-	if !strings.Contains(prompt, "2026-09-07T14:07:00+03:00") {
-		t.Fatalf("prompt missing local RFC3339 timestamp:\n%s", prompt)
+	if !strings.Contains(stamped, "2026-09-07T14:07:00+03:00") {
+		t.Errorf("message missing local RFC3339 timestamp:\n%s", stamped)
 	}
-	if !strings.Contains(prompt, "2026-09-07T11:07:00Z") {
-		t.Fatalf("prompt missing UTC timestamp:\n%s", prompt)
+	if !strings.Contains(stamped, "2026-09-07T11:07:00Z") {
+		t.Errorf("message missing UTC timestamp:\n%s", stamped)
 	}
-	if !strings.Contains(prompt, "authoritative") {
-		t.Fatalf("prompt missing time-handling rule:\n%s", prompt)
+	if !strings.HasSuffix(stamped, "скопируй игру 82033") {
+		t.Errorf("the user's own text must survive verbatim at the end:\n%s", stamped)
+	}
+
+	// The rule that tells the model where to look for "now" has to point at the
+	// stamp, or the stamp is decoration.
+	prompt := buildSystemPrompt(&config{domain: "tech.en.cx"}, &llmSession{})
+	if !strings.Contains(prompt, "authoritative") || !strings.Contains(prompt, "square brackets") {
+		t.Errorf("prompt does not tell the model the time rides on the message:\n%s", prompt)
+	}
+}
+
+// The whole point of moving the clock onto the message: the system prompt — the
+// rules plus the tool catalog behind it, some 6700 tokens — must be byte-identical
+// from one message to the next, or none of it can be reused. It used to carry the
+// time on its fourth line, which made every turn decode all of it again: on an
+// Intel N150 that was over five minutes before the model said a word.
+func TestBuildSystemPromptIsStableOverTime(t *testing.T) {
+	orig := systemPromptNow
+	defer func() { systemPromptNow = orig }()
+	cfg := &config{domain: "tech.en.cx", gameId: 82033}
+
+	systemPromptNow = func() time.Time { return time.Date(2026, 9, 7, 14, 7, 0, 0, time.UTC) }
+	first := buildSystemPrompt(cfg, &llmSession{})
+
+	systemPromptNow = func() time.Time { return time.Date(2026, 9, 8, 21, 43, 12, 0, time.UTC) }
+	second := buildSystemPrompt(cfg, &llmSession{})
+
+	if first != second {
+		t.Fatalf("the system prompt changed with the clock, so no prefix can be cached:\n--- first ---\n%s\n--- second ---\n%s", first, second)
 	}
 }
 

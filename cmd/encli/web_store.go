@@ -214,7 +214,7 @@ func (s *ChatStore) AppendUserMessageUnlessRunning(chatID, content string) (msg 
 		return UIMessage{}, true, true
 	}
 	t.uiMessages = append(t.uiMessages, msg)
-	t.messages = append(t.messages, llmMessage{Role: "user", Content: content})
+	t.messages = append(t.messages, llmMessage{Role: "user", Content: stampedUserMessage(content)})
 	t.Title = autoTitleFromMessage(t.Title, t.Domain, content)
 	t.UpdatedAt = now
 	return msg, true, false
@@ -247,7 +247,7 @@ func (s *ChatStore) AppendUserMessage(chatID, content string) (UIMessage, bool) 
 		return UIMessage{}, false
 	}
 	t.uiMessages = append(t.uiMessages, msg)
-	t.messages = append(t.messages, llmMessage{Role: "user", Content: content})
+	t.messages = append(t.messages, llmMessage{Role: "user", Content: stampedUserMessage(content)})
 	t.UpdatedAt = now
 	return msg, true
 }

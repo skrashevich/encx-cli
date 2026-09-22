@@ -118,12 +118,34 @@ func newLLMSessionForPrompt(prompt string) *llmSession {
 // the agent system prompt. It is a package var so tests can pin it.
 var systemPromptNow = time.Now
 
-func buildSystemPrompt(cfg *config, session *llmSession) string {
+// stampedUserMessage is the user's text as the model sees it: prefixed with the
+// moment it was sent.
+//
+// That stamp used to live on the fourth line of the system prompt, which put a
+// value that changes every message ahead of the rules and the entire tool
+// catalog. Everything behind it — about 6700 tokens that were otherwise
+// identical from turn to turn — was therefore new every time. A machine with a
+// GPU swallows that; an Intel N150 spent more than five minutes decoding it
+// before the model said a word.
+//
+// Carried on the message, the stamp never moves and never changes, so the long
+// prefix stays reusable — by the local KV cache here, and by the prompt caching
+// the cloud providers do. It also reads better: the model is told when each
+// message was sent rather than being handed one "now" that silently rewrites
+// itself underneath the conversation.
+//
+// Only the copy the model sees is stamped. The UI and the export keep their own
+// list of messages, so what the operator typed is what the operator sees.
+func stampedUserMessage(text string) string {
 	now := systemPromptNow()
+	return fmt.Sprintf("[sent at %s / %s UTC]\n%s",
+		now.Format(time.RFC3339), now.UTC().Format(time.RFC3339), text)
+}
+
+func buildSystemPrompt(cfg *config, session *llmSession) string {
 	return `You are an autonomous agent for the Encounter (en.cx) game engine CLI tool.
 The user gives you a natural language request. Execute it step by step using the available tools.
 The current domain is: ` + cfg.domain + `
-The current date and time is: ` + now.Format(time.RFC3339) + ` (local time, RFC3339; ` + now.UTC().Format(time.RFC3339) + ` in UTC).
 ` + func() string {
 		if cfg.gameId != 0 {
 			return fmt.Sprintf("The current game ID is: %d\n", cfg.gameId)
@@ -131,7 +153,7 @@ The current date and time is: ` + now.Format(time.RFC3339) + ` (local time, RFC3
 		return ""
 	}() + `
 Rules:
-- TIME: Treat the "current date and time" above as authoritative. Never guess or infer today's date from memory. Resolve every relative time the user gives ("in a minute", "tonight", "tomorrow", "next Saturday") against that value, and echo the absolute date/time you computed so the user can check it.
+- TIME: Every user message starts with the time it was sent, in square brackets. The most recent of those is now, and it is authoritative. Never guess or infer today's date from memory. Resolve every relative time the user gives ("in a minute", "tonight", "tomorrow", "next Saturday") against it, and echo the absolute date/time you computed so the user can check it.
 - NEVER FABRICATE (strict): Do not invent, guess, or infer facts about game content, tool results, files, URLs, or anything else. If information is missing, call the appropriate tools to obtain it. If tools still cannot provide it, say clearly that the information is unavailable — do not fill gaps with assumptions, stereotypes, or plausible-sounding details.
 - Execute multi-step tasks by calling tools one at a time. You will receive the result of each tool call.
 - Use tool results to inform your next action (e.g., get level IDs before renaming levels).
