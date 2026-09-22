@@ -418,14 +418,35 @@ func executeLLMToolCall(ctx context.Context, cfg *config, client *encx.Client, s
 		requireAdminAuth(ctx, cfg, client)
 		cmdAdminWipeGame(ctx, cfg, client)
 
-	case "admin_copy_game":
-		sourceID := getInt("source_game_id")
-		targetID := getInt("target_game_id")
-		if sourceID != 0 {
-			cfg.gameId = sourceID
+	case "inspect_game_scenario":
+		if getInt("source_game_id") <= 0 {
+			fatal("source_game_id must be positive")
 		}
+		sourceCfg, source := agentScenarioSource(ctx, cfg, client, getString("source_domain"))
+		doc := readRemoteAgentScenario(ctx, source, getInt("source_game_id"))
+		result := scenarioSummary(doc)
+		result["source_domain"] = sourceCfg.domain
+		outputJSON(result)
+
+	case "admin_copy_game":
+		sourceID, targetID := getInt("source_game_id"), getInt("target_game_id")
+		if sourceID <= 0 || targetID <= 0 {
+			fatal("source_game_id and target_game_id must be positive")
+		}
+		sourceDomain, err := scenarioSourceDomain(getString("source_domain"), cfg.domain)
+		if err != nil {
+			fatal("%v", err)
+		}
+		if sourceDomain == cfg.domain && sourceID == targetID {
+			fatal("Source and target must be different games")
+		}
+		_, source := agentScenarioSource(ctx, cfg, client, sourceDomain)
+		// Read the entire source before authenticating or writing to the target.
+		doc := readRemoteAgentScenario(ctx, source, sourceID)
 		requireAdminAuth(ctx, cfg, client)
-		cmdAdminCopyGame(ctx, cfg, client, []string{strconv.Itoa(targetID)})
+		targetCfg := *cfg
+		targetCfg.gameId = targetID
+		importAgentScenario(ctx, &targetCfg, client, doc)
 
 	case "admin_delete_game":
 		requireAdminAuth(ctx, cfg, client)

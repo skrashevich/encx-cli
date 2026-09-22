@@ -17,6 +17,22 @@ tools. PicoClaw now owns provider calls, conversation/tool-call iteration and th
 iteration limit for both CLI surfaces. `agenttools` remains the reusable,
 CLI-independent engine catalog used by mobile and MCP.
 
+## Copying scenarios between domains in encli
+
+The CLI and web agent accept requests such as “скопируй сюда игру 82864 с
+домена svk.en.cx” while the chat is on `tech.en.cx`. The agent calls
+`inspect_game_scenario` with `source_domain` and `source_game_id`, creates a
+new destination if needed, then calls `admin_copy_game` with those source
+arguments and `target_game_id`. The destination always belongs to the current
+chat domain; inspecting or copying does not switch the chat to the source.
+
+The source uses its own saved session. If needed, log into that domain in the
+web interface or with `encli login -domain svk.en.cx` before retrying. Target
+credentials are not forwarded to the source. Copying uses the scenario importer,
+which aligns levels by position and checks a fresh export before returning
+`verified=true`; it does not delete extra destination levels. A mismatch or
+interrupted import must not be reported as a completed copy.
+
 ## Catalog
 
 Read tools — always available:

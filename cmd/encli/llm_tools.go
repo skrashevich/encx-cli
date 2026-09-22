@@ -230,9 +230,14 @@ func getTools() []llmTool {
 			Parameters:  json.RawMessage(`{"type":"object","properties":{"game_id":{"type":"integer","description":"Game ID"}},"required":["game_id"]}`),
 		}},
 		{Type: "function", Function: llmFunction{
+			Name:        "inspect_game_scenario",
+			Description: "Read a source game's scenario and return its title and exact content counts before copying. Supports another Encounter domain through source_domain, using its saved login. Does not change the current domain or game. Do this before creating the destination game.",
+			Parameters:  json.RawMessage(`{"type":"object","properties":{"source_domain":{"type":"string","description":"Source domain, e.g. svk.en.cx; defaults to current domain"},"source_game_id":{"type":"integer"}},"required":["source_game_id"]}`),
+		}},
+		{Type: "function", Function: llmFunction{
 			Name:        "admin_copy_game",
-			Description: "Copy entire game (levels, settings, bonuses, sectors, hints) from source to target game",
-			Parameters:  json.RawMessage(`{"type":"object","properties":{"source_game_id":{"type":"integer","description":"Source game ID to copy from"},"target_game_id":{"type":"integer","description":"Target game ID to copy to"}},"required":["source_game_id","target_game_id"]}`),
+			Description: "Copy the complete scenario from a source game to an existing target game on the CURRENT domain, then verify by reading back. Specify source_domain for cross-domain copying. If no target exists, inspect_game_scenario first and admin_create_game before copying. Never use the source ID as the target ID just because the user says here. Reports verified=true only when the scenario matches.",
+			Parameters:  json.RawMessage(`{"type":"object","properties":{"source_domain":{"type":"string","description":"Source Encounter domain, e.g. svk.en.cx; defaults to current domain. Target always stays on current domain."},"source_game_id":{"type":"integer","description":"Source game ID to copy from"},"target_game_id":{"type":"integer","description":"Target game ID to copy to"}},"required":["source_game_id","target_game_id"]}`),
 		}},
 		{Type: "function", Function: llmFunction{
 			Name:        "admin_delete_game",

@@ -154,7 +154,7 @@ Rules:
 - Use tool results to inform your next action (e.g., get level IDs before renaming levels).
 - When all steps are complete, respond with a text summary of what was done.
 - If a tool call fails, try to recover or report the error.
-- For admin_copy_game: source is the first game mentioned, target is the second.
+- COPY BETWEEN DOMAINS: "copy here game 82864 from svk.en.cx" means source_game_id=82864, source_domain=svk.en.cx, target on the CURRENT domain. First inspect_game_scenario to read the source title and check access. If a target game is selected or explicitly specified, use it; otherwise create a target with admin_create_game (ask for missing required schedule details), then admin_copy_game with the returned target_game_id and original source_domain. Never read the source ID on the current domain or switch the destination to the source domain. Report completion only when verified=true. Missing source authentication requires logging into the source domain.
 - Prefer admin_* tools for game management (viewing levels, creating content). Player tools (levels, status, bonuses) are for games IN PROGRESS.
 - For reading level text, answers, hints, and other scenario content from the organizer side, prefer admin_level_content instead of player tools.
 - TASK DECOMPOSITION: Enumeration tools (admin_levels, game lists, directory listings) return IDs, names, and metadata only — not full content. If the user needs scenario text, per-level details, or an audit/summary across items, call the read tool (admin_level_content, read_local_file, etc.) for every relevant item before your final answer. A complete-looking table or summary built only from names is wrong.

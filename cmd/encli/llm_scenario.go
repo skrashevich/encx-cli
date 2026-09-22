@@ -142,6 +142,10 @@ func toolImportScenario(ctx context.Context, cfg *config, client *encx.Client, p
 	if len(doc.MissingAssets) > 0 {
 		fatal("Scenario has %d missing local assets; restore them before importing", len(doc.MissingAssets))
 	}
+	importAgentScenario(ctx, cfg, client, doc)
+}
+
+func importAgentScenario(ctx context.Context, cfg *config, client *encx.Client, doc *scenario.Document) {
 	stats, err := syncMissingScenario(ctx, cfg, client, doc, func(string) {})
 	result := scenarioSummary(doc)
 	result["game_id"] = cfg.gameId
