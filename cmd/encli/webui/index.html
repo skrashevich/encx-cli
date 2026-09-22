@@ -252,7 +252,7 @@
       <div class="modal-body onboarding-body">
         <section class="onboarding-pane" id="onboarding-pane-welcome" tabindex="-1" hidden>
           <p class="onboarding-intro">encli — агент для работы с квестами en.cx: читает задания, ведёт переписку и выполняет действия на сайте вместо вас.</p>
-          <p class="onboarding-intro">Мастер проходит два шага и сохраняет настройки локально. Любой шаг можно пропустить и вернуться к нему позже.</p>
+          <p class="onboarding-intro">Мастер проходит два шага и сохраняет настройки локально. Для завершения нужно войти в учётную запись en.cx.</p>
           <ol class="onboarding-summary">
             <li><strong>Модель</strong> — как агент подключается к языковой модели.</li>
             <li><strong>Вход</strong> — учётная запись en.cx для доступа к играм.</li>
@@ -359,10 +359,6 @@
               <label class="llm-field-label" for="onboarding-auth-password">Пароль</label>
               <input type="password" name="password" id="onboarding-auth-password" class="llm-input" autocomplete="current-password" required />
             </div>
-            <div class="llm-actions">
-              <button type="submit" class="btn btn-accent" id="btn-onboarding-auth-submit">Войти</button>
-              <button type="button" class="btn btn-ghost" id="btn-onboarding-auth-skip">Пропустить этот шаг</button>
-            </div>
           </form>
           <div class="onboarding-result" id="onboarding-auth-status" aria-live="polite"></div>
         </section>
@@ -371,7 +367,6 @@
       <div class="modal-foot onboarding-foot">
         <div class="llm-alert" id="onboarding-error" role="alert" hidden></div>
         <div class="modal-actions">
-          <button type="button" class="btn btn-ghost btn-sm" id="btn-onboarding-skip-all">Пропустить настройку</button>
           <span class="modal-actions-gap"></span>
           <button type="button" class="btn btn-secondary" id="btn-onboarding-back">Назад</button>
           <button type="button" class="btn btn-primary" id="btn-onboarding-next"><span id="onboarding-next-label">Далее</span></button>

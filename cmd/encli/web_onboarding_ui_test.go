@@ -44,15 +44,12 @@ var onboardingUIIDs = []string{
 	"onboarding-auth-domain",
 	"onboarding-auth-login",
 	"onboarding-auth-password",
-	"btn-onboarding-auth-submit",
 	"onboarding-auth-status",
-	"btn-onboarding-auth-skip",
 
 	// Подвал и повторный запуск мастера.
 	"onboarding-error",
 	"btn-onboarding-back",
 	"btn-onboarding-next",
-	"btn-onboarding-skip-all",
 	"btn-onboarding-open",
 }
 

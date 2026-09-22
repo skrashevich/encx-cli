@@ -2372,11 +2372,14 @@ function renderOnboardingChrome() {
   const back = $('btn-onboarding-back');
   if (back) back.disabled = busy || idx === 0;
   const next = $('btn-onboarding-next');
-  if (next) next.disabled = busy;
+  if (next) {
+    next.disabled = busy;
+    next.type = step === 'auth' ? 'submit' : 'button';
+    if (step === 'auth') next.setAttribute('form', 'onboarding-auth-form');
+    else next.removeAttribute('form');
+  }
   const nextLabel = $('onboarding-next-label');
-  if (nextLabel) nextLabel.textContent = idx === ONBOARDING_STEPS.length - 1 ? 'Готово' : 'Далее';
-  const skipAll = $('btn-onboarding-skip-all');
-  if (skipAll) skipAll.disabled = busy;
+  if (nextLabel) nextLabel.textContent = idx === ONBOARDING_STEPS.length - 1 ? (busy ? 'Проверяем…' : 'Войти и завершить') : 'Далее';
 }
 
 function setOnboardingBusy(busy) {
@@ -2550,30 +2553,18 @@ function prefillOnboardingAuth() {
 
 async function onOnboardingAuthSubmit(ev) {
   ev.preventDefault();
-  const fd = new FormData(ev.target);
+  if (state.onboarding.busy) return;
+  const form = $('onboarding-auth-form');
+  if (!form.reportValidity()) return;
+  const fd = new FormData(form);
   const domain = String(fd.get('domain') || '').trim();
   const login = String(fd.get('login') || '').trim();
   const password = String(fd.get('password') || '');
-  if (!domain || !login || !password) return;
-  const submit = $('btn-onboarding-auth-submit');
-  if (submit) submit.disabled = true;
-  setOnboardingError('');
-  setOnboardingResult('onboarding-auth-status', 'Входим…', '');
-  try {
-    await api('/auth/login', { method: 'POST', body: { domain, login, password } });
-    const pwd = $('onboarding-auth-password');
-    if (pwd) pwd.value = '';
-    await loadAuthStatus();
-    renderAuth();
-    setOnboardingResult('onboarding-auth-status', `Вход выполнен: ${domain}`, 'ok');
-  } catch (e) {
-    setOnboardingResult('onboarding-auth-status', '', '');
-    // Антиспам отдаёт адрес страницы проверки: без ссылки сообщение нечем
-    // закрыть, поэтому она идёт рядом с текстом ошибки.
-    setOnboardingError(e.message || String(e), e.data?.antispam ? e.data.url : '');
-  } finally {
-    if (submit) submit.disabled = false;
+  if (!domain || !login || !password) {
+    setOnboardingError('Заполните домен, логин и пароль.');
+    return;
   }
+  await finishOnboarding({ domain, login, password });
 }
 
 /* —— Переходы, открытие и завершение —— */
@@ -2581,16 +2572,16 @@ async function onOnboardingAuthSubmit(ev) {
 async function onboardingNext() {
   if (state.onboarding.busy) return;
   const step = state.onboarding.step;
+  if (step === 'auth') {
+    $('onboarding-auth-form')?.requestSubmit();
+    return;
+  }
   setOnboardingError('');
   setOnboardingBusy(true);
   try {
     if (step === 'llm' && !(await saveOnboardingLLM())) return;
   } finally {
     setOnboardingBusy(false);
-  }
-  if (step === 'auth') {
-    await finishOnboarding(false);
-    return;
   }
   await goToOnboardingStep(ONBOARDING_STEPS[onboardingStepIndex(step) + 1]);
 }
@@ -2605,8 +2596,7 @@ async function onboardingBack() {
 function onOnboardingKeydown(e) {
   if (!isOnboardingOpen()) return;
   if (e.key === 'Escape') {
-    // Первый запуск закрывается только кнопкой «Пропустить настройку»:
-    // случайный Escape не должен молча оставить приложение ненастроенным.
+    // Первый запуск нельзя закрыть до успешного входа.
     if (state.onboarding.status?.required) return;
     e.preventDefault();
     e.stopPropagation();
@@ -2645,20 +2635,22 @@ function closeOnboarding() {
   onboardingLastFocus = null;
 }
 
-async function finishOnboarding(skipped) {
+async function finishOnboarding(credentials) {
+  setOnboardingError('');
   setOnboardingBusy(true);
   try {
     state.onboarding.status = await api('/onboarding/complete', {
       method: 'POST',
-      body: { skipped: !!skipped },
+      body: credentials,
     });
   } catch (e) {
-    // Мастер пройден, а отметку записать не удалось: держать оператора внутри
-    // диалога незачем — мастер просто появится снова на следующем запуске.
-    toast(`Не удалось сохранить отметку о настройке: ${e.message || String(e)}`, true);
+    setOnboardingError(e.message || String(e), e.data?.antispam ? e.data.url : '');
+    return;
   } finally {
     setOnboardingBusy(false);
   }
+  const pwd = $('onboarding-auth-password');
+  if (pwd) pwd.value = '';
   closeOnboarding();
   await bootstrapWorkspace();
 }
@@ -2677,9 +2669,10 @@ async function initOnboarding() {
 
 function bindOnboarding() {
   $('btn-onboarding-open')?.addEventListener('click', () => void openOnboarding());
-  $('btn-onboarding-next')?.addEventListener('click', () => void onboardingNext());
+  $('btn-onboarding-next')?.addEventListener('click', () => {
+    if (state.onboarding.step !== 'auth') void onboardingNext();
+  });
   $('btn-onboarding-back')?.addEventListener('click', () => void onboardingBack());
-  $('btn-onboarding-skip-all')?.addEventListener('click', () => void finishOnboarding(true));
   $('onboarding-llm-tab-codex')?.addEventListener('click', () => selectOnboardingLLMTab('codex'));
   $('onboarding-llm-tab-apikey')?.addEventListener('click', () => selectOnboardingLLMTab('apikey'));
   $('btn-onboarding-llm-test')?.addEventListener('click', () => void testOnboardingLLM());
@@ -2692,7 +2685,6 @@ function bindOnboarding() {
     }
   });
   $('onboarding-auth-form')?.addEventListener('submit', (e) => void onOnboardingAuthSubmit(e));
-  $('btn-onboarding-auth-skip')?.addEventListener('click', () => void finishOnboarding(false));
 }
 
 function bindUI() {

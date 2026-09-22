@@ -1,11 +1,8 @@
 package main
 
 import (
-	"bytes"
 	"cmp"
-	"encoding/json"
 	"fmt"
-	"io"
 	"net/http"
 	"time"
 )
@@ -30,36 +27,22 @@ type onboardingStatusPayload struct {
 	Error       string           `json:"error,omitempty"`
 }
 
-type onboardingCompleteRequest struct {
-	Skipped bool `json:"skipped"`
-}
-
 func (h *webHub) httpOnboardingStatus(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, h.onboardingStatusPayload())
 }
 
 func (h *webHub) httpOnboardingComplete(w http.ResponseWriter, r *http.Request) {
-	var req onboardingCompleteRequest
-	// The wizard's Finish button sends nothing, and readJSONBody answers an empty
-	// body with 400. Here an absent body is the happy path — it means "finished,
-	// not skipped" — so the read is done inline rather than refusing it.
-	defer r.Body.Close()
-	data, err := io.ReadAll(io.LimitReader(r.Body, 1<<20))
-	if err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "read body"})
+	var req authLoginBody
+	if !readJSONBody(w, r, &req) {
 		return
 	}
-	if len(bytes.TrimSpace(data)) > 0 {
-		if err := json.Unmarshal(data, &req); err != nil {
-			writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
-			return
-		}
+	if !h.authenticateWebLogin(w, r, req) {
+		return
 	}
 
 	state := onboardingState{
 		Completed:   true,
 		CompletedAt: time.Now().UTC().Format(time.RFC3339),
-		Skipped:     req.Skipped,
 	}
 	if err := saveOnboardingState(state); err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})

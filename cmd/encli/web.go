@@ -521,9 +521,20 @@ func (h *webHub) httpAuthLogin(w http.ResponseWriter, r *http.Request) {
 	if !readJSONBody(w, r, &body) {
 		return
 	}
+	if !h.authenticateWebLogin(w, r, body) {
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"success":      true,
+		"session_file": sessionFile(&config{domain: body.Domain}),
+	})
+}
+
+// authenticateWebLogin checks credentials against Encounter and reports login errors.
+func (h *webHub) authenticateWebLogin(w http.ResponseWriter, r *http.Request, body authLoginBody) bool {
 	if body.Domain == "" || body.Login == "" || body.Password == "" {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "domain, login, password required"})
-		return
+		return false
 	}
 	opts := encOptsFromConfig(h.cfg)
 	err := h.registry.Login(r.Context(), body.Domain, body.Login, body.Password, opts)
@@ -531,7 +542,7 @@ func (h *webHub) httpAuthLogin(w http.ResponseWriter, r *http.Request) {
 		var le EncxLoginError
 		if errors.As(err, &le) {
 			writeJSON(w, http.StatusUnauthorized, map[string]any{"error": le.Error(), "code": le.Code})
-			return
+			return false
 		}
 		if encx.IsAntiSpam(err) {
 			writeJSON(w, http.StatusForbidden, map[string]any{
@@ -539,15 +550,12 @@ func (h *webHub) httpAuthLogin(w http.ResponseWriter, r *http.Request) {
 				"antispam": true,
 				"url":      encx.AntiSpamURLFromError(err),
 			})
-			return
+			return false
 		}
 		writeJSON(w, http.StatusBadGateway, map[string]string{"error": err.Error()})
-		return
+		return false
 	}
-	writeJSON(w, http.StatusOK, map[string]any{
-		"success":      true,
-		"session_file": sessionFile(&config{domain: body.Domain}),
-	})
+	return true
 }
 
 type authLogoutBody struct {

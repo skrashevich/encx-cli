@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -21,7 +22,7 @@ func newOnboardingTestServer(t *testing.T) *httptest.Server {
 	silentEngineEnv(t)
 	t.Setenv(onboardingFileEnvVar, filepath.Join(t.TempDir(), "onboarding", "state.json"))
 
-	hub := &webHub{cfg: &config{}, registry: NewAuthRegistry(), store: NewChatStore(), sse: newSSEHub()}
+	hub := &webHub{cfg: &config{useHTTP: true, engine: "legacy"}, registry: NewAuthRegistry(), store: NewChatStore(), sse: newSSEHub()}
 	srv := httptest.NewTestServer(t, hub.newMux())
 	srv.Start()
 	return srv
@@ -90,8 +91,8 @@ func TestWebOnboardingRequiredOnACleanMachine(t *testing.T) {
 func TestWebOnboardingCompletePersists(t *testing.T) {
 	srv := newOnboardingTestServer(t)
 
-	// The Finish button sends no body; that is the happy path, not a bad request.
-	status, payload, raw := onboardingRequest(t, srv, http.MethodPost, "/api/v1/onboarding/complete", "")
+	// Completion validates credentials before persisting the onboarding state.
+	status, payload, raw := onboardingRequest(t, srv, http.MethodPost, "/api/v1/onboarding/complete", onboardingCredentials(t))
 	if status != http.StatusOK {
 		t.Fatalf("POST complete status = %d, body %s", status, raw)
 	}
@@ -117,26 +118,63 @@ func TestWebOnboardingCompletePersists(t *testing.T) {
 	}
 }
 
-func TestWebOnboardingCompleteSkippedRoundTrips(t *testing.T) {
+func TestWebOnboardingRejectsMissingCredentials(t *testing.T) {
 	srv := newOnboardingTestServer(t)
+	for _, body := range []string{"", "{}", `{"skipped":true}`, `{"domain":"demo.en.cx","login":"player"}`} {
+		status, _, raw := onboardingRequest(t, srv, http.MethodPost, "/api/v1/onboarding/complete", body)
+		if status != http.StatusBadRequest {
+			t.Fatalf("status=%d body=%s", status, raw)
+		}
+	}
+	state, err := loadOnboardingState()
+	if err != nil || state.Completed {
+		t.Fatalf("state=%+v err=%v", state, err)
+	}
+}
 
-	status, payload, raw := onboardingRequest(t, srv, http.MethodPost, "/api/v1/onboarding/complete", `{"skipped":true}`)
-	if status != http.StatusOK {
-		t.Fatalf("POST complete status = %d, body %s", status, raw)
+func TestWebOnboardingRejectsInvalidCredentials(t *testing.T) {
+	srv := newOnboardingTestServer(t)
+	body := strings.Replace(onboardingCredentials(t), "secret", "wrong", 1)
+	status, _, raw := onboardingRequest(t, srv, http.MethodPost, "/api/v1/onboarding/complete", body)
+	if status != http.StatusUnauthorized {
+		t.Fatalf("status=%d body=%s", status, raw)
 	}
-	if !payload.Skipped || payload.Required {
-		t.Fatalf("payload = %+v, want a skipped completion", payload)
+	state, err := loadOnboardingState()
+	if err != nil || state.Completed {
+		t.Fatalf("state=%+v err=%v", state, err)
 	}
-	_, payload, raw = onboardingRequest(t, srv, http.MethodGet, "/api/v1/onboarding", "")
-	if !payload.Skipped || payload.Required {
-		t.Fatalf("GET after skip = %s, want skipped and not required", raw)
+}
+
+func onboardingCredentials(t *testing.T) string {
+	t.Helper()
+	upstream := httptest.NewTestServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/login/signin" || r.Method != http.MethodPost {
+			t.Errorf("unexpected login request: %s %s", r.Method, r.URL)
+			http.NotFound(w, r)
+			return
+		}
+		if err := r.ParseForm(); err != nil {
+			t.Error(err)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		if r.Form.Get("Login") != "player" || r.Form.Get("Password") != "secret" {
+			_, _ = w.Write([]byte(`{"Error":1}`))
+			return
+		}
+		_, _ = w.Write([]byte(`{"Error":0}`))
+	}))
+	upstream.Start()
+	body, err := json.Marshal(authLoginBody{Domain: strings.TrimPrefix(upstream.URL, "http://"), Login: "player", Password: "secret"})
+	if err != nil {
+		t.Fatal(err)
 	}
+	return string(body)
 }
 
 func TestWebOnboardingResetMakesItRequiredAgain(t *testing.T) {
 	srv := newOnboardingTestServer(t)
 
-	if status, _, raw := onboardingRequest(t, srv, http.MethodPost, "/api/v1/onboarding/complete", ""); status != http.StatusOK {
+	if status, _, raw := onboardingRequest(t, srv, http.MethodPost, "/api/v1/onboarding/complete", onboardingCredentials(t)); status != http.StatusOK {
 		t.Fatalf("POST complete status = %d, body %s", status, raw)
 	}
 	status, payload, raw := onboardingRequest(t, srv, http.MethodPost, "/api/v1/onboarding/reset", "")
