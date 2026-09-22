@@ -145,18 +145,24 @@ type chatPatch struct {
 	SecurityMode *AgentSecurityMode `json:"security_mode"`
 }
 
-// Update parses patch JSON and updates the thread; returns ok false if missing.
-func (s *ChatStore) Update(id string, patchJSON []byte) (snap ChatSnapshot, ok bool) {
+// Update rejects changes while a turn owns the thread. Never wait for t.mu
+// while holding s.mu: the agent holds t.mu and needs s.mu to persist results.
+// Returns ok false if missing or invalid, busy true if the thread is in use.
+func (s *ChatStore) Update(id string, patchJSON []byte) (snap ChatSnapshot, ok, busy bool) {
 	var p chatPatch
 	if err := json.Unmarshal(patchJSON, &p); err != nil {
-		return ChatSnapshot{}, false
+		return ChatSnapshot{}, false, false
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	t, ok := s.chats[id]
 	if !ok {
-		return ChatSnapshot{}, false
+		return ChatSnapshot{}, false, false
 	}
+	if t.running || !t.mu.TryLock() {
+		return ChatSnapshot{}, true, true
+	}
+	defer t.mu.Unlock()
 	if p.Title != nil {
 		t.Title = *p.Title
 	}
@@ -168,16 +174,14 @@ func (s *ChatStore) Update(id string, patchJSON []byte) (snap ChatSnapshot, ok b
 	}
 	if p.SecurityMode != nil {
 		if mode, valid := parseAgentSecurityMode(string(*p.SecurityMode)); valid {
-			t.mu.Lock()
 			if t.session == nil {
 				t.session = &llmSession{}
 			}
 			t.session.securityMode = mode
-			t.mu.Unlock()
 		}
 	}
 	t.UpdatedAt = time.Now().UTC()
-	return s.snapshotLocked(t), true
+	return s.snapshotLocked(t), true, false
 }
 
 // Delete removes a chat by id.

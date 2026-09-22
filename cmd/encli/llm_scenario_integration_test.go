@@ -1,11 +1,13 @@
 package main
 
 import (
+	"context"
 	"encoding/json/v2"
 	"net/url"
 	"os"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/skrashevich/encx-cli/encx"
 )
@@ -39,7 +41,19 @@ func TestScenarioImportRoundTripLocal(t *testing.T) {
 		}
 	}
 	cfg := &config{domain: u.Host, gameId: id, jsonOutput: true}
-	raw := captureStdout(t, func() { toolImportScenario(t.Context(), cfg, c, path) })
+	var statuses []string
+	var raw string
+	runWithToolProgress(t.Context(), AgentCallbacks{OnStatus: func(_, message string) {
+		statuses = append(statuses, message)
+	}}, &llmSession{preferRussian: true}, "admin_import_scenario", 5*time.Second, func(ctx context.Context) string {
+		raw = captureStdout(t, func() { toolImportScenario(ctx, cfg, c, path) })
+		return raw
+	})
+	for _, stage := range []string{"Чтение файла", "Чтение существующих", "Импорт уровня", "секторы и ответы", "Завершён уровень", "Проверка сценария"} {
+		if !strings.Contains(strings.Join(statuses, "\n"), stage) {
+			t.Errorf("missing progress stage %q in %v", stage, statuses)
+		}
+	}
 	var result struct {
 		Success  bool            `json:"success"`
 		Verified bool            `json:"verified"`

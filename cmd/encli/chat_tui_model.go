@@ -554,8 +554,11 @@ func (m *chatModel) patchChat(patch map[string]any) {
 		m.appendRow(UIMessageRoleSystem, "Ошибка: "+err.Error(), "")
 		return
 	}
-	if _, ok := m.store.Update(m.chatID, data); !ok {
+	if _, ok, busy := m.store.Update(m.chatID, data); !ok {
 		m.appendRow(UIMessageRoleSystem, "Чат не найден", "")
+		return
+	} else if busy {
+		m.appendRow(UIMessageRoleSystem, "Агент ещё работает. Остановите его перед изменением настроек чата.", "")
 		return
 	}
 	m.store.Persist(m.chatID)

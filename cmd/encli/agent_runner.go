@@ -657,7 +657,9 @@ func (r *picoLegacyToolRuntime) execute(ctx context.Context, name, argsJSON stri
 	}
 
 	started := time.Now()
-	rawResult := executeToolCallSafe(ctx, r.input.Cfg, r.input.Client, r.input.Session, name, argsJSON)
+	rawResult := runWithToolProgress(ctx, r.cb, r.input.Session, name, 5*time.Second, func(toolCtx context.Context) string {
+		return executeToolCallSafe(toolCtx, r.input.Cfg, r.input.Client, r.input.Session, name, argsJSON)
+	})
 	r.stats.addTool(time.Since(started))
 	llmResult := prepareToolResultForLLM(name, rawResult)
 	r.afterToolResult(name, argsJSON, llmResult)
