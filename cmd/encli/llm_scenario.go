@@ -98,6 +98,7 @@ func scenarioDifferences(want, got *scenario.Document) []string {
 }
 
 func verifyScenarioImport(ctx context.Context, client *encx.Client, gameID int, doc *scenario.Document) ([]string, error) {
+	reportToolProgress(ctx, "Verifying imported scenario: reading back from server", "Проверка сценария: повторное чтение с сервера")
 	actual, err := client.GetAdminGameScenario(ctx, gameID)
 	if err != nil {
 		return nil, fmt.Errorf("read back imported scenario: %w", err)
@@ -133,6 +134,7 @@ func toolVerifyScenario(ctx context.Context, cfg *config, client *encx.Client, p
 
 func toolImportScenario(ctx context.Context, cfg *config, client *encx.Client, path string) {
 	requireGameId(cfg)
+	reportToolProgress(ctx, "Reading scenario file", "Чтение файла сценария")
 	doc, err := readAgentScenario(path)
 	if err != nil {
 		fatal("Failed to parse scenario: %v", err)

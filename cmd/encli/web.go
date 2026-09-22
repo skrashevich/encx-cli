@@ -282,9 +282,13 @@ func (h *webHub) httpPatchChat(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "read body"})
 		return
 	}
-	snap, ok := h.store.Update(id, data)
+	snap, ok, busy := h.store.Update(id, data)
 	if !ok {
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "chat not found"})
+		return
+	}
+	if busy {
+		writeJSON(w, http.StatusConflict, map[string]string{"error": "Агент ещё работает. Дождитесь завершения или остановите его перед изменением настроек чата."})
 		return
 	}
 	h.store.Persist(id)

@@ -1235,6 +1235,7 @@ func readCurrentScenarioLevelsByNumber(ctx context.Context, client *encx.Client,
 
 func syncMissingScenario(ctx context.Context, cfg *config, client *encx.Client, doc *scenario.Document, progress func(string)) (importSyncStats, error) {
 	stats := importSyncStats{}
+	reportToolProgress(ctx, "Reading existing levels", "Чтение существующих уровней")
 
 	var levels []encx.AdminLevel
 	err := runWithAntiSpamRetry("read existing levels", func() error {
@@ -1257,6 +1258,7 @@ func syncMissingScenario(ctx context.Context, cfg *config, client *encx.Client, 
 				return stats, err
 			}
 			stats.LevelsCreated += batch
+			reportToolProgress(ctx, fmt.Sprintf("Created levels: %d/%d", stats.LevelsCreated, missing), fmt.Sprintf("Создано уровней: %d/%d", stats.LevelsCreated, missing))
 		}
 		progress(fmt.Sprintf("Created %d missing level(s)", stats.LevelsCreated))
 		levels, err = client.AdminGetLevels(ctx, cfg.gameId)
@@ -1271,11 +1273,13 @@ func syncMissingScenario(ctx context.Context, cfg *config, client *encx.Client, 
 		}
 	}
 
+	reportToolProgress(ctx, "Reading current scenario", "Чтение текущего сценария")
 	currentLevels, _ := readCurrentScenarioLevelsByNumber(ctx, client, cfg.gameId)
 
 	for idx, src := range doc.Levels {
 		levelNum := idx + 1
 		levelName := importLevelName(levelNum, src.Name)
+		reportToolProgress(ctx, fmt.Sprintf("Importing level %d/%d: %s", levelNum, len(doc.Levels), levelName), fmt.Sprintf("Импорт уровня %d/%d: %s", levelNum, len(doc.Levels), levelName))
 		var current *scenario.Level
 		if cur, ok := currentLevels[levelNum]; ok {
 			current = &cur
@@ -1334,9 +1338,11 @@ func syncMissingScenario(ctx context.Context, cfg *config, client *encx.Client, 
 			}
 		}
 
+		reportToolProgress(ctx, fmt.Sprintf("Level %d/%d: tasks", levelNum, len(doc.Levels)), fmt.Sprintf("Уровень %d/%d: задание", levelNum, len(doc.Levels)))
 		if err := syncLevelTasksToScenario(ctx, client, cfg.gameId, levelNum, src, current, &stats); err != nil {
 			return stats, err
 		}
+		reportToolProgress(ctx, fmt.Sprintf("Level %d/%d: hints", levelNum, len(doc.Levels)), fmt.Sprintf("Уровень %d/%d: подсказки", levelNum, len(doc.Levels)))
 		if err := syncLevelHintsToScenario(ctx, client, cfg.gameId, levelNum, src, current, &stats); err != nil {
 			return stats, err
 		}
@@ -1344,9 +1350,11 @@ func syncMissingScenario(ctx context.Context, cfg *config, client *encx.Client, 
 		if len(src.Bonuses) > 0 && levelID == 0 {
 			return stats, fmt.Errorf("level %d: missing admin level ID for bonus import", levelNum)
 		}
+		reportToolProgress(ctx, fmt.Sprintf("Level %d/%d: bonuses", levelNum, len(doc.Levels)), fmt.Sprintf("Уровень %d/%d: бонусы", levelNum, len(doc.Levels)))
 		if err := syncLevelBonusesToScenario(ctx, client, cfg.gameId, levelNum, levelID, src, current, &stats); err != nil {
 			return stats, err
 		}
+		reportToolProgress(ctx, fmt.Sprintf("Level %d/%d: sectors and answers", levelNum, len(doc.Levels)), fmt.Sprintf("Уровень %d/%d: секторы и ответы", levelNum, len(doc.Levels)))
 		if err := syncLevelSectorsToScenario(ctx, client, cfg.gameId, levelNum, src, &stats); err != nil {
 			return stats, err
 		}
@@ -1374,6 +1382,7 @@ func syncMissingScenario(ctx context.Context, cfg *config, client *encx.Client, 
 		}
 
 		progress(fmt.Sprintf("Synced level %d/%d: %s", levelNum, len(doc.Levels), levelName))
+		reportToolProgress(ctx, fmt.Sprintf("Completed level %d/%d: %s", levelNum, len(doc.Levels), levelName), fmt.Sprintf("Завершён уровень %d/%d: %s", levelNum, len(doc.Levels), levelName))
 	}
 
 	return stats, nil

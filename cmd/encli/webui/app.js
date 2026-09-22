@@ -416,9 +416,6 @@ function flashSecurityModeApplied() {
 async function applySecurityMode() {
   const mode = getSelectedSecurityMode();
   syncSecurityModeVisual();
-  if (state.detail) {
-    state.detail.security_mode = mode;
-  }
   if (!state.activeId) return;
   try {
     const updated = await api(`/chats/${encodeURIComponent(state.activeId)}`, {
