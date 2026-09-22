@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net"
 	"strings"
 	"sync"
 	"time"
@@ -18,6 +19,9 @@ import (
 )
 
 const (
+	// Bound each model request, not the whole run: tools may legitimately take longer.
+	agentModelRequestTimeout = 10 * time.Minute
+
 	agentEventAssistantText = "assistant_text"
 	agentEventToolStart     = "tool_start"
 	agentEventToolDone      = "tool_done"
@@ -299,6 +303,16 @@ func (p *observedPicoProvider) Chat(
 	options map[string]any,
 ) (*providers.LLMResponse, error) {
 	p.seen = messages
+	if p.session.antiSpamResult != "" {
+		var challenge struct {
+			URL string `json:"verification_url"`
+		}
+		_ = json.Unmarshal([]byte(p.session.antiSpamResult), &challenge)
+		return &providers.LLMResponse{FinishReason: "stop", Content: p.session.reviewText(
+			"Encounter requested anti-spam verification. Requests are paused; completed actions and tool results are saved. This does not mean the session was lost. Open "+challenge.URL+" in your browser, complete verification, then say ‘continue’. Before retrying writes, I will check what was saved on the server.",
+			"Encounter запросил антиспам-проверку. Запросы остановлены; выполненные действия и результаты инструментов сохранены. Это не означает потерю сессии. Откройте "+challenge.URL+" в браузере, пройдите проверку и напишите «продолжай». Перед повторной записью я проверю, что сохранилось на сервере.",
+		)}, nil
+	}
 	_, _, completedTurns, _, _, _ := p.stats.snapshot()
 	turn := completedTurns + 1
 	emitStatus(p.cb, "llm", p.session.reviewText(
@@ -318,14 +332,18 @@ func (p *observedPicoProvider) Chat(
 	// gets a request it can accept — it only gets "failed after 3 attempts".
 	retries, shrinks := 0, 0
 	for retries < 3 && shrinks <= agentMaxContextShrinks {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
 		// Waiting helps a rate limit, not a request that was simply too long, and
 		// the next one is rebuilt smaller anyway.
 		if retries > 0 && !shrunk {
 			delay := time.Duration(retries) * 5 * time.Second
-			emitStatus(p.cb, "retry", p.session.reviewText(
-				fmt.Sprintf("Retrying in %s…", delay),
-				fmt.Sprintf("Повтор через %s…", delay),
-			))
+			message := p.session.reviewText(
+				fmt.Sprintf("Retrying in %s (attempt %d/3)…", delay, retries+1),
+				fmt.Sprintf("Повтор через %s (попытка %d/3)…", delay, retries+1),
+			)
+			emitStatus(p.cb, "retry", message)
 			timer := time.NewTimer(delay)
 			select {
 			case <-ctx.Done():
@@ -344,8 +362,17 @@ func (p *observedPicoProvider) Chat(
 		}
 
 		response, lastErr = p.chatWithWait(ctx, requestMessages, toolDefs, model, options)
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
 		if lastErr == nil {
 			break
+		}
+		if isLLMTimeout(lastErr) {
+			return nil, fmt.Errorf("%s: %w", p.session.reviewText(
+				"Model response timed out; the provider may still be processing the request. No automatic retry was sent",
+				"Время ожидания ответа модели истекло; провайдер может продолжать обработку запроса. Автоматический повтор не отправлен",
+			), lastErr)
 		}
 		// The window is smaller than the budget assumed. Believe the provider
 		// rather than guess a window per model, and retry on the smaller one.
@@ -428,9 +455,16 @@ func (p *observedPicoProvider) chatWithWait(
 	model string,
 	options map[string]any,
 ) (*providers.LLMResponse, error) {
+	ctx, cancel := context.WithTimeout(ctx, agentModelRequestTimeout)
+	defer cancel()
 	done := make(chan struct{})
-	defer close(done)
+	stopped := make(chan struct{})
+	defer func() {
+		close(done)
+		<-stopped
+	}()
 	go func() {
+		defer close(stopped)
 		started := time.Now()
 		ticker := time.NewTicker(15 * time.Second)
 		defer ticker.Stop()
@@ -444,10 +478,15 @@ func (p *observedPicoProvider) chatWithWait(
 				))
 			case <-done:
 				return
+			case <-ctx.Done():
+				return
 			}
 		}
 	}()
 	response, err := p.delegate.Chat(ctx, messages, toolDefs, model, options)
+	if ctx.Err() != nil {
+		return nil, ctx.Err()
+	}
 	return response, withAPIErrorDetail(err)
 }
 
@@ -613,7 +652,7 @@ func (r *picoLegacyToolRuntime) execute(ctx context.Context, name, argsJSON stri
 	legacyToolExecutionMu.Lock()
 	defer legacyToolExecutionMu.Unlock()
 
-	if securityRequiresApproval(r.input.Session, name) {
+	if r.input.Session.antiSpamResult == "" && securityRequiresApproval(r.input.Session, name) {
 		if r.cb.ApproveToolCall == nil {
 			message := r.input.Session.reviewText(
 				"Tool approval required but no approval handler is configured",
@@ -704,14 +743,23 @@ func newPicoProvider(agentCfg AgentConfig) (providers.LLMProvider, error) {
 		}
 		return newGigaChatProvider(gigachat)
 	}
+	var extraBody map[string]any
+	if polzaEndpoint(agentCfg.BaseURL) {
+		extraBody = map[string]any{
+			"provider": map[string]any{
+				"sort":   "throughput",
+				"ignore": []string{"Relace", "relace/fp4"},
+			},
+		}
+	}
 	provider := providers.NewHTTPProviderWithMaxTokensFieldAndRequestTimeout(
 		agentCfg.APIKey,
 		strings.TrimRight(agentCfg.BaseURL, "/"),
 		"",
 		"",
 		"encli/"+version,
-		600,
-		nil,
+		int(agentModelRequestTimeout/time.Second),
+		extraBody,
 		nil,
 	)
 	if strings.Contains(strings.ToLower(agentCfg.BaseURL), "openrouter.ai") {
@@ -895,15 +943,34 @@ func isContextOverflowError(err error) bool {
 	return false
 }
 
-func isRetryableLLMError(err error) bool {
+// A timeout does not establish that the upstream generation stopped. Retrying
+// it can duplicate work and charges while the original request is still running.
+func isLLMTimeout(err error) bool {
 	if err == nil {
+		return false
+	}
+	if errors.Is(err, context.DeadlineExceeded) {
+		return true
+	}
+	if timeout, ok := errors.AsType[net.Error](err); ok && timeout.Timeout() {
+		return true
+	}
+	if failover, ok := errors.AsType[*providers.FailoverError](err); ok && failover.Reason == providers.FailoverTimeout {
+		return true
+	}
+	message := strings.ToLower(err.Error())
+	return strings.Contains(message, "timeout") || strings.Contains(message, "timed out") ||
+		strings.Contains(message, "deadline exceeded") || strings.Contains(message, "http 504")
+}
+
+func isRetryableLLMError(err error) bool {
+	if err == nil || errors.Is(err, context.Canceled) || isLLMTimeout(err) {
 		return false
 	}
 	var failover *providers.FailoverError
 	if errors.As(err, &failover) {
 		switch failover.Reason {
-		case providers.FailoverRateLimit, providers.FailoverNetwork,
-			providers.FailoverTimeout, providers.FailoverOverloaded:
+		case providers.FailoverRateLimit, providers.FailoverNetwork, providers.FailoverOverloaded:
 			return true
 		case providers.FailoverAuth, providers.FailoverBilling,
 			providers.FailoverFormat, providers.FailoverContextOverflow:
@@ -917,8 +984,8 @@ func isRetryableLLMError(err error) bool {
 		}
 	}
 	for _, transient := range []string{
-		"context deadline exceeded", "http 429", "http 502", "http 503", "http 504", "connection reset", "eof",
-		"rate limit", "rate_limit", "overloaded", "temporarily unavailable", "failover(network)", "failover(timeout)",
+		"http 429", "http 502", "http 503", "connection reset", "eof",
+		"rate limit", "rate_limit", "overloaded", "temporarily unavailable", "failover(network)",
 	} {
 		if strings.Contains(s, transient) {
 			return true
@@ -934,6 +1001,7 @@ func runAgentLoop(ctx context.Context, agentCfg AgentConfig, input *AgentRunInpu
 	if input.Session == nil {
 		input.Session = &llmSession{}
 	}
+	input.Session.antiSpamResult = ""
 
 	disablePicoClawLogging.Do(logger.DisableConsole)
 	stats := &agentRunStats{}
@@ -1009,7 +1077,7 @@ func runAgentLoop(ctx context.Context, agentCfg AgentConfig, input *AgentRunInpu
 		return input.Messages, err
 	}
 
-	if len(input.Session.pendingFixes) > 0 {
+	if input.Session.antiSpamResult == "" && len(input.Session.pendingFixes) > 0 {
 		fixes := append([]pendingAdminFix(nil), input.Session.pendingFixes...)
 		emitAgent(cb, AgentEvent{Type: agentEventApprovalNeed, PendingFixes: fixes})
 		if cb.RunPendingApprovals != nil {

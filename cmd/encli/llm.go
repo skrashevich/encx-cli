@@ -36,7 +36,8 @@ var agentMode bool
 
 // agentFatalError is the panic value used by fatal in agent mode.
 type agentFatalError struct {
-	Message string
+	Message     string
+	AntiSpamURL string
 }
 
 // llmTool is the persisted CLI catalog definition adapted into a PicoClaw tool.
@@ -70,6 +71,8 @@ type llmToolCallFunction struct {
 }
 
 type llmSession struct {
+	// Reset for each user turn; prevents a challenged batch from sending more requests.
+	antiSpamResult         string
 	securityMode           AgentSecurityMode
 	applyingApprovedFix    bool
 	preferRussian          bool

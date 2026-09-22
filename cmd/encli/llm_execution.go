@@ -15,6 +15,13 @@ import (
 
 // executeToolCallSafe runs a tool call, capturing stdout and recovering from fatal panics.
 func executeToolCallSafe(ctx context.Context, cfg *config, client *encx.Client, session *llmSession, name, argsJSON string) string {
+	if session != nil && session.antiSpamResult != "" {
+		var blocked map[string]any
+		_ = json.Unmarshal([]byte(session.antiSpamResult), &blocked)
+		blocked["skipped"] = true
+		payload, _ := json.Marshal(blocked)
+		return string(payload)
+	}
 	// Capture stdout
 	oldStdout := os.Stdout
 	r, w, _ := os.Pipe()
@@ -37,6 +44,18 @@ func executeToolCallSafe(ctx context.Context, cfg *config, client *encx.Client, 
 			if rec := recover(); rec != nil {
 				if fe, ok := rec.(agentFatalError); ok {
 					result = fmt.Sprintf(`{"error": %q}`, fe.Message)
+					if fe.AntiSpamURL != "" {
+						payload, _ := json.Marshal(map[string]any{
+							"error":            fe.Message,
+							"code":             "antispam_required",
+							"verification_url": fe.AntiSpamURL,
+							"action":           "Stop requests. Ask the user to complete browser verification, then continue in a new turn. Do not log in again or invent credentials. Preserve completed work; verify server state before retrying writes.",
+						})
+						result = string(payload)
+						if session != nil {
+							session.antiSpamResult = result
+						}
+					}
 				} else {
 					result = fmt.Sprintf(`{"error": "panic: %v"}`, rec)
 				}
@@ -135,11 +154,14 @@ func executeLLMToolCall(ctx context.Context, cfg *config, client *encx.Client, s
 		})
 
 	case "login":
-		cfg.login = getString("login")
-		cfg.password = getString("password")
-		if cfg.login == "" || cfg.password == "" {
+		login, password := getString("login"), getString("password")
+		if login == "" || password == "" {
 			fatal("LLM tool 'login' requires both login and password parameters")
 		}
+		if strings.EqualFold(strings.TrimSpace(login), "__ASK_USER__") || strings.EqualFold(strings.TrimSpace(password), "__ASK_USER__") {
+			fatal("Login requires real user-provided credentials; ask the user to sign in through settings instead of sending __ASK_USER__")
+		}
+		cfg.login, cfg.password = login, password
 		cmdLogin(ctx, cfg, client)
 
 	case "logout":

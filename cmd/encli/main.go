@@ -1086,6 +1086,9 @@ func requireAdminAuth(ctx context.Context, cfg *config, client *encx.Client) {
 			return
 		} else {
 			debugf("require admin auth: saved session rejected: %v", err)
+			if encx.IsAntiSpam(err) {
+				fatalEncx("Admin session verification paused", err)
+			}
 		}
 	}
 	if cfg.login == "" || cfg.password == "" {
@@ -1912,7 +1915,13 @@ func outputJSON(v any) {
 func fatal(format string, args ...any) {
 	msg := fmt.Sprintf(format, args...)
 	if agentMode {
-		panic(agentFatalError{Message: msg})
+		failure := agentFatalError{Message: msg}
+		for _, arg := range args {
+			if err, ok := arg.(error); ok && encx.IsAntiSpam(err) {
+				failure.AntiSpamURL = encx.AntiSpamURLFromError(err)
+			}
+		}
+		panic(failure)
 	}
 	if jsonMode {
 		outputJSON(map[string]string{"error": msg})
@@ -1923,6 +1932,9 @@ func fatal(format string, args ...any) {
 }
 
 func fatalEncx(context string, err error) {
+	if agentMode && encx.IsAntiSpam(err) {
+		fatal("%s: %v", context, err)
+	}
 	if msg := encx.AntiSpamUserMessage(err); msg != "" {
 		fatal("%s: %s", context, msg)
 	}
