@@ -7,6 +7,9 @@ const state = {
   activeId: null,
   detail: null,
   authDomains: [],
+  addingDomain: false,
+  loginBusy: false,
+  gamesRequest: 0,
   es: null,
   streamBuf: '',
   agentRunning: false,
@@ -246,11 +249,11 @@ function parseSSEPayload(ev) {
   }
 }
 
-async function loadAuthStatus() {
+async function loadAuthStatus(preferredDomain) {
   const data = await api('/auth/status');
   state.authDomains = Array.isArray(data?.domains) ? data.domains : [];
+  await fillDomainSelect(preferredDomain);
   renderAuth();
-  await fillDomainSelect();
 }
 
 async function loadAgentConfig() {
@@ -277,10 +280,10 @@ async function loadAgentConfig() {
   }
 }
 
-async function fillDomainSelect() {
+async function fillDomainSelect(preferredDomain) {
   const sel = $('field-domain');
   if (!sel) return;
-  const prev = sel.value;
+  const prev = preferredDomain || sel.value;
   let domains = [];
   try {
     const data = await api('/catalog/domains');
@@ -312,6 +315,8 @@ async function fillDomainSelect() {
 }
 
 async function loadGamesForDomain(domain) {
+  const request = ++state.gamesRequest;
+  state.catalogGames = [];
   const sel = $('field-game-id');
   if (!sel) return;
   sel.innerHTML = '';
@@ -331,10 +336,12 @@ async function loadGamesForDomain(domain) {
   sel.disabled = true;
   try {
     const data = await api(`/catalog/games?domain=${encodeURIComponent(domain)}`);
+    if (request !== state.gamesRequest) return;
     const games = Array.isArray(data?.games) ? data.games : [];
     state.catalogGames = games;
     await fillGameSelect(games);
   } catch (e) {
+    if (request !== state.gamesRequest) return;
     state.catalogGames = [];
     sel.innerHTML = '';
     const o = document.createElement('option');
@@ -502,6 +509,31 @@ function findAuthDomain(domain) {
   return state.authDomains.find((d) => d.domain === domain);
 }
 
+function setAddingDomain(open) {
+  state.addingDomain = open;
+  const form = $('login-form');
+  form.reset();
+  if (open) {
+    $('auth-panel').classList.add('is-open');
+    $('btn-auth-toggle').setAttribute('aria-expanded', 'true');
+  }
+  renderAuth();
+  if (open) form.querySelector('input[name="domain"]').focus();
+  else $('btn-add-domain').focus();
+}
+
+async function switchDomain(domain, refreshAuth = false) {
+  // A chat belongs to its saved domain. Leave it before composing on another one.
+  if (state.activeId && state.detail?.domain !== domain) {
+    stopRunningPoll();
+    state.agentRunning = false;
+    await switchChat(null);
+  }
+  if (refreshAuth) await loadAuthStatus(domain);
+  else await loadGamesForDomain(domain);
+  await onChatContextChanged();
+}
+
 function renderAuth() {
   const box = $('auth-status');
   const form = $('login-form');
@@ -510,12 +542,14 @@ function renderAuth() {
   const loggedInHere = isLoggedInOnDomain(domain);
 
   if (form) {
-    form.classList.toggle('is-collapsed', loggedInHere);
+    form.classList.toggle('is-collapsed', loggedInHere && !state.addingDomain);
     const domainInput = form.querySelector('input[name="domain"]');
-    if (domainInput && domain && !loggedInHere && !domainInput.value.trim()) {
+    if (domainInput && domain && !loggedInHere && !state.addingDomain && !domainInput.value.trim()) {
       domainInput.value = domain;
     }
   }
+  $('btn-add-domain')?.setAttribute('aria-expanded', String(state.addingDomain));
+  if ($('btn-cancel-add-domain')) $('btn-cancel-add-domain').hidden = !state.addingDomain;
   if (logoutBtn) logoutBtn.hidden = !loggedInHere;
 
   if (!box) return;
@@ -1373,21 +1407,31 @@ async function sendMessage() {
 
 async function onLoginSubmit(ev) {
   ev.preventDefault();
+  if (state.loginBusy) return;
   const fd = new FormData(ev.target);
   const domain = String(fd.get('domain') || '').trim();
   const login = String(fd.get('login') || '').trim();
   const password = String(fd.get('password') || '');
   if (!domain || !login || !password) return;
+  state.loginBusy = true;
+  const submit = ev.target.querySelector('button[type="submit"]');
+  submit.disabled = true;
+  $('btn-add-domain').disabled = true;
+  $('btn-cancel-add-domain').disabled = true;
   try {
     await api('/auth/login', { method: 'POST', body: { domain, login, password } });
     toast(`Вход выполнен (${domain}).`);
-    await loadAuthStatus();
-    const domSel = $('field-domain');
-    if (domSel) domSel.value = domain;
-    await loadGamesForDomain(domain);
-    await onChatContextChanged();
+    ev.target.reset();
+    state.addingDomain = false;
+    await switchDomain(domain, true);
+    $('field-domain').focus();
   } catch (e) {
     toast(e.message || String(e), true);
+  } finally {
+    state.loginBusy = false;
+    submit.disabled = false;
+    $('btn-add-domain').disabled = false;
+    $('btn-cancel-add-domain').disabled = false;
   }
 }
 
@@ -2705,10 +2749,12 @@ function bindUI() {
   $('btn-approval-no')?.addEventListener('click', () => postApproval('no'));
   $('btn-approval-quit')?.addEventListener('click', () => postApproval('quit'));
   $('login-form').addEventListener('submit', onLoginSubmit);
+  $('btn-add-domain')?.addEventListener('click', () => setAddingDomain(true));
+  $('btn-cancel-add-domain')?.addEventListener('click', () => setAddingDomain(false));
   bindLLMSettings();
   bindOnboarding();
   $('field-domain')?.addEventListener('change', () => {
-    void loadGamesForDomain(getSelectedDomain()).then(() => onChatContextChanged());
+    void switchDomain(getSelectedDomain());
   });
   $('field-game-id')?.addEventListener('change', () => {
     void onChatContextChanged();

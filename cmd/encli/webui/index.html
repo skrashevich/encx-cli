@@ -47,6 +47,7 @@
               <label for="field-game-id">Игра</label>
               <select id="field-game-id" name="game-id" aria-label="Игра"></select>
             </div>
+            <button type="button" class="btn btn-ghost" id="btn-add-domain" aria-controls="login-form" aria-expanded="false">Добавить домен</button>
           </div>
           <div class="context-actions">
             <button type="button" class="btn btn-secondary" id="btn-patch-chat" disabled>Сохранить</button>
@@ -69,6 +70,7 @@
             <input type="text" name="login" placeholder="логин" autocomplete="username" aria-label="Логин" required />
             <input type="password" name="password" placeholder="пароль" autocomplete="current-password" aria-label="Пароль" required />
             <button type="submit" class="btn btn-accent btn-auth">Войти</button>
+            <button type="button" class="btn btn-ghost btn-auth" id="btn-cancel-add-domain" hidden>Отмена</button>
           </form>
           <button type="button" class="btn btn-ghost btn-auth" id="btn-logout" hidden>Выйти</button>
           <ul class="auth-sessions" id="auth-status" aria-live="polite"></ul>
