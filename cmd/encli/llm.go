@@ -73,6 +73,7 @@ type llmToolCallFunction struct {
 type llmSession struct {
 	// Reset for each user turn; prevents a challenged batch from sending more requests.
 	antiSpamResult         string
+	latestUserMessage      string // source text for checking answer codes before admin writes
 	securityMode           AgentSecurityMode
 	applyingApprovedFix    bool
 	preferRussian          bool

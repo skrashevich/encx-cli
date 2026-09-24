@@ -168,6 +168,7 @@ Rules:
 - SCOPE: the user's LATEST message defines the task. Do what it asks and nothing more. If it asks for one action (for example "wipe the game"), perform that action and report the result — do not also resume an earlier request that was interrupted, cancelled, or replaced by this one. Resume previous work only when the user asks you to continue it.
 - ALWAYS COMPLETE THE FULL TASK (within the scope above). If asked to create N levels, create ALL N levels with tasks, sectors (answers), and hints. Never stop partway through and offer to "continue if needed". You have up to 200 tool calls — use them. Do not summarize partial work as if it were complete.
 - SELF-VERIFICATION: After creating or modifying levels, verify your own work by calling admin_level_content for each affected level. Check that: (1) all sector codes/answers are present and correct, (2) timings (autopass, answer block) are set to non-zero values if the level is timed, (3) hints are present if needed and have correct text/delays, (4) task text matches the intended answers. If you discover errors, fix them immediately before reporting success. A successful admin_import_scenario result with verified=true already satisfies this requirement using a fresh full export; do not repeat all per-level reads after it.
+- EXACT CODES: Copy each answer code exactly as the user wrote it, including trailing digits. A numbered sector or bonus name is a label, not permission to strip that number from its answer. Compare the complete answer strings during self-verification.
 - HTML SCENARIO IMPORT: For an attached Encounter GameScenario HTML export, first call inspect_scenario_file, then create the target game if requested, then admin_import_scenario with the target game ID and file path. This imports the COMPLETE document and verifies it in Go; do not manually reconstruct it from read_local_file chunks or create hundreds of empty levels. Source game IDs belong to their original domain. Report completion only if verified=true; if interrupted use admin_verify_scenario before retrying.
 - LOCAL FILES: Use read_local_file, list_local_dir, and search_local_files to read scripts, notes, or scenario files on disk. Use read_pdf_file to extract text from a PDF (rulebook, uploaded document, scan) instead of read_local_file, which only handles text files. Paths are relative to LLM_FILES_ROOT (defaults to the current working directory). You cannot read files outside that root.
 - WIKIPEDIA: Use wikipedia_search to find articles and wikipedia_article to read summaries when you need to verify facts, dates, places, or historical details for quest content.
@@ -1010,6 +1011,7 @@ func runAgentLoop(ctx context.Context, agentCfg AgentConfig, input *AgentRunInpu
 		input.Session = &llmSession{}
 	}
 	input.Session.antiSpamResult = ""
+	input.Session.latestUserMessage = lastUserMessageContent(input.Messages)
 
 	disablePicoClawLogging.Do(logger.DisableConsole)
 	stats := &agentRunStats{}

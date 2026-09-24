@@ -137,6 +137,11 @@ func executeLLMToolCall(ctx context.Context, cfg *config, client *encx.Client, s
 	if securityBlocksMutation(session, name) {
 		fatal("Tool %q is blocked in read-only mode", name)
 	}
+	if session != nil && (name == "admin_create_sector" || name == "admin_create_bonus" || name == "admin_update_sector") {
+		if err := checkRequestedCodeSuffix(session.latestUserMessage, getString("name"), getStringSlice("answers")); err != nil {
+			fatal("%v", err)
+		}
+	}
 	switch name {
 	case "propose_admin_fix":
 		if session == nil {
