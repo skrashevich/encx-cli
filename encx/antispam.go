@@ -209,6 +209,15 @@ func isNotHumanRequest(location string) bool {
 	return strings.Contains(strings.ToLower(location), "nothumanrequest")
 }
 
+func isRobotRequestsPage(body []byte) bool {
+	page := strings.ToLower(strings.TrimSpace(string(body)))
+	if !strings.HasPrefix(page, "<") {
+		return false
+	}
+	return strings.Contains(page, "запросы классифицированы как запросы робота") ||
+		strings.Contains(page, "requests have been classified as robot")
+}
+
 func isRedirectStatus(code int) bool {
 	return code == http.StatusMovedPermanently ||
 		code == http.StatusFound ||
@@ -217,7 +226,7 @@ func isRedirectStatus(code int) bool {
 		code == http.StatusPermanentRedirect
 }
 
-// guardAntiSpam returns an error when the server challenged with NotHumanRequest.aspx.
+// guardAntiSpam returns an error for an Encounter robot-check redirect or page.
 func guardAntiSpam(domain, scheme string, resp *http.Response, body []byte) error {
 	if resp != nil {
 		if isRedirectStatus(resp.StatusCode) {
@@ -229,13 +238,13 @@ func guardAntiSpam(domain, scheme string, resp *http.Response, body []byte) erro
 			return newAntiSpamError(domain, scheme, resp.Request.URL.RequestURI())
 		}
 	}
-	if len(body) > 0 && isNotHumanRequest(string(body)) {
+	if len(body) > 0 && (isNotHumanRequest(string(body)) || isRobotRequestsPage(body)) {
 		return newAntiSpamError(domain, scheme, "")
 	}
 	return nil
 }
 
-// readResponseBody reads the HTTP body and detects anti-spam redirects.
+// readResponseBody reads the HTTP body and detects anti-spam challenges.
 func (c *Client) readResponseBody(resp *http.Response) ([]byte, error) {
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
@@ -252,7 +261,7 @@ func (c *Client) ensureJSONBody(body []byte) error {
 	if len(body) == 0 || body[0] != '<' {
 		return nil
 	}
-	if isNotHumanRequest(string(body)) {
+	if isNotHumanRequest(string(body)) || isRobotRequestsPage(body) {
 		return newAntiSpamError(c.domain, c.scheme, "")
 	}
 	return fmt.Errorf("encx: session expired or access denied (server returned HTML instead of JSON; try re-login)")

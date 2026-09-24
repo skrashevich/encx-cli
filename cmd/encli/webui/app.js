@@ -513,6 +513,7 @@ function setAddingDomain(open) {
   state.addingDomain = open;
   const form = $('login-form');
   form.reset();
+  $('auth-feedback').hidden = true;
   if (open) {
     $('auth-panel').classList.add('is-open');
     $('btn-auth-toggle').setAttribute('aria-expanded', 'true');
@@ -1413,6 +1414,7 @@ async function onLoginSubmit(ev) {
   const login = String(fd.get('login') || '').trim();
   const password = String(fd.get('password') || '');
   if (!domain || !login || !password) return;
+  $('auth-feedback').hidden = true;
   state.loginBusy = true;
   const submit = ev.target.querySelector('button[type="submit"]');
   submit.disabled = true;
@@ -1426,7 +1428,25 @@ async function onLoginSubmit(ev) {
     await switchDomain(domain, true);
     $('field-domain').focus();
   } catch (e) {
-    toast(e.message || String(e), true);
+    if (e.data?.antispam) {
+      const feedback = $('auth-feedback');
+      feedback.textContent = 'Encounter ограничил запросы: подождите 30 минут или войдите на сайт домена и подтвердите, что вы не робот. Затем повторите вход здесь.';
+      try {
+        const verificationURL = new URL(e.data.url);
+        if (verificationURL.protocol === 'https:' && verificationURL.hostname.toLowerCase() === domain.toLowerCase()) {
+          const link = document.createElement('a');
+          link.href = verificationURL.href;
+          link.target = '_blank';
+          link.rel = 'noopener noreferrer';
+          link.textContent = ' Открыть страницу проверки';
+          feedback.append(link);
+        }
+      } catch { /* The explanation remains useful without a verification URL. */ }
+      feedback.hidden = false;
+      ev.target.elements.password.value = '';
+    } else {
+      toast(e.message || String(e), true);
+    }
   } finally {
     state.loginBusy = false;
     submit.disabled = false;

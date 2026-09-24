@@ -736,6 +736,24 @@ html[data-sidebar="closed"] .sidebar {
   white-space: nowrap;
 }
 
+.auth-feedback {
+  flex: 1 0 100%;
+  margin: 0;
+  padding: 8px 10px;
+  border: 1px solid var(--amber);
+  border-radius: var(--radius-sm);
+  font-size: 0.78rem;
+  line-height: 1.4;
+}
+
+.auth-feedback[hidden] {
+  display: none;
+}
+
+.auth-feedback a {
+  color: var(--teal);
+}
+
 .auth-sessions {
   display: flex;
   flex-wrap: wrap;
@@ -2166,6 +2184,7 @@ html[data-theme="light"] .onboarding-step.is-active .onboarding-step-num {
   }
 
   .auth-panel:not(.is-open) .login-form,
+  .auth-panel:not(.is-open) .auth-feedback,
   .auth-panel:not(.is-open) .auth-sessions,
   .auth-panel:not(.is-open) #btn-logout {
     display: none;

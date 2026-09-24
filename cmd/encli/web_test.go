@@ -212,6 +212,44 @@ func jsonQuote(s string) string {
 	return string(b)
 }
 
+func TestWebAuthLoginRobotRequestsPage(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	engine := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost || r.URL.Path != "/login/signin" {
+			t.Errorf("unexpected engine request: %s %s", r.Method, r.URL.Path)
+		}
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		_, _ = w.Write([]byte(`<html><body>Ваши запросы классифицированы как запросы робота. Подождите 30 минут или войдите в систему.</body></html>`))
+	}))
+	defer engine.Close()
+
+	domain := engine.Listener.Addr().String()
+	hub := &webHub{
+		cfg:      &config{engine: "legacy", useHTTP: true},
+		registry: NewAuthRegistry(),
+		store:    NewChatStore(),
+		sse:      newSSEHub(),
+	}
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/auth/login", stringsReader(`{"domain":`+jsonQuote(domain)+`,"login":"player","password":"secret"}`))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	hub.newMux().ServeHTTP(w, req)
+
+	if w.Code != http.StatusForbidden {
+		t.Fatalf("status = %d, want 403: %s", w.Code, w.Body.String())
+	}
+	var got struct {
+		AntiSpam bool   `json:"antispam"`
+		URL      string `json:"url"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &got); err != nil {
+		t.Fatal(err)
+	}
+	if !got.AntiSpam || got.URL == "" {
+		t.Fatalf("anti-spam details missing: %+v", got)
+	}
+}
+
 func TestWebPostMessageAndConflict(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 	cfg := &config{}

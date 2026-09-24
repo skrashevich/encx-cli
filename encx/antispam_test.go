@@ -34,6 +34,19 @@ func TestGuardAntiSpamBody(t *testing.T) {
 	}
 }
 
+func TestGuardAntiSpamRobotRequestsPage(t *testing.T) {
+	resp := &http.Response{StatusCode: http.StatusOK}
+	for _, body := range []string{
+		`<html><body>Ваши запросы классифицированы как запросы робота. Подождите 30 минут или войдите в систему.</body></html>`,
+		`<html><body>Your requests have been classified as robot's requests. Please, wait 30 minutes or login.</body></html>`,
+	} {
+		err := guardAntiSpam("world.en.cx", "https", resp, []byte(body))
+		if !IsAntiSpam(err) {
+			t.Errorf("expected anti-spam error for %q, got %v", body, err)
+		}
+	}
+}
+
 func TestGuardAntiSpamNoMatch(t *testing.T) {
 	resp := &http.Response{
 		StatusCode: http.StatusFound,
@@ -41,6 +54,9 @@ func TestGuardAntiSpamNoMatch(t *testing.T) {
 	}
 	if err := guardAntiSpam("tech.en.cx", "https", resp, []byte(`{"ok":true}`)); err != nil {
 		t.Fatalf("unexpected error: %v", err)
+	}
+	if err := guardAntiSpam("tech.en.cx", "https", resp, []byte(`{"task":"requests have been classified as robot's requests"}`)); err != nil {
+		t.Fatalf("JSON content must not be classified as an anti-spam page: %v", err)
 	}
 }
 
