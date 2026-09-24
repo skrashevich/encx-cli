@@ -173,6 +173,7 @@ ENCX_LIVE_DOMAIN=demo.en.cx ENCX_LIVE_LOGIN=… ENCX_LIVE_PASSWORD=… \
 |---|---|
 | `AdminCopyGame` | оркестрация над другими методами encx.Client — работает на обоих движках без отдельной реализации |
 | `AdminWipeGame` | оркестрация над другими методами encx.Client — работает на обоих движках без отдельной реализации |
+| `SessionHTTPClient` | текущие cookies и API-токен с ограничением по адресу; сохраняет транспорт и правила редиректов вызывающего кода |
 | `ExportCookies` | сессия: массив cookies на legacy, объект с apiToken когда задействован новый движок |
 | `ImportCookies` | принимает оба формата |
 | `APIToken` | JWT нового движка (пусто на legacy) |

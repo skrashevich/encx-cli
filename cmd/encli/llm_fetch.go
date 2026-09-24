@@ -15,6 +15,8 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"github.com/skrashevich/encx-cli/encx"
+
 	"golang.org/x/net/html"
 	"golang.org/x/net/html/charset"
 )
@@ -137,9 +139,9 @@ func isFetchableScheme(scheme string) bool {
 	}
 }
 
-// toolFetchURL downloads a public web page and returns it as plain text, so the
+// toolFetchURL downloads a web page and returns it as plain text, so the
 // agent can read a link the user pasted instead of claiming it cannot.
-func toolFetchURL(ctx context.Context, rawURL string, maxBytes, offset int) {
+func toolFetchURL(ctx context.Context, encounter *encx.Client, rawURL string, maxBytes, offset int) {
 	rawURL = strings.TrimSpace(rawURL)
 	if rawURL == "" {
 		fatal("url is required")
@@ -175,7 +177,11 @@ func toolFetchURL(ctx context.Context, rawURL string, maxBytes, offset int) {
 	req.Header.Set("User-Agent", agentUserAgent)
 	req.Header.Set("Accept", "text/html,application/xhtml+xml,text/plain,application/json;q=0.9,*/*;q=0.1")
 
-	resp, err := fetchHTTPClient.Do(req)
+	client := fetchHTTPClient
+	if encounter != nil {
+		client = encounter.SessionHTTPClient(client)
+	}
+	resp, err := client.Do(req)
 	if err != nil {
 		fatal("failed to fetch %s: %v", rawURL, err)
 	}

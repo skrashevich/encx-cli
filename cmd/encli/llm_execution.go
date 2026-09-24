@@ -562,7 +562,7 @@ func executeLLMToolCall(ctx context.Context, cfg *config, client *encx.Client, s
 		toolWikipediaArticle(ctx, getString("title"), getString("lang"))
 
 	case "fetch_url":
-		toolFetchURL(ctx, getString("url"), getInt("max_bytes"), getInt("offset"))
+		toolFetchURL(ctx, client, getString("url"), getInt("max_bytes"), getInt("offset"))
 
 	default:
 		fatal("Unknown tool call: %s", name)

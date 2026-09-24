@@ -295,6 +295,12 @@ func (c *Client) setHeaders(req *http.Request) {
 	if c.lang != "" {
 		req.Header.Set("Accept-Language", c.lang)
 	}
+	c.SetSessionHeaders(req)
+}
+
+// SetSessionHeaders applies the active API session. Callers must restrict it to
+// the configured API origin; it is not safe for arbitrary URLs.
+func (c *Client) SetSessionHeaders(req *http.Request) {
 	if c.domain != "" {
 		req.Header.Set(DomainHeader, c.domain)
 	}

@@ -20,10 +20,11 @@ var engineIndependentMethods = map[string]string{
 	"AdminCopyGame": "composed entirely of dispatched methods",
 	"AdminWipeGame": "composed entirely of dispatched methods",
 
-	"ExportCookies": "session persistence, engine-aware inside",
-	"ImportCookies": "session persistence, engine-aware inside",
-	"APIToken":      "new-engine session accessor",
-	"SetAPIToken":   "new-engine session accessor",
+	"SessionHTTPClient": "scoped session transport shared by both engines",
+	"ExportCookies":     "session persistence, engine-aware inside",
+	"ImportCookies":     "session persistence, engine-aware inside",
+	"APIToken":          "new-engine session accessor",
+	"SetAPIToken":       "new-engine session accessor",
 
 	"GetAdminGameScenario": "author scenario export plus administrative bonus flags",
 	"APIBaseURL":           "engine selection",

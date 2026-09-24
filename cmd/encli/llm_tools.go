@@ -296,7 +296,7 @@ func getTools() []llmTool {
 		}},
 		{Type: "function", Function: llmFunction{
 			Name:        "fetch_url",
-			Description: "Fetch an external web page or text document by URL and return it as plain text (HTML is converted to readable text). Use this whenever the user gives a link — question packs, rules, articles, any public page. Do not tell the user a link cannot be opened; call this tool.",
+			Description: "Fetch an external web page or text document by URL and return it as plain text (HTML is converted to readable text). Use this whenever the user gives a link — question packs, rules, articles, any public page. Encounter URLs reuse the active user session when available; external sites receive no Encounter credentials. Do not tell the user a link cannot be opened; call this tool.",
 			Parameters:  json.RawMessage(`{"type":"object","properties":{"url":{"type":"string","description":"Absolute http or https URL"},"max_bytes":{"type":"integer","description":"Max bytes of text to return (default 65536, max 524288)"},"offset":{"type":"integer","description":"Byte offset into the extracted text; use to page through a long document"}},"required":["url"]}`),
 		}},
 		{Type: "function", Function: llmFunction{
