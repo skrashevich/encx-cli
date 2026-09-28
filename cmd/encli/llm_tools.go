@@ -185,6 +185,11 @@ func getTools() []llmTool {
 			Parameters:  json.RawMessage(`{"type":"object","properties":{"game_id":{"type":"integer","description":"Game ID"},"level_number":{"type":"integer","description":"Level number"},"hint_id":{"type":"integer","description":"Hint ID"}},"required":["game_id","level_number","hint_id"]}`),
 		}},
 		{Type: "function", Function: llmFunction{
+			Name:        "admin_upload_image",
+			Description: "Upload a local PNG, JPEG, GIF or WebP image to this game's own file storage and return its direct URL for use in task HTML (<img src=...>). Does not edit any level. The path may refer to an attached chat file or a file under LLM_FILES_ROOT. Refuses an existing filename; choose a unique name when needed.",
+			Parameters:  json.RawMessage(`{"type":"object","properties":{"game_id":{"type":"integer","minimum":1,"description":"Target game ID on the current domain"},"path":{"type":"string","description":"Local image path"},"name":{"type":"string","description":"Optional filename in game storage; defaults to local basename"}},"required":["game_id","path"]}`),
+		}},
+		{Type: "function", Function: llmFunction{
 			Name:        "admin_create_task",
 			Description: "Add a task (assignment text) to a level that has none. A level holds one task: if it already has one this fails — read the task id with admin_level_content and call admin_update_task to replace the text.",
 			Parameters:  json.RawMessage(`{"type":"object","properties":{"game_id":{"type":"integer","description":"Game ID"},"level_number":{"type":"integer","description":"Level number"},"text":{"type":"string","description":"Task text"}},"required":["game_id","level_number","text"]}`),

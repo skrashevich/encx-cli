@@ -46,6 +46,7 @@ func isAdminMutationTool(name string) bool {
 		"admin_create_hint",
 		"admin_delete_hint",
 		"admin_create_task",
+		"admin_upload_image",
 		"admin_update_task",
 		"admin_delete_task",
 		"admin_set_comment",

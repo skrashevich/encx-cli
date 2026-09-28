@@ -56,6 +56,7 @@ type backend interface {
 
 	// Admin level editor
 	AdminGetGames(ctx context.Context) ([]AdminGame, error)
+	AdminUploadGameImage(ctx context.Context, gameID int, name string, data []byte) (*AdminGameFile, error)
 	AdminGetLevels(ctx context.Context, gameId int) ([]AdminLevel, error)
 	AdminCreateLevels(ctx context.Context, gameId, count int) error
 	AdminDeleteLevel(ctx context.Context, gameId, levelNum int) error

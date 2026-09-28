@@ -366,6 +366,10 @@ func executeLLMToolCall(ctx context.Context, cfg *config, client *encx.Client, s
 			getString("text"),
 		})
 
+	case "admin_upload_image":
+		requireAdminAuth(ctx, cfg, client)
+		toolAdminUploadImage(ctx, cfg, client, getString("path"), getString("name"))
+
 	case "admin_update_task":
 		requireAdminAuth(ctx, cfg, client)
 		cmdAdminUpdateTask(ctx, cfg, client, []string{
