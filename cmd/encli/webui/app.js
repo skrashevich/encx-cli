@@ -859,8 +859,15 @@ function buildToolChipMeta(p) {
 }
 
 let toolTipAnchor = null;
+let toolTipHideTimer = null;
+
+function scheduleHideToolChipTooltip() {
+  clearTimeout(toolTipHideTimer);
+  toolTipHideTimer = setTimeout(hideToolChipTooltip, 150);
+}
 
 function hideToolChipTooltip() {
+  clearTimeout(toolTipHideTimer);
   toolTipAnchor = null;
   const tip = $('tool-chip-tooltip');
   if (tip) tip.hidden = true;
@@ -869,6 +876,9 @@ function hideToolChipTooltip() {
 function showToolChipTooltip(el, meta) {
   const tip = $('tool-chip-tooltip');
   if (!tip || !el) return;
+  clearTimeout(toolTipHideTimer);
+  tip.onmouseenter = tip.onfocus = () => clearTimeout(toolTipHideTimer);
+  tip.onmouseleave = tip.onblur = scheduleHideToolChipTooltip;
   toolTipAnchor = el;
   const detailItems = meta.details.length
     ? meta.details.map((line) => `<li>${escapeHtml(line)}</li>`).join('')
@@ -902,7 +912,7 @@ function positionToolChipTooltip(el) {
 
 function bindToolChipTooltip(el, meta) {
   const show = () => showToolChipTooltip(el, meta);
-  const hide = () => hideToolChipTooltip();
+  const hide = scheduleHideToolChipTooltip;
   el.addEventListener('mouseenter', show);
   el.addEventListener('mouseleave', hide);
   el.addEventListener('focus', show);
@@ -2849,6 +2859,9 @@ async function boot() {
   }, true);
   window.addEventListener('resize', () => {
     if (toolTipAnchor) positionToolChipTooltip(toolTipAnchor);
+  });
+  window.addEventListener('keydown', (event) => {
+    if (event.key === 'Escape') hideToolChipTooltip();
   });
   requestAnimationFrame(() => document.body.classList.add('is-ready'));
   await bootstrapWorkspace();

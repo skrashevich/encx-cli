@@ -1165,6 +1165,10 @@ html[data-sidebar="closed"] .sidebar {
   position: fixed;
   z-index: 200;
   max-width: min(340px, calc(100vw - 24px));
+  max-height: min(480px, calc(100dvh - 16px));
+  overflow: auto;
+  overflow-wrap: anywhere;
+  overscroll-behavior: contain;
   padding: 10px 12px;
   border-radius: var(--radius);
   border: 1px solid color-mix(in srgb, var(--teal) 45%, var(--border));
@@ -1173,7 +1177,7 @@ html[data-sidebar="closed"] .sidebar {
   font-family: var(--font-sans);
   font-size: 0.82rem;
   line-height: 1.45;
-  pointer-events: none;
+  pointer-events: auto;
 }
 
 .tool-chip-tooltip-action {

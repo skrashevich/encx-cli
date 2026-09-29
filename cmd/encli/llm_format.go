@@ -132,6 +132,8 @@ func formatToolCallForDisplay(session *llmSession, name, argsJSON string) string
 		return format(rt("Deleting hint", "Удаляю подсказку"))
 	case "admin_create_task":
 		return format(rt("Creating task", "Создаю задание"))
+	case "admin_update_task":
+		return format(rt("Updating task", "Обновляю задание"))
 	case "admin_add_correction":
 		return format(rt("Adding correction", "Добавляю коррекцию"))
 	case "admin_delete_correction":
@@ -220,6 +222,18 @@ func formatToolCallForDisplay(session *llmSession, name, argsJSON string) string
 		}
 		return format(rt("Fetching a web page", "Загружаю веб-страницу"))
 	default:
+		// Decode JSON escapes for display, preserving large numeric identifiers.
+		var value any
+		decoder := json.NewDecoder(strings.NewReader(argsJSON))
+		decoder.UseNumber()
+		if json.Valid([]byte(argsJSON)) && decoder.Decode(&value) == nil {
+			var display strings.Builder
+			encoder := json.NewEncoder(&display)
+			encoder.SetEscapeHTML(false)
+			if encoder.Encode(value) == nil {
+				argsJSON = strings.TrimSpace(display.String())
+			}
+		}
 		return format(fmt.Sprintf("[%s] %s", name, argsJSON))
 	}
 }
@@ -227,11 +241,11 @@ func formatToolCallForDisplay(session *llmSession, name, argsJSON string) string
 // formatToolApprovalAction is a short headline for approval UI (no timestamp).
 func formatToolApprovalAction(session *llmSession, name, argsJSON string) string {
 	line := formatToolCallForDisplay(session, name, argsJSON)
-	if idx := strings.Index(line, " — "); idx >= 0 {
-		return strings.TrimSpace(line[idx+3:])
-	}
-	if idx := strings.Index(line, " - "); idx >= 0 {
-		return strings.TrimSpace(line[idx+3:])
+	_, line, _ = strings.Cut(line, "  ") // Timestamp separator.
+	if strings.HasPrefix(line, "game#") || strings.HasPrefix(line, "ур.") {
+		if _, action, ok := strings.Cut(line, " — "); ok {
+			return strings.TrimSpace(action)
+		}
 	}
 	return strings.TrimSpace(line)
 }
