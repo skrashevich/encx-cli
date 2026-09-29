@@ -31,7 +31,10 @@ func TestBonusCLIAndLLMWrite(t *testing.T) {
 <input name="rbAllLevels" value="1" checked="checked" type="radio">
 <input name="chkDelay" checked="checked" type="checkbox"><input name="txtDelaySeconds" value="15">
 <textarea name="txtTask">task</textarea><textarea name="txtHelp">hint</textarea>`)
-			case "save":
+			case "save", "update":
+				if r.URL.Query().Get("bonus") == "42" && r.URL.Query().Get("action") != "update" {
+					t.Error("updating an existing bonus must not use the create action")
+				}
 				if err := r.ParseForm(); err != nil {
 					t.Error(err)
 				}
@@ -71,7 +74,7 @@ func TestBonusCLIAndLLMWrite(t *testing.T) {
 				}
 				for key, want := range map[string]string{
 					"txtHours": "0", "txtMinutes": fmt.Sprint(minutes), "txtSeconds": "0",
-					"txtBonusName": "Б 1", "txtTask": "task", "txtHelp": "hint", "answer_-1": "дом1",
+					"txtBonusName": "Б 1", "txtTask": "task", "txtHelp": "hint", "answer_1": "дом1",
 					"rbAllLevels": "1", "chkDelay": "on", "txtDelaySeconds": "15", "negative": "",
 				} {
 					if got := saved.Get(key); got != want {

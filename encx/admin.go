@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/url"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -1296,10 +1297,25 @@ func (c *Client) legacyAdminUpdateTask(ctx context.Context, gameId, levelNum, ta
 
 // AdminUpdateBonus updates an existing bonus by its ID.
 func (c *Client) legacyAdminUpdateBonus(ctx context.Context, gameId, levelNum, bonusId int, b AdminBonus) error {
-	u := fmt.Sprintf("%s/Administration/Games/BonusEdit.aspx?gid=%d&level=%d&bonus=%d&action=save",
+	if bonusId <= 0 {
+		return fmt.Errorf("encx: admin update bonus: bonus ID must be positive")
+	}
+	editURL := fmt.Sprintf("%s/Administration/Games/BonusEdit.aspx?gid=%d&level=%d&bonus=%d&action=edit",
 		c.baseURL(), gameId, levelNum, bonusId)
-
-	form := url.Values{}
+	body, err := c.doGet(ctx, editURL)
+	if err != nil {
+		return fmt.Errorf("encx: admin read bonus before update: %w", err)
+	}
+	if _, ok := parseEnabledInputs(body)["txtBonusName"]; !ok {
+		return fmt.Errorf("encx: admin update bonus: bonus edit form is missing; no update sent")
+	}
+	// The editor posts action=update. action=save creates a new bonus even
+	// when the query already contains an existing bonus ID.
+	u := fmt.Sprintf("%s/Administration/Games/BonusEdit.aspx?gid=%d&level=%d&bonus=%d&action=update",
+		c.baseURL(), gameId, levelNum, bonusId)
+	form := adminBonusUpdateAnswers(body, b.Answers)
+	form.Set("btnUpdate.x", "1")
+	form.Set("btnUpdate.y", "1")
 	form.Set("txtBonusName", b.Name)
 	form.Set("txtTask", b.Task)
 	form.Set("txtHelp", b.Hint)
@@ -1310,10 +1326,6 @@ func (c *Client) legacyAdminUpdateBonus(ctx context.Context, gameId, levelNum, b
 	} else {
 		form.Set("rbAllLevels", "0")
 		form.Set(fmt.Sprintf("level_%d", b.LevelID), "on")
-	}
-
-	for i, ans := range b.Answers {
-		form.Set(fmt.Sprintf("answer_-%d", i+1), ans)
 	}
 
 	form.Set("txtHours", strconv.Itoa(b.AwardHours))
@@ -1344,7 +1356,7 @@ func (c *Client) legacyAdminUpdateBonus(ctx context.Context, gameId, levelNum, b
 		form.Set("txtValidSeconds", strconv.Itoa(b.WorkSeconds))
 	}
 
-	_, err := c.doPost(ctx, u, form)
+	_, err = c.doPost(ctx, u, form)
 	if err != nil {
 		return fmt.Errorf("encx: admin update bonus: %w", err)
 	}
@@ -1690,4 +1702,43 @@ func resolveOptionValue(html, selectName, optionText string) string {
 		return m[1]
 	}
 	return ""
+}
+
+// Keep server answer IDs for unchanged answers. Empty existing fields remove
+// answers; negative IDs introduce new ones, matching the editor's form.
+func adminBonusUpdateAnswers(body string, answers []string) url.Values {
+	inputs := parseEnabledInputs(body)
+	var ids []int
+	for key := range inputs {
+		suffix, ok := strings.CutPrefix(key, "answer_")
+		if !ok {
+			continue
+		}
+		id, err := strconv.Atoi(suffix)
+		if err == nil && id > 0 {
+			ids = append(ids, id)
+		}
+	}
+	slices.Sort(ids)
+	form := url.Values{}
+	used := make([]bool, len(answers))
+	for _, id := range ids {
+		key := fmt.Sprintf("answer_%d", id)
+		form.Set(key, "")
+		for i, answer := range answers {
+			if !used[i] && inputs[key] == answer {
+				form.Set(key, answer)
+				used[i] = true
+				break
+			}
+		}
+	}
+	next := 1
+	for i, answer := range answers {
+		if !used[i] {
+			form.Set(fmt.Sprintf("answer_-%d", next), answer)
+			next++
+		}
+	}
+	return form
 }
