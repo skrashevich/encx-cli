@@ -55,7 +55,21 @@ func TestAdminGameScenarioReadsCompleteDocument(t *testing.T) {
 	if doc.Levels[0].Tasks[0] != task || doc.Levels[1].Tasks[0] != "Last task" || doc.Levels[0].Hints[0].Text != "Full hint" || doc.Levels[0].Sectors[0].Answers[0] != "CODE" {
 		t.Fatal("scenario content lost")
 	}
+	var page struct {
+		Levels          []scenario.Level `json:"levels"`
+		AllLevelNumbers []int            `json:"all_level_numbers"`
+	}
+	ranged := executeToolCallSafe(t.Context(), cfg, client, session, "admin_game_scenario", `{"game_id":42,"from_level":2}`)
+	if err := json.Unmarshal([]byte(ranged), &page); err != nil || len(page.Levels) != 1 || page.Levels[0].Number != 2 || len(page.AllLevelNumbers) != 2 {
+		t.Fatalf("from_level ignored: %v %s", err, ranged)
+	}
+	if strings.Contains(ranged, `\u003c`) || strings.Contains(ranged, "\n  ") {
+		t.Fatal("scenario printed indented or with HTML escaped")
+	}
 	runtime := &picoLegacyToolRuntime{input: &AgentRunInput{Cfg: cfg, Session: session}}
+	if runtime.repeatReadKey("admin_game_scenario", `{"game_id":42}`) == runtime.repeatReadKey("admin_game_scenario", `{"game_id":42,"from_level":2}`) {
+		t.Fatal("pages share one repeat-read key")
+	}
 	runtime.afterToolResult("admin_game_scenario", `{"game_id":42}`, result)
 	if missing := missingLevelsForContentSummary(session, "покажи сценарий"); len(missing) != 0 || len(session.loadedLevelContent) != 2 {
 		t.Fatalf("coverage not recorded: %+v", session.loadedLevelContent)

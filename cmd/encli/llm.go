@@ -93,6 +93,10 @@ type llmSession struct {
 	// the same reason — without it every user message re-discovers the window by
 	// having two oversized requests refused.
 	agentRequestCeiling int
+	// agentBudgetModel is the model the two values above were learned from. A
+	// window refused by a 32K model says nothing about a 1M one, and the ceiling
+	// only ever shrinks, so switching models starts over.
+	agentBudgetModel string
 }
 
 func cmdLLM(ctx context.Context, cfg *config, client *encx.Client, prompt string) {

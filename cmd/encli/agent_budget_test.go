@@ -125,7 +125,7 @@ func levelReviewTranscript(t *testing.T, levels int) ([]providers.Message, []pro
 	t.Helper()
 	session := &llmSession{}
 	in := &AgentRunInput{Cfg: &config{}, Session: session, Tools: getToolsForSession(session)}
-	registry, err := newPicoRegistry(in, AgentCallbacks{}, &agentRunStats{})
+	registry, err := newPicoRegistry(in, AgentCallbacks{}, &agentRunStats{}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -294,5 +294,27 @@ func TestRunShrinksUntilTheModelAcceptsTheRequest(t *testing.T) {
 	// next user message rediscovers it by having two more requests refused.
 	if session.agentRequestCeiling <= 0 || session.agentRequestCeiling >= agentRequestByteBudget {
 		t.Fatalf("session ceiling = %d, want the learned limit", session.agentRequestCeiling)
+	}
+}
+
+// A window learned from one model is dropped when the chat moves to another:
+// the ceiling only ever shrinks, so a 32K model's refusal would otherwise cap a
+// 1M model for the rest of the chat.
+func TestLearnedWindowIsDroppedWhenTheModelChanges(t *testing.T) {
+	history, _ := levelReviewTranscript(t, 2)
+	for _, tc := range []struct {
+		learnedOn string
+		keep      bool
+	}{{"small-window", true}, {"", true}, {"other-model", false}} {
+		session := &llmSession{agentRequestCeiling: 80000, agentBudgetModel: tc.learnedOn}
+		input := &AgentRunInput{Cfg: &config{}, Session: session, Messages: llmMessagesFrom(history), Tools: getToolsForSession(session)}
+		if _, err := runAgentLoop(context.Background(), AgentConfig{
+			BaseURL: "http://127.0.0.1:1/v1", Model: "small-window", Provider: &oversizedRequestProvider{},
+		}, input, AgentCallbacks{}); err != nil {
+			t.Fatalf("runAgentLoop: %v", err)
+		}
+		if kept := session.agentRequestCeiling == 80000; kept != tc.keep || session.agentBudgetModel != "small-window" {
+			t.Fatalf("learned on %q: ceiling %d, model %q", tc.learnedOn, session.agentRequestCeiling, session.agentBudgetModel)
+		}
 	}
 }

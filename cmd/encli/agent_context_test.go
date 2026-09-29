@@ -207,7 +207,7 @@ func TestSavedDialogRequestOffline(t *testing.T) {
 	}
 	session := &llmSession{}
 	in := &AgentRunInput{Cfg: &config{}, Session: session, Tools: getToolsForSession(session)}
-	registry, err := newPicoRegistry(in, AgentCallbacks{}, &agentRunStats{})
+	registry, err := newPicoRegistry(in, AgentCallbacks{}, &agentRunStats{}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

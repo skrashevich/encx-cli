@@ -160,7 +160,7 @@ Rules:
 - If a tool call fails, try to recover or report the error.
 - COPY BETWEEN DOMAINS: "copy here game 82864 from svk.en.cx" means source_game_id=82864, source_domain=svk.en.cx, target on the CURRENT domain. First inspect_game_scenario to read the source title and check access. If a target game is selected or explicitly specified, use it; otherwise create a target with admin_create_game (ask for missing required schedule details), then admin_copy_game with the returned target_game_id and original source_domain. Never read the source ID on the current domain or switch the destination to the source domain. Report completion only when verified=true. Missing source authentication requires logging into the source domain.
 - Prefer admin_* tools for game management (viewing levels, creating content). Player tools (levels, status, bonuses) are for games IN PROGRESS.
-- For showing, summarizing, or auditing a whole game scenario, call admin_game_scenario directly. It returns full content for all levels; do not first enumerate and read every level separately. Use admin_level_content for a specific level or editable object IDs, and player tools only for the player view.
+- For showing, summarizing, or auditing a whole game scenario, call admin_game_scenario directly. It returns full content for all levels, or, when the game is too large for the context, a page of whole levels with truncated=true and next_from_level: then call it again with from_level=next_from_level until next_from_level is absent. Do not first enumerate and read every level separately. Use admin_level_content for a specific level or editable object IDs, and player tools only for the player view.
 - TASK DECOMPOSITION: Enumeration tools (admin_levels, game lists, directory listings) return IDs, names, and metadata only — not full content. If the user needs scenario text, per-level details, or an audit/summary across items, read the full content before your final answer: admin_game_scenario covers all game levels in one call; otherwise use the appropriate individual read tool. A complete-looking table or summary built only from names is wrong.
 - IRREVERSIBLE ACTIONS: admin_delete_game destroys a whole game and admin_wipe_game empties one. Call either only when the user's latest message asks for that game to be deleted or emptied, and never as a step towards something else (for example, do not delete a game to "recreate it cleanly" unless asked). Deleting is not a way to fix a mistake in a game you just created.
 - Starting/launching a game is NOT available via CLI — only through the web interface. Inform the user if they ask.
@@ -294,6 +294,44 @@ type observedPicoProvider struct {
 	// called once per turn by RunToolLoop and never concurrently, so it needs no
 	// lock of its own.
 	budget agentBudgetCalibrator
+
+	// seenTools are the schemas sent with seen, and pendingResultBytes what the
+	// tools of the current turn have delivered since: together they are the
+	// request the next Chat will have to fit. Tools run one at a time between
+	// Chat calls, so neither needs a lock.
+	seenTools          []providers.ToolDefinition
+	pendingResultBytes int
+}
+
+// agentResultReserveBytes is held back from a tool result for what the next
+// request adds around it: the assistant message that made the call, framing,
+// and the model's reply.
+const agentResultReserveBytes = 8 * 1024
+
+// resultRoom is how many request bytes a tool result can take in this model's
+// window right now.
+//
+// The whole transcript counts when it fits, so a result never forces older
+// ones out. When the transcript is crowded, the result may take half of what
+// the eviction ladder can free — never more than the anchors (system prompt,
+// the user's messages) and the kept tail leave, which is a request the
+// provider will accept.
+func (p *observedPicoProvider) resultRoom() int {
+	budget := p.budget.byteBudget()
+	if p.seen == nil {
+		return maxScenarioBytesForLLM
+	}
+	full, err := agentRequestBytes(p.seen, p.seenTools)
+	if err != nil {
+		return maxScenarioBytesForLLM
+	}
+	floor, err := agentRequestBytes(agentIncompressibleMessages(p.seen), p.seenTools)
+	if err != nil {
+		return maxScenarioBytesForLLM
+	}
+	free := budget - full - agentResultReserveBytes
+	evictable := budget - floor - agentResultReserveBytes
+	return max(free, evictable/2) - p.pendingResultBytes
 }
 
 func (p *observedPicoProvider) GetDefaultModel() string { return p.delegate.GetDefaultModel() }
@@ -306,6 +344,8 @@ func (p *observedPicoProvider) Chat(
 	options map[string]any,
 ) (*providers.LLMResponse, error) {
 	p.seen = messages
+	p.seenTools = toolDefs
+	p.pendingResultBytes = 0
 	if p.session.antiSpamResult != "" {
 		var challenge struct {
 			URL string `json:"verification_url"`
@@ -525,6 +565,17 @@ type picoLegacyToolRuntime struct {
 	// every turn: twenty such calls once pushed a 72-page PDF past a 261k context
 	// limit. Guarded by legacyToolExecutionMu, which every execute call holds.
 	delivered map[string]struct{}
+
+	// provider sizes results to the model's window; nil outside a run.
+	provider *observedPicoProvider
+}
+
+// resultRoom is how many request bytes the next tool result may take.
+func (r *picoLegacyToolRuntime) resultRoom() int {
+	if r.provider == nil {
+		return maxScenarioBytesForLLM
+	}
+	return r.provider.resultRoom()
 }
 
 // repeatGuardedRead reports the read-only tools that answer identical arguments
@@ -558,7 +609,8 @@ func repeatReadKey(name, argsJSON string, fallbackGame int) string {
 		game = fallbackGame
 	}
 	if name == "admin_game_scenario" {
-		return fmt.Sprintf("%s\x00game=%d", name, game)
+		return fmt.Sprintf("%s\x00game=%d from=%d to=%d", name, game,
+			getAnyInt(args["from_level"]), getAnyInt(args["to_level"]))
 	}
 	if lvl := getAnyInt(args["level_number"]); lvl > 0 {
 		return fmt.Sprintf("%s\x00game=%d level=%d", name, game, lvl)
@@ -711,7 +763,10 @@ func (r *picoLegacyToolRuntime) execute(ctx context.Context, name, argsJSON stri
 		return executeToolCallSafe(toolCtx, r.input.Cfg, r.input.Client, r.input.Session, name, argsJSON)
 	})
 	r.stats.addTool(time.Since(started))
-	llmResult := prepareToolResultForLLM(name, rawResult)
+	llmResult := prepareToolResultWithin(name, rawResult, r.resultRoom())
+	if r.provider != nil {
+		r.provider.pendingResultBytes += wireBytes(llmResult)
+	}
 	r.afterToolResult(name, argsJSON, llmResult)
 	emitAgent(r.cb, AgentEvent{Type: agentEventToolDone, ToolName: name, ToolArgs: argsJSON, ToolResult: llmResult})
 	debugf("picoclaw tool result: name=%s raw_bytes=%d llm_bytes=%d result=%q",
@@ -796,9 +851,19 @@ func resolveAgentPricing(ctx context.Context, agentCfg AgentConfig) *llmPricing 
 	return fetchLLMPricing(ctx, agentCfg.BaseURL, agentCfg.APIKey, agentCfg.Model)
 }
 
-func newPicoRegistry(input *AgentRunInput, cb AgentCallbacks, stats *agentRunStats) (*tools.ToolRegistry, error) {
+// resolveAgentContextWindow asks the provider's catalog for the model's window
+// in tokens; 0 means unknown, and the budget assumes 128K.
+func resolveAgentContextWindow(ctx context.Context, agentCfg AgentConfig) int {
+	switch agentCfg.AuthMethod {
+	case authMethodCodex, authMethodGigaChat:
+		return 0
+	}
+	return fetchLLMContextWindow(ctx, agentCfg.BaseURL, agentCfg.APIKey, agentCfg.Model)
+}
+
+func newPicoRegistry(input *AgentRunInput, cb AgentCallbacks, stats *agentRunStats, provider *observedPicoProvider) (*tools.ToolRegistry, error) {
 	registry := tools.NewToolRegistry()
-	runtime := &picoLegacyToolRuntime{input: input, cb: cb, stats: stats, delivered: map[string]struct{}{}}
+	runtime := &picoLegacyToolRuntime{input: input, cb: cb, stats: stats, delivered: map[string]struct{}{}, provider: provider}
 	for _, definition := range input.Tools {
 		var parameters map[string]any
 		if err := json.Unmarshal(definition.Function.Parameters, &parameters); err != nil {
@@ -1017,10 +1082,6 @@ func runAgentLoop(ctx context.Context, agentCfg AgentConfig, input *AgentRunInpu
 
 	disablePicoClawLogging.Do(logger.DisableConsole)
 	stats := &agentRunStats{}
-	registry, err := newPicoRegistry(input, cb, stats)
-	if err != nil {
-		return input.Messages, err
-	}
 	delegate, err := newPicoProvider(agentCfg)
 	if err != nil {
 		emitAgent(cb, AgentEvent{Type: agentEventError, Err: err, Message: err.Error()})
@@ -1030,6 +1091,11 @@ func runAgentLoop(ctx context.Context, agentCfg AgentConfig, input *AgentRunInpu
 	totalStart := time.Now()
 	resetLevelEnumeration(input.Session)
 
+	// Chats saved before the model was recorded keep what they learned.
+	if input.Session.agentBudgetModel != "" && input.Session.agentBudgetModel != agentCfg.Model {
+		input.Session.agentBytesPerToken = 0
+		input.Session.agentRequestCeiling = 0
+	}
 	provider := &observedPicoProvider{
 		delegate: delegate,
 		session:  input.Session,
@@ -1039,11 +1105,17 @@ func runAgentLoop(ctx context.Context, agentCfg AgentConfig, input *AgentRunInpu
 		budget: agentBudgetCalibrator{
 			bytesPerToken: input.Session.agentBytesPerToken,
 			ceiling:       input.Session.agentRequestCeiling,
+			tokenBudget:   agentTokenBudgetForWindow(resolveAgentContextWindow(ctx, agentCfg)),
 		},
+	}
+	registry, err := newPicoRegistry(input, cb, stats, provider)
+	if err != nil {
+		return input.Messages, err
 	}
 	defer func() {
 		input.Session.agentBytesPerToken = provider.budget.bytesPerToken
 		input.Session.agentRequestCeiling = provider.budget.ceiling
+		input.Session.agentBudgetModel = agentCfg.Model
 	}()
 	result, err := tools.RunToolLoop(ctx, tools.ToolLoopConfig{
 		Provider:      provider,

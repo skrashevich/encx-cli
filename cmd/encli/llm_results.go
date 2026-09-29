@@ -24,6 +24,12 @@ var contentToolFields = map[string]string{
 }
 
 func prepareToolResultForLLM(name, result string) string {
+	return prepareToolResultWithin(name, result, maxScenarioBytesForLLM)
+}
+
+// prepareToolResultWithin is prepareToolResultForLLM for a run that knows how
+// many request bytes the model's context has left for this result.
+func prepareToolResultWithin(name, result string, room int) string {
 	if result == "" {
 		return result
 	}
@@ -31,9 +37,10 @@ func prepareToolResultForLLM(name, result string) string {
 		return truncateToolContent(result, field)
 	}
 	// A scenario is the requested content, not metadata: generic summarization
-	// would silently cut tasks, answers, and entire levels.
+	// would silently cut tasks, answers, and entire levels. It is paged by whole
+	// levels instead, sized to the context left.
 	if name == "admin_game_scenario" {
-		return result
+		return pageScenarioForLLM(result, room)
 	}
 	if name == "admin_level_content" {
 		if len(result) <= 20000 {

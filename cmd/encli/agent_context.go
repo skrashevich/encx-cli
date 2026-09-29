@@ -12,8 +12,23 @@ import (
 
 // The budget is a token budget; bytes are what this process can measure without
 // a tokenizer. Leave room for the response and the provider's message framing in
-// a 128K window.
+// a 128K window, which is what a model is assumed to have when its provider does
+// not publish the window.
 const agentRequestTokenBudget = 112 * 1024
+
+// agentTokenBudgetForWindow is the request budget in a window the provider
+// published. The fixed 128K assumption cost a DeepSeek run with a 1M window its
+// only answer: one 560 KB scenario did not fit a budget sized for a model a
+// tenth of its size.
+func agentTokenBudgetForWindow(window int) int {
+	if window <= 0 {
+		return agentRequestTokenBudget
+	}
+	// The same 1/8 held back for the response as 112K keeps of 128K, and never
+	// less than those 16K — unless that would leave the request less than half
+	// of a small window.
+	return max(window-max(window/8, 16*1024), window/2)
+}
 
 const (
 	// One byte per token is the worst case no text can beat, so it is what a run
@@ -59,12 +74,23 @@ type agentBudgetCalibrator struct {
 	// to whatever sits behind a custom base URL, where the window can be 32K.
 	// Rather than guess a window per model, believe the rejection.
 	ceiling int
+
+	// tokenBudget is the budget in the window the provider published for this
+	// model, or zero when it publishes none and 128K is assumed.
+	tokenBudget int
+}
+
+func (c *agentBudgetCalibrator) tokens() float64 {
+	if c.tokenBudget > 0 {
+		return float64(c.tokenBudget)
+	}
+	return agentRequestTokenBudget
 }
 
 func (c *agentBudgetCalibrator) byteBudget() int {
-	budget := agentRequestByteBudget
+	budget := int(c.tokens() * agentMinBytesPerToken)
 	if c.bytesPerToken > 0 {
-		budget = int(agentRequestTokenBudget * c.bytesPerToken)
+		budget = int(c.tokens() * c.bytesPerToken)
 	}
 	if c.ceiling > 0 && c.ceiling < budget {
 		return c.ceiling
@@ -339,4 +365,24 @@ func validateAgentResponse(response *providers.LLMResponse) error {
 		return fmt.Errorf("модель вернула пустой ответ без вызовов инструментов (finish_reason=%s)", response.FinishReason)
 	}
 	return nil
+}
+
+// agentIncompressibleMessages is the transcript after the ladder in
+// boundedAgentMessages has evicted everything it may: the anchors and the kept
+// tail, less the one tail turn a new result will push out of it. The ladder
+// excerpts old results before it evicts their turns, but it evicts them in the
+// end, so this is the floor it can reach.
+func agentIncompressibleMessages(ms []providers.Message) []providers.Message {
+	groups := agentTurnGroups(ms)
+	tail := max(len(groups)-(agentKeptTailTurns-1), 0)
+	var out []providers.Message
+	for g, group := range groups {
+		if g < tail && !agentGroupIsAnchor(ms, group) {
+			continue
+		}
+		for _, i := range group {
+			out = append(out, ms[i])
+		}
+	}
+	return out
 }

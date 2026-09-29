@@ -253,7 +253,7 @@ func executeLLMToolCall(ctx context.Context, cfg *config, client *encx.Client, s
 		if err != nil {
 			fatalEncx("Read game scenario", err)
 		}
-		outputJSON(doc)
+		outputCompactJSON(selectScenarioLevels(doc, getInt("from_level"), getInt("to_level")))
 
 	case "inspect_scenario_file":
 		toolInspectScenario(getString("path"))

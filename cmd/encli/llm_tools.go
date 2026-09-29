@@ -106,8 +106,8 @@ func getTools() []llmTool {
 		}},
 		{Type: "function", Function: llmFunction{
 			Name:        "admin_game_scenario",
-			Description: "Read the complete game scenario in one tool call: all levels, full task texts, answers, hints, penalty hints, bonuses and exported timings. Prefer this for showing, summarizing or auditing a whole scenario instead of calling admin_levels and admin_level_content for every level. Use admin_level_content only for an individual level or editable object IDs. Read-only; requires author access.",
-			Parameters:  json.RawMessage(`{"type":"object","properties":{"game_id":{"type":"integer","minimum":1,"description":"Game ID"}},"required":["game_id"]}`),
+			Description: "Read the complete game scenario in one tool call: all levels, full task texts, answers, hints, penalty hints, bonuses and exported timings. Prefer this for showing, summarizing or auditing a whole scenario instead of calling admin_levels and admin_level_content for every level. Use admin_level_content only for an individual level or editable object IDs. A scenario too large for the context comes back in pages of whole levels: then the result has truncated=true and next_from_level, and the next page is read with from_level. Read-only; requires author access.",
+			Parameters:  json.RawMessage(`{"type":"object","properties":{"game_id":{"type":"integer","minimum":1,"description":"Game ID"},"from_level":{"type":"integer","minimum":1,"description":"First level number to return (for the next page, or a range)"},"to_level":{"type":"integer","minimum":1,"description":"Last level number to return"}},"required":["game_id"]}`),
 		}},
 		{Type: "function", Function: llmFunction{
 			Name:        "inspect_scenario_file",

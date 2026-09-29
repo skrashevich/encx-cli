@@ -3,6 +3,7 @@ package main
 import (
 	"encoding/json"
 	"fmt"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -249,8 +250,34 @@ func markScenarioContentLoaded(session *llmSession, result string) {
 		Levels []struct {
 			Number int `json:"number"`
 		} `json:"levels"`
+		AllLevelNumbers []int `json:"all_level_numbers"`
+		TruncatedLevels []int `json:"truncated_levels"`
 	}
 	if err := json.Unmarshal([]byte(result), &doc); err != nil || doc.Levels == nil {
+		return
+	}
+	if doc.AllLevelNumbers != nil {
+		// One page of the game: it adds to what earlier pages loaded, and the
+		// game's own level list says what is still unread. The first page starts
+		// the record over — coverage is keyed by level number alone, and levels
+		// read in another game must not count here. A shortened level is not
+		// read.
+		first := len(doc.Levels) > 0 && len(doc.AllLevelNumbers) > 0 && doc.Levels[0].Number == doc.AllLevelNumbers[0]
+		if session.loadedLevelContent == nil || first {
+			session.loadedLevelContent = map[int]struct{}{}
+		}
+		for _, level := range doc.Levels {
+			if level.Number > 0 && !slices.Contains(doc.TruncatedLevels, level.Number) {
+				session.loadedLevelContent[level.Number] = struct{}{}
+			}
+		}
+		session.enumeratedLevelNumbers = nil
+		for _, number := range doc.AllLevelNumbers {
+			if number > 0 {
+				session.enumeratedLevelNumbers = append(session.enumeratedLevelNumbers, number)
+			}
+		}
+		session.levelCompletionNudges = 0
 		return
 	}
 	session.loadedLevelContent = make(map[int]struct{}, len(doc.Levels))

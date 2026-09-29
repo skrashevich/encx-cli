@@ -33,6 +33,7 @@ type persistedSess struct {
 	// message after it is bounded at the rate this chat already measured.
 	AgentBytesPerToken  float64 `json:"agent_bytes_per_token,omitempty"`
 	AgentRequestCeiling int     `json:"agent_request_ceiling,omitempty"`
+	AgentBudgetModel    string  `json:"agent_budget_model,omitempty"`
 }
 
 func (s *ChatStore) LoadFromDisk() error {
@@ -79,6 +80,7 @@ func (s *ChatStore) LoadFromDisk() error {
 		}
 		t.session.agentBytesPerToken = pc.Session.AgentBytesPerToken
 		t.session.agentRequestCeiling = pc.Session.AgentRequestCeiling
+		t.session.agentBudgetModel = pc.Session.AgentBudgetModel
 		if len(pc.Session.LoadedLevelContent) > 0 {
 			applyLoadedLevels(t.session, pc.Session.LoadedLevelContent)
 		} else {
@@ -114,6 +116,7 @@ func (s *ChatStore) Persist(id string) {
 			LoadedLevelContent:  loadedLevelsSlice(t.session.loadedLevelContent),
 			AgentBytesPerToken:  t.session.agentBytesPerToken,
 			AgentRequestCeiling: t.session.agentRequestCeiling,
+			AgentBudgetModel:    t.session.agentBudgetModel,
 		}
 	}
 	s.mu.Unlock()
