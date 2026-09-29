@@ -587,6 +587,12 @@ func executeLLMToolCall(ctx context.Context, cfg *config, client *encx.Client, s
 	case "read_pdf_file":
 		toolReadPdfFile(getString("path"), getInt("page"), getInt("max_bytes"))
 
+	case "create_pdf":
+		toolCreatePDF(ctx, cfg, client, session, getString("title"), getString("content"))
+
+	case "create_scenario_pdf":
+		toolCreateScenarioPDF(ctx, client, session, getInt("game_id"), getInt("from_level"), getInt("to_level"))
+
 	case "wikipedia_search":
 		toolWikipediaSearch(ctx, getString("query"), getString("lang"), getInt("limit"))
 

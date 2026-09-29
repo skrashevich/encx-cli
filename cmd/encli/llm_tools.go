@@ -300,6 +300,16 @@ func getTools() []llmTool {
 			Parameters:  json.RawMessage(`{"type":"object","properties":{"path":{"type":"string","description":"File path (relative to LLM_FILES_ROOT or absolute within it)"},"page":{"type":"integer","description":"Extract only this page (1-based). Omit to read the whole document."},"max_bytes":{"type":"integer","description":"Max bytes of extracted text to return (default 65536, max 524288)"}},"required":["path"]}`),
 		}},
 		{Type: "function", Function: llmFunction{
+			Name:        "create_scenario_pdf",
+			Description: "Read an authored game scenario from the current Encounter domain and generate a local downloadable PDF in this WebUI chat. Includes every level and image without sending the full scenario through model context. Optionally select a contiguous range with from_level and to_level. Use when the user asks to show or download the whole scenario or a substantial part of it; share only the returned local artifact link.",
+			Parameters:  json.RawMessage(`{"type":"object","properties":{"game_id":{"type":"integer","minimum":1,"description":"Game ID on the current domain"},"from_level":{"type":"integer","minimum":1,"description":"Optional first level number"},"to_level":{"type":"integer","minimum":1,"description":"Optional last level number"}},"required":["game_id"]}`),
+		}},
+		{Type: "function", Function: llmFunction{
+			Name:        "create_pdf",
+			Description: "Create a local downloadable PDF document from supplied text or Markdown in this WebUI chat. Use for reports or other documents when a PDF is useful. For a game scenario use create_scenario_pdf, which reads all levels directly without model context limits. Share only the returned local artifact link.",
+			Parameters:  json.RawMessage(`{"type":"object","properties":{"title":{"type":"string","description":"Document title"},"content":{"type":"string","description":"Complete document text or Markdown, up to 1 MiB"}},"required":["title","content"]}`),
+		}},
+		{Type: "function", Function: llmFunction{
 			Name:        "search_local_files",
 			Description: "Search for a substring in local text files under a directory. Returns matching file paths, line numbers, and snippets.",
 			Parameters:  json.RawMessage(`{"type":"object","properties":{"path":{"type":"string","description":"Directory or file to search (default: LLM_FILES_ROOT)"},"pattern":{"type":"string","description":"Case-insensitive substring to find"},"glob":{"type":"string","description":"Optional filename glob, e.g. *.md"},"max_matches":{"type":"integer","description":"Max matches to return (default 50)"}},"required":["pattern"]}`),

@@ -1118,6 +1118,17 @@ html[data-sidebar="closed"] .sidebar {
   color: var(--amber);
 }
 
+.msg-body .md-image {
+  display: block;
+  max-width: min(100%, 760px);
+  max-height: 70vh;
+  width: auto;
+  height: auto;
+  margin: 0.5em 0;
+  border-radius: var(--radius-sm);
+  object-fit: contain;
+}
+
 .msg.streaming {
   border-color: var(--amber);
   box-shadow: 0 0 24px var(--amber-glow);

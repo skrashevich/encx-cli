@@ -51,11 +51,12 @@ func getToolsForSession(session *llmSession) []llmTool {
 		mode = session.securityMode.effective()
 	}
 	all := getTools()
-	if mode != SecurityModeReadonly {
-		return all
-	}
 	filtered := make([]llmTool, 0, len(all))
 	for _, tool := range all {
+		if (tool.Function.Name == "create_pdf" || tool.Function.Name == "create_scenario_pdf") &&
+			(session == nil || session.webChatID == "") {
+			continue
+		}
 		if shouldExposeTool(tool.Function.Name, mode) {
 			filtered = append(filtered, tool)
 		}

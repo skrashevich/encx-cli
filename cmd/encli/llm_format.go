@@ -43,6 +43,10 @@ func formatToolCallForDisplay(session *llmSession, name, argsJSON string) string
 		return format(rt("Fetching level list", "Получаю список уровней"))
 	case "admin_game_scenario":
 		return format(rt("Reading complete game scenario", "Читаю весь сценарий игры"))
+	case "create_scenario_pdf":
+		return format(rt("Creating scenario PDF locally", "Создаю PDF сценария локально"))
+	case "create_pdf":
+		return format(rt("Creating PDF locally", "Создаю PDF локально"))
 	case "admin_level_content":
 		return format(rt("Reading level content", "Читаю содержимое уровня"))
 	case "admin_games":

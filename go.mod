@@ -11,6 +11,7 @@ require (
 	github.com/ledongthuc/pdf v0.0.0-20260907135840-6c8c28e0e8a0
 	github.com/modelcontextprotocol/go-sdk v1.8.0
 	github.com/openai/openai-go/v3 v3.22.0
+	github.com/phpdave11/gofpdf v1.4.2
 	github.com/sipeed/picoclaw v0.3.1
 	golang.org/x/image v0.46.0
 	golang.org/x/mobile v0.0.0-20260908204917-8b95e45f8d3e

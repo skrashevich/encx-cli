@@ -87,6 +87,8 @@ func (h *webHub) mount(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/v1/chats/{id}/approval", h.httpGetApproval)
 	mux.HandleFunc("POST /api/v1/chats/{id}/approval", h.httpPostApproval)
 	mux.HandleFunc("GET /api/v1/chats/{id}/export", h.httpExportChat)
+	mux.HandleFunc("GET /api/v1/chats/{id}/artifacts/{name}", h.httpGetChatArtifact)
+	mux.HandleFunc("GET /api/v1/media", h.httpMedia)
 
 	mux.HandleFunc("POST /api/v1/auth/login", h.httpAuthLogin)
 	mux.HandleFunc("POST /api/v1/auth/logout", h.httpAuthLogout)
@@ -423,8 +425,28 @@ func (h *webHub) httpExportChat(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/markdown; charset=utf-8")
 		w.Header().Set("Content-Disposition", `attachment; filename="chat-`+id+`.md"`)
 		_, _ = w.Write([]byte(exportChatMarkdown(snap)))
+	case "pdf":
+		var loader pdfImageLoader
+		if snap.Domain != "" {
+			client := h.registry.Get(snap.Domain, encOptsFromConfig(h.cfg))
+			loader = func(ctx context.Context, src string) ([]byte, error) {
+				resource, err := client.FetchResource(ctx, src)
+				if err != nil {
+					return nil, err
+				}
+				return resource.Data, nil
+			}
+		}
+		data, err := renderChatPDF(r.Context(), snap, loader)
+		if err != nil {
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "cannot generate PDF"})
+			return
+		}
+		w.Header().Set("Content-Type", "application/pdf")
+		w.Header().Set("Content-Disposition", `attachment; filename="chat-`+id+`.pdf"`)
+		_, _ = w.Write(data)
 	default:
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "format must be json or markdown"})
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "format must be json, markdown or pdf"})
 	}
 }
 

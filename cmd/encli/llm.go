@@ -71,6 +71,7 @@ type llmToolCallFunction struct {
 }
 
 type llmSession struct {
+	webChatID string // current WebUI chat; enables downloadable local artifacts
 	// Reset for each user turn; prevents a challenged batch from sending more requests.
 	antiSpamResult         string
 	latestUserMessage      string // source text for checking answer codes before admin writes

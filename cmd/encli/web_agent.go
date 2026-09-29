@@ -5,7 +5,9 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/hex"
+	"encoding/json"
 	"fmt"
+	"regexp"
 	"strings"
 	"time"
 
@@ -114,6 +116,24 @@ func lastUserMessageContent(messages []llmMessage) string {
 	return ""
 }
 
+var inventedScenarioPDFURL = regexp.MustCompile(`(?:https?://[^/\s)]+)?/api/v1/scenario/\d+/pdf(?:\?[^\s)]*)?`)
+
+func validPDFArtifactURL(chatID, raw string) bool {
+	prefix := "/api/v1/chats/" + chatID + "/artifacts/"
+	name, ok := strings.CutPrefix(raw, prefix)
+	return ok && webChatIDRE.MatchString(chatID) && pdfArtifactNameRE.MatchString(name)
+}
+
+func includeLocalPDFLink(message, link string) string {
+	message = inventedScenarioPDFURL.ReplaceAllString(message, link)
+	remoteArtifact := regexp.MustCompile(`https?://[^/\s)]+` + regexp.QuoteMeta(link))
+	message = remoteArtifact.ReplaceAllString(message, link)
+	if !strings.Contains(message, link) {
+		message = strings.TrimSpace(message) + "\n\n[Скачать PDF](" + link + ")"
+	}
+	return message
+}
+
 func runWebChatTurn(ctx context.Context, hub *webHub, chatID string) {
 	t, unlock, ok := hub.store.LockThread(chatID)
 	if !ok {
@@ -132,6 +152,7 @@ func runWebChatTurn(ctx context.Context, hub *webHub, chatID string) {
 	if t.session == nil {
 		t.session = &llmSession{}
 	}
+	t.session.webChatID = chatID
 	if last := lastUserMessageContent(t.messages); last != "" {
 		t.session.preferRussian = looksLikeRussian(last)
 	}
@@ -154,9 +175,26 @@ func runWebChatTurn(ctx context.Context, hub *webHub, chatID string) {
 	})
 
 	var runErr error
+	var generatedPDFURL string
 	hub.registry.WithDomainLock(t.Domain, func() {
 		_, runErr = runAgentLoop(ctx, agentCfg, &loopIn, AgentCallbacks{
 			OnEvent: func(ev AgentEvent) {
+				if ev.Type == agentEventToolDone && (ev.ToolName == "create_scenario_pdf" || ev.ToolName == "create_pdf") {
+					var result struct {
+						URL string `json:"url"`
+					}
+					if json.Unmarshal([]byte(ev.ToolResult), &result) == nil && validPDFArtifactURL(chatID, result.URL) {
+						generatedPDFURL = result.URL
+					}
+				}
+				if ev.Type == agentEventAssistantText && generatedPDFURL != "" {
+					ev.Text = includeLocalPDFLink(ev.Text, generatedPDFURL)
+					generatedPDFURL = ""
+				}
+				if ev.Type == agentEventDone && generatedPDFURL != "" {
+					hub.handleAgentEvent(chatID, t, AgentEvent{Type: agentEventAssistantText, Text: "[Скачать PDF](" + generatedPDFURL + ")"})
+					generatedPDFURL = ""
+				}
 				if ev.Type != agentEventError {
 					hub.handleAgentEvent(chatID, t, ev)
 				}

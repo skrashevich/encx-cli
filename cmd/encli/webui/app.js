@@ -51,13 +51,42 @@ function escapeHtml(s) {
   return d.innerHTML;
 }
 
+function escapeAttr(s) {
+  return escapeHtml(s).replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+}
+
+function safeMarkdownURL(raw) {
+  const value = String(raw || '').replace(/&amp;/g, '&');
+  if (/^\/api\/v1\/chats\/[a-f0-9]+\/(?:export(?:\?.*)?|artifacts\/[a-f0-9]{32}\.pdf)$/.test(value)) return value;
+  try {
+    const url = new URL(value);
+    if (url.protocol === 'https:' || url.protocol === 'http:') return url.href;
+  } catch (_) { /* leave invalid URLs as text */ }
+  return '';
+}
+
+function imageProxyURL(raw) {
+  const domain = state.detail?.domain || '';
+  return `${API}/media?${new URLSearchParams({ domain, url: raw })}`;
+}
+
 function renderInlineMarkdown(s) {
-  let x = escapeHtml(String(s ?? ''));
+  const source = String(s ?? '');
+  const links = [];
+  let x = escapeHtml(source.replace(/(!?)\[([^\]]*)\]\(([^\s)]+)\)/g, (match, image, label, rawURL) => {
+    const url = safeMarkdownURL(rawURL);
+    if (!url || (image && !/^https?:\/\//i.test(url))) return match;
+    const href = escapeAttr(url);
+    const content = image
+      ? `<img class="md-image" src="${escapeAttr(imageProxyURL(url))}" alt="${escapeAttr(label)}" loading="lazy">`
+      : escapeHtml(label);
+    links.push(`<a href="${href}" target="_blank" rel="noopener noreferrer">${content}</a>`);
+    return `\uE000LINK${links.length - 1}\uE001`;
+  }));
   x = x.replace(/`([^`]+)`/g, '<code class="md-code">$1</code>');
   x = x.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
   x = x.replace(/\*([^*]+)\*/g, '<em>$1</em>');
-  x = x.replace(/\[([^\]]+)\]\((https?:\/\/[^)]+)\)/g, '<a href="$2" target="_blank" rel="noopener">$1</a>');
-  return x;
+  return x.replace(/\uE000LINK(\d+)\uE001/g, (_, i) => links[Number(i)] || '');
 }
 
 function isTableRow(line) {
