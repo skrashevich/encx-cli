@@ -154,7 +154,7 @@ func TestOSMRouteMapDestinationOnly(t *testing.T) {
 	}
 	html := got["task_html"].(string)
 	if got["finish_coords"] != "55.7539, 37.6208" || !strings.Contains(html, `<span class="coords">55.7539, 37.6208</span>`) ||
-		!strings.Contains(html, `<img src="IMAGE_URL">`) || !strings.Contains(html, "OpenStreetMap") {
+		!strings.HasSuffix(html, `<img src="IMAGE_URL">`) || strings.Contains(html, "OpenStreetMap") {
 		t.Fatalf("finish_coords = %v, task_html = %s", got["finish_coords"], html)
 	}
 	if got["zoom"].(float64) != osmDefaultZoom {

@@ -100,5 +100,4 @@ func cmdRouteMap(ctx context.Context, cfg *config, client *encx.Client, args []s
 	}
 	fmt.Printf("Finish: %s\n", result["finish_coords"])
 	fmt.Printf("OpenStreetMap: %s\n", result["osm_url"])
-	fmt.Printf("Keep the credit \"%s\" under the image.\n", osmAttribution)
 }

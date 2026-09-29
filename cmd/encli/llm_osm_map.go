@@ -582,7 +582,8 @@ const (
 
 // routeTaskHTML renders the level text Encounter walking games use with a
 // scheme: which pin to walk between, the finish duplicated as coordinates,
-// the image, and the OSM credit. imageURL is the uploaded map's URL.
+// and the image. The OSM credit is drawn on the image itself, where OSM asks
+// for it, so the text carries none. imageURL is the uploaded map's URL.
 func routeTaskHTML(profile string, hasStart bool, finish osmPoint, imageURL string) string {
 	var lead string
 	switch {
@@ -593,8 +594,7 @@ func routeTaskHTML(profile string, hasStart bool, finish osmPoint, imageURL stri
 	default:
 		lead = "Доедьте от " + redBadge + " на карте до " + blackBadge + ". Финальная точка доезда продублирована координатами."
 	}
-	return lead + `<br/><span class="coords">` + finishCoords(finish) + `</span><br/><img src="` + html.EscapeString(imageURL) +
-		`"><br/><small>` + osmAttribution + `</small>`
+	return lead + `<br/><span class="coords">` + finishCoords(finish) + `</span><br/><img src="` + html.EscapeString(imageURL) + `">`
 }
 
 const routeMapImagePlaceholder = "IMAGE_URL"
@@ -772,7 +772,6 @@ func buildRouteMap(ctx context.Context, cfg *config, client *encx.Client, req ro
 	result["height"] = height
 	result["zoom"] = zoom
 	result["osm_url"] = osmURL
-	result["attribution"] = osmAttribution
 	result["finish_coords"] = finishCoords(to)
 	result["task_html"] = routeTaskHTML(profile, from != nil, to, routeMapImagePlaceholder)
 	if tileErrors > 0 {
