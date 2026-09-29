@@ -950,7 +950,7 @@ func printCommandHelp(cmd string) {
 		fmt.Fprintln(os.Stderr, "  Update task text by its ID.")
 	case "admin-update-bonus":
 		fmt.Fprintln(os.Stderr, "Usage: encli admin-update-bonus -game-id <id> <level-num> <bonus-id> <key=value ...>")
-		fmt.Fprintln(os.Stderr, "  Update bonus fields. Supported keys: name, task, hint, answers (comma-separated), award_hours, award_minutes, award_seconds, negative. Omitted time components are preserved.")
+		fmt.Fprintln(os.Stderr, "  Update bonus fields. Supported keys: level_id (positive ID from admin-levels, 0/-1 for all levels), name, task, hint, answers (comma-separated), award_hours, award_minutes, award_seconds, negative. Omitted time components are preserved.")
 	case "admin-update-hint":
 		fmt.Fprintln(os.Stderr, "Usage: encli admin-update-hint -game-id <id> <level-num> <hint-id> <key=value ...>")
 		fmt.Fprintln(os.Stderr, "  Update hint fields. Supported keys: text, delay (HH:MM:SS).")

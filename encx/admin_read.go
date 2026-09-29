@@ -15,8 +15,11 @@ var (
 	adminInputDisabledRe = regexp.MustCompile(`(?i)disabled`)
 	adminTextareaRe      = regexp.MustCompile(`(?i)<textarea[^>]*name="([^"]*)"[^>]*>([\s\S]*?)</textarea>`)
 	adminTaskTextareaRe  = regexp.MustCompile(`(?i)<textarea[^>]*>([\s\S]*?)</textarea>`)
-	adminCheckedLevelRe  = regexp.MustCompile(`(?i)<input[^>]*name="(level_\d+)"[^>]*checked`)
-	adminRbAllLevelsRe   = regexp.MustCompile(`(?i)<input[^>]*name="rbAllLevels"[^>]*checked`)
+	adminLevelBoxRe      = regexp.MustCompile(`(?i)name="level_(\d+)"`)
+	adminAllLevelsRe     = regexp.MustCompile(`(?i)name="rbAllLevels"`)
+	adminInputTagRe      = regexp.MustCompile(`(?i)<input[^>]*>`)
+	adminInputCheckedRe  = regexp.MustCompile(`(?i)checked`)
+	adminInputValueRe    = regexp.MustCompile(`(?i)value="([^"]*)"`)
 )
 
 // parseEnabledInputs extracts name/value pairs from enabled (not disabled) input elements.
@@ -73,6 +76,36 @@ func parseCheckedRadioBool(body, name string) bool {
 		return strings.EqualFold(strings.TrimSpace(m[1]), "true")
 	}
 	return false
+}
+
+// parseAdminBonusLevels reads which levels a bonus applies to: the
+// rbAllLevels radio group (value 1 = whole game, 0 = selected levels) and the
+// checked level_<id> boxes. Like IsModerated, the group always has one checked
+// button, so its presence alone says nothing; reading it that way reported
+// every bonus as game-wide and a time-only update moved it off its level.
+func parseAdminBonusLevels(body string) (all bool, levelIDs []int) {
+	radio := false
+	for _, tag := range adminInputTagRe.FindAllString(body, -1) {
+		if adminInputDisabledRe.MatchString(tag) || !adminInputCheckedRe.MatchString(tag) {
+			continue
+		}
+		if adminAllLevelsRe.MatchString(tag) {
+			m := adminInputValueRe.FindStringSubmatch(tag)
+			radio = true
+			all = m != nil && strings.TrimSpace(m[1]) == "1"
+			continue
+		}
+		if m := adminLevelBoxRe.FindStringSubmatch(tag); m != nil {
+			if id, err := strconv.Atoi(m[1]); err == nil && id > 0 {
+				levelIDs = append(levelIDs, id)
+			}
+		}
+	}
+	// Without the radio the checkboxes are the only evidence.
+	if !radio {
+		all = len(levelIDs) == 0
+	}
+	return all, levelIDs
 }
 
 // parseCheckedInputs returns names of checked (but not disabled) inputs.
@@ -244,7 +277,7 @@ func (c *Client) legacyAdminGetBonus(ctx context.Context, gameId, levelNum, bonu
 	inputs := parseEnabledInputs(body)
 	checked := parseCheckedInputs(body)
 
-	b.Name = inputs["txtBonusName"]
+	b.Name = html.UnescapeString(inputs["txtBonusName"])
 	b.AwardHours, _ = strconv.Atoi(inputs["txtHours"])
 	b.AwardMinutes, _ = strconv.Atoi(inputs["txtMinutes"])
 	b.AwardSeconds, _ = strconv.Atoi(inputs["txtSeconds"])
@@ -271,20 +304,14 @@ func (c *Client) legacyAdminGetBonus(ctx context.Context, gameId, levelNum, bonu
 	// Answers
 	for key, val := range inputs {
 		if strings.Contains(key, "nswer_") && val != "" {
-			b.Answers = append(b.Answers, val)
+			b.Answers = append(b.Answers, html.UnescapeString(val))
 		}
 	}
 
-	// Which levels this bonus applies to
-	// Check if rbAllLevels is checked (bonus for all levels)
-	if adminRbAllLevelsRe.MatchString(body) {
+	if all, levelIDs := parseAdminBonusLevels(body); all {
 		b.LevelID = -1 // sentinel: means "all levels"
-	} else {
-		// Find checked level
-		if m := adminCheckedLevelRe.FindStringSubmatch(body); m != nil {
-			idStr := strings.TrimPrefix(m[1], "level_")
-			b.LevelID, _ = strconv.Atoi(idStr)
-		}
+	} else if len(levelIDs) > 0 {
+		b.LevelID = levelIDs[0]
 	}
 
 	// Textareas (task, help)
@@ -292,9 +319,9 @@ func (c *Client) legacyAdminGetBonus(ctx context.Context, gameId, levelNum, bonu
 	for _, m := range textareas {
 		switch m[1] {
 		case "txtTask":
-			b.Task = m[2]
+			b.Task = html.UnescapeString(m[2])
 		case "txtHelp":
-			b.Hint = m[2]
+			b.Hint = html.UnescapeString(m[2])
 		}
 	}
 

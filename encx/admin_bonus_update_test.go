@@ -87,3 +87,113 @@ func TestBonusUpdateAnswerReplacement(t *testing.T) {
 		t.Fatalf("unexpected replacement fields: %v", form)
 	}
 }
+
+// The editor renders rbAllLevels as two radio buttons, one always checked.
+// Reading "a checked rbAllLevels exists" as game-wide made every time-only
+// update move level bonuses into "all levels".
+func TestLegacyBonusUpdateKeepsLevelBinding(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		name, form string
+		wantLevel  int
+		want       url.Values
+	}{
+		{
+			name: "levels",
+			form: `<input type="radio" name="rbAllLevels" value="1"><input type="radio" name="rbAllLevels" value="0" checked="checked">
+<input type="checkbox" name="level_555" checked="checked"><input type="checkbox" name="level_556" checked="checked"><input type="checkbox" name="level_557">`,
+			wantLevel: 555,
+			want:      url.Values{"rbAllLevels": {"0"}, "level_555": {"on"}, "level_556": {"on"}},
+		},
+		{
+			name:      "game",
+			form:      `<input type="radio" name="rbAllLevels" value="1" checked="checked"><input type="radio" name="rbAllLevels" value="0"><input type="checkbox" name="level_555" disabled="disabled">`,
+			wantLevel: -1,
+			want:      url.Values{"rbAllLevels": {"1"}},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			var posted url.Values
+			c := verifyingClient(t, func(w http.ResponseWriter, r *http.Request) {
+				if r.Method == http.MethodGet {
+					fmt.Fprint(w, `<input name="txtBonusName" value="Б&amp;1"><input name="txtMinutes" value="0"><input name="txtSeconds" value="30">
+<input name="answer_901" value="x&amp;y">`+tc.form+`<textarea name="txtTask">a &lt;b&gt; c</textarea>`)
+					return
+				}
+				if err := r.ParseForm(); err != nil {
+					t.Error(err)
+				}
+				posted = r.PostForm
+				w.WriteHeader(http.StatusFound)
+			})
+			b, err := c.AdminGetBonus(t.Context(), 7, 2, 42)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if b.LevelID != tc.wantLevel || b.Name != "Б&1" || b.Task != "a <b> c" || len(b.Answers) != 1 || b.Answers[0] != "x&y" {
+				t.Fatalf("read %+v", b)
+			}
+			b.AwardMinutes, b.AwardSeconds = 3, 0
+			if err := c.AdminUpdateBonus(t.Context(), 7, 2, 42, *b); err != nil {
+				t.Fatal(err)
+			}
+			for _, key := range []string{"rbAllLevels", "level_555", "level_556", "level_557"} {
+				if posted.Get(key) != tc.want.Get(key) {
+					t.Errorf("%s = %q, want %q", key, posted.Get(key), tc.want.Get(key))
+				}
+			}
+			if posted.Get("txtBonusName") != "Б&1" || posted.Get("txtTask") != "a <b> c" || posted.Get("answer_901") != "x&y" || posted.Has("answer_-1") {
+				t.Errorf("text fields not round-tripped: %v", posted)
+			}
+		})
+	}
+}
+
+func TestLegacyBonusUpdateMovesToRequestedLevel(t *testing.T) {
+	t.Parallel()
+	var posted url.Values
+	c := verifyingClient(t, func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodGet {
+			fmt.Fprint(w, `<input name="txtBonusName" value="Б1"><input type="radio" name="rbAllLevels" value="1" checked="checked"><input type="radio" name="rbAllLevels" value="0">`)
+			return
+		}
+		if err := r.ParseForm(); err != nil {
+			t.Error(err)
+		}
+		posted = r.PostForm
+		w.WriteHeader(http.StatusFound)
+	})
+	if err := c.AdminUpdateBonus(t.Context(), 7, 2, 42, AdminBonus{Name: "Б1", LevelID: 555}); err != nil {
+		t.Fatal(err)
+	}
+	if posted.Get("rbAllLevels") != "0" || posted.Get("level_555") != "on" {
+		t.Fatalf("binding not changed: %v", posted)
+	}
+}
+
+func TestLegacyBonusUpdateKeepsEmptyLevelSelection(t *testing.T) {
+	t.Parallel()
+	var posted url.Values
+	c := verifyingClient(t, func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodGet {
+			fmt.Fprint(w, `<input name="txtBonusName" value="Б1"><input type="radio" name="rbAllLevels" value="1"><input type="radio" name="rbAllLevels" value="0" checked="checked"><input type="checkbox" name="level_555">`)
+			return
+		}
+		if err := r.ParseForm(); err != nil {
+			t.Error(err)
+		}
+		posted = r.PostForm
+		w.WriteHeader(http.StatusFound)
+	})
+	b, err := c.AdminGetBonus(t.Context(), 7, 2, 42)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := c.AdminUpdateBonus(t.Context(), 7, 2, 42, *b); err != nil {
+		t.Fatal(err)
+	}
+	if posted.Get("rbAllLevels") != "0" {
+		t.Fatalf("bonus made game-wide: %v", posted)
+	}
+}

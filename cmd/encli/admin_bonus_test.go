@@ -18,6 +18,7 @@ func TestBonusCLIAndLLMWrite(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 	var saved url.Values
 	var saves int
+	binding := `<input name="rbAllLevels" value="1" checked="checked" type="radio">`
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case "/Administration/Games/LevelManager.aspx":
@@ -25,12 +26,12 @@ func TestBonusCLIAndLLMWrite(t *testing.T) {
 		case "/Administration/Games/BonusEdit.aspx":
 			switch r.URL.Query().Get("action") {
 			case "edit":
-				fmt.Fprint(w, `<input name="txtBonusName" value="Б 1">
+				fmt.Fprintf(w, `<input name="txtBonusName" value="Б 1">
 <input name="txtHours" value="1"><input name="txtMinutes" value="2"><input name="txtSeconds" value="30">
 <input name="answer_1" value="дом1"><input name="negative" checked="checked" type="checkbox">
-<input name="rbAllLevels" value="1" checked="checked" type="radio">
+%s
 <input name="chkDelay" checked="checked" type="checkbox"><input name="txtDelaySeconds" value="15">
-<textarea name="txtTask">task</textarea><textarea name="txtHelp">hint</textarea>`)
+<textarea name="txtTask">task</textarea><textarea name="txtHelp">hint</textarea>`, binding)
 			case "save", "update":
 				if r.URL.Query().Get("bonus") == "42" && r.URL.Query().Get("action") != "update" {
 					t.Error("updating an existing bonus must not use the create action")
@@ -68,6 +69,13 @@ func TestBonusCLIAndLLMWrite(t *testing.T) {
 					if strings.Contains(out, "error") {
 						t.Fatal(out)
 					}
+					var result map[string]any
+					if err := json.Unmarshal([]byte(out), &result); err != nil {
+						t.Fatal(err)
+					}
+					if verified, ok := result["verified"]; !ok || verified != false {
+						t.Fatalf("unverified write presented as verified: %s", out)
+					}
 				}
 				if saves != before+1 {
 					t.Fatalf("writes = %d, before = %d", saves, before)
@@ -84,6 +92,35 @@ func TestBonusCLIAndLLMWrite(t *testing.T) {
 			})
 		}
 	}
+	t.Run("replace_binding_without_recreating", func(t *testing.T) {
+		original := binding
+		defer func() { binding = original }()
+		for _, source := range []string{original, `<input name="rbAllLevels" value="0" checked><input name="level_22" type="checkbox" checked><input name="level_33" type="checkbox" checked>`} {
+			binding = source
+			for _, via := range []string{"cli", "llm"} {
+				before := saves
+				if via == "cli" {
+					captureStdout(t, func() { cmdAdminUpdateBonus(t.Context(), cfg, client, []string{"2", "42", "level_id=22"}) })
+				} else {
+					out := executeToolCallSafe(t.Context(), cfg, client, nil, "admin_update_bonus", `{"level_number":2,"bonus_id":42,"level_id":22}`)
+					if strings.Contains(out, "error") {
+						t.Fatal(out)
+					}
+				}
+				if saves != before+1 || saved.Get("rbAllLevels") != "0" || saved.Get("level_22") != "on" || saved.Has("level_33") {
+					t.Fatalf("%s binding replacement failed: %v", via, saved)
+				}
+				if saved.Get("txtHours") != "1" || saved.Get("txtMinutes") != "2" || saved.Get("txtSeconds") != "30" || saved.Get("answer_1") != "дом1" {
+					t.Fatalf("rebinding changed time or answers: %v", saved)
+				}
+			}
+		}
+		out := executeToolCallSafe(t.Context(), cfg, client, nil, "admin_update_bonus", `{"level_number":2,"bonus_id":42,"level_id":0}`)
+		if strings.Contains(out, "error") || saved.Get("rbAllLevels") != "1" || saved.Has("level_22") {
+			t.Fatal(out, saved)
+		}
+	})
+
 	t.Run("partial_preserves_time", func(t *testing.T) {
 		out := executeToolCallSafe(t.Context(), cfg, client, nil, "admin_update_bonus", `{"level_number":2,"bonus_id":42,"award_minutes":5}`)
 		if strings.Contains(out, "error") {
@@ -120,7 +157,7 @@ func TestBonusCLIAndLLMWrite(t *testing.T) {
 }
 
 func TestBonusPatchValidationAndZero(t *testing.T) {
-	for _, arg := range []string{"award_seconds=-1", "award_minutes=oops", "award_hours=1.5", "negative=maybe", "unknown=1", "award_minutes"} {
+	for _, arg := range []string{"award_seconds=-1", "award_minutes=oops", "award_hours=1.5", "negative=maybe", "unknown=1", "award_minutes", "level_id=-2", "level_id=bad"} {
 		if _, err := parseAdminBonusPatch([]string{arg}); err == nil {
 			t.Errorf("accepted %s", arg)
 		}
@@ -161,7 +198,7 @@ func TestBonusToolRegistrationAndApproval(t *testing.T) {
 			if err := json.Unmarshal(tool.Function.Parameters, &schema); err != nil {
 				t.Fatal(err)
 			}
-			for _, field := range []string{"award_hours", "award_minutes", "award_seconds", "negative", "answers"} {
+			for _, field := range []string{"award_hours", "award_minutes", "award_seconds", "negative", "answers", "level_id"} {
 				if _, ok := schema.Properties[field]; !ok {
 					t.Errorf("%s missing %s", name, field)
 				}
@@ -230,6 +267,20 @@ func TestBonusLLMNewEngine(t *testing.T) {
 			t.Fatal(saved)
 		}
 	}
+	for _, target := range []int{22, 0, -1} {
+		out := executeToolCallSafe(t.Context(), cfg, client, nil, "admin_update_bonus",
+			fmt.Sprintf(`{"level_number":2,"bonus_id":42,"level_id":%d}`, target))
+		if strings.Contains(out, "error") || method != http.MethodPut {
+			t.Fatal(out, method)
+		}
+		if saved["all_levels"] != (target <= 0) || saved["bonus_time"] != float64(30) {
+			t.Fatal(saved)
+		}
+		if target > 0 && !reflect.DeepEqual(saved["level_ids"], []any{float64(22)}) {
+			t.Fatal(saved)
+		}
+	}
+
 	saved = nil
 	out := executeToolCallSafe(t.Context(), cfg, client, nil, "admin_create_bonus",
 		`{"level_number":2,"level_id":22,"name":"Б 1","answers":["дом1"],"award_minutes":3}`)

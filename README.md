@@ -579,6 +579,10 @@ encli admin-clone-levels -game-id 12345 2 1
 encli admin-update-bonus -game-id 12345 1 <bonus-id> name="Новое имя" answers="код1,код2"
 # Заменить бонусное время на 3 минуты, сохранив остальные поля:
 encli admin-update-bonus -game-id 12345 1 <bonus-id> award_hours=0 award_minutes=3 award_seconds=0
+# Перепривязать существующий бонус только к уровню с ID 67890:
+encli admin-update-bonus -game-id 12345 1 <bonus-id> level_id=67890
+# ID уровня берётся из admin-levels; это не его порядковый номер.
+# level_id=0 или -1 — все уровни; без level_id привязка сохраняется.
 # Штрафной бонус: negative=true; обычный бонус: negative=false.
 # Время задаётся компонентами; пропущенные компоненты при обновлении сохраняются.
 # LLM: admin_create_bonus и admin_update_bonus принимают эти же поля времени.

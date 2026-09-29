@@ -42,10 +42,13 @@ type AdminLevelSettings struct {
 
 // AdminBonus holds the data for creating/editing a bonus in the admin panel.
 type AdminBonus struct {
-	Name     string   `json:"name"`
-	Task     string   `json:"task"`
-	Hint     string   `json:"hint"`
-	LevelID  int      `json:"level_id"`
+	Name    string `json:"name"`
+	Task    string `json:"task"`
+	Hint    string `json:"hint"`
+	LevelID int    `json:"level_id"`
+	// LevelIDs explicitly replaces the level binding when non-nil.
+	// An empty slice means all levels; nil retains the LevelID compatibility behavior.
+	LevelIDs []int    `json:"level_ids,omitzero"`
 	Answers  []string `json:"answers"`
 	BonusFor string   `json:"bonus_for"` // ddlBonusFor value
 

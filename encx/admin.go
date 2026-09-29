@@ -3,6 +3,7 @@ package encx
 import (
 	"context"
 	"fmt"
+	"html"
 	"net/http"
 	"net/url"
 	"regexp"
@@ -388,13 +389,17 @@ func (c *Client) legacyAdminCreateBonus(ctx context.Context, gameId, levelNum in
 	form.Set("txtHelp", b.Hint)
 	form.Set("ddlBonusFor", b.BonusFor)
 
-	if b.LevelID == -1 || b.LevelID == 0 {
-		// Bonus for all levels
+	levels := b.LevelIDs
+	if levels == nil && b.LevelID > 0 {
+		levels = []int{b.LevelID}
+	}
+	if len(levels) == 0 {
 		form.Set("rbAllLevels", "1")
 	} else {
-		// Bonus for specific level
 		form.Set("rbAllLevels", "0")
-		form.Set(fmt.Sprintf("level_%d", b.LevelID), "on")
+		for _, id := range levels {
+			form.Set(fmt.Sprintf("level_%d", id), "on")
+		}
 	}
 
 	for i, ans := range b.Answers {
@@ -1321,11 +1326,28 @@ func (c *Client) legacyAdminUpdateBonus(ctx context.Context, gameId, levelNum, b
 	form.Set("txtHelp", b.Hint)
 	form.Set("ddlBonusFor", b.BonusFor)
 
-	if b.LevelID == -1 || b.LevelID == 0 {
+	// AdminGetBonus reports only the first of several checked levels, so an
+	// unchanged binding is echoed from the editor rather than rebuilt from it.
+	// "Selected levels" with none checked reads back as LevelID 0, which must
+	// not turn into a game-wide bonus either; only -1 asks for that.
+	all, levelIDs := parseAdminBonusLevels(body)
+	switch {
+	case b.LevelIDs != nil:
+		all, levelIDs = len(b.LevelIDs) == 0, b.LevelIDs
+	case all && b.LevelID <= 0, !all && slices.Contains(levelIDs, b.LevelID),
+		!all && len(levelIDs) == 0 && b.LevelID == 0:
+	case b.LevelID <= 0:
+		all, levelIDs = true, nil
+	default:
+		all, levelIDs = false, []int{b.LevelID}
+	}
+	if all {
 		form.Set("rbAllLevels", "1")
 	} else {
 		form.Set("rbAllLevels", "0")
-		form.Set(fmt.Sprintf("level_%d", b.LevelID), "on")
+		for _, id := range levelIDs {
+			form.Set(fmt.Sprintf("level_%d", id), "on")
+		}
 	}
 
 	form.Set("txtHours", strconv.Itoa(b.AwardHours))
@@ -1726,7 +1748,7 @@ func adminBonusUpdateAnswers(body string, answers []string) url.Values {
 		key := fmt.Sprintf("answer_%d", id)
 		form.Set(key, "")
 		for i, answer := range answers {
-			if !used[i] && inputs[key] == answer {
+			if !used[i] && html.UnescapeString(inputs[key]) == answer {
 				form.Set(key, answer)
 				used[i] = true
 				break

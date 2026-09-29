@@ -677,7 +677,10 @@ func bonusRequest(b AdminBonus, levelID int) enapi.AdminBonusRequest {
 	// "the whole game", anything else names one level. Sending the level the
 	// caller happens to be editing instead would quietly narrow a game-wide
 	// bonus on every read-modify-write.
-	if b.LevelID <= 0 {
+	if b.LevelIDs != nil {
+		req.AllLevels = len(b.LevelIDs) == 0
+		req.LevelIDs = append([]int(nil), b.LevelIDs...)
+	} else if b.LevelID <= 0 {
 		req.AllLevels = true
 	} else {
 		req.LevelIDs = []int{b.LevelID}

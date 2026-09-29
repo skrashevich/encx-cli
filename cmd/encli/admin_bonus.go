@@ -12,6 +12,7 @@ import (
 
 // Pointers distinguish an omitted field from an explicit zero or false.
 type adminBonusPatch struct {
+	LevelID      *int      `json:"level_id"`
 	Name         *string   `json:"name"`
 	Task         *string   `json:"task"`
 	Hint         *string   `json:"hint"`
@@ -23,11 +24,21 @@ type adminBonusPatch struct {
 }
 
 func (p adminBonusPatch) apply(b *encx.AdminBonus) error {
+	if p.LevelID != nil && *p.LevelID < -1 {
+		return fmt.Errorf("level_id must be a positive level ID, or 0/-1 for all levels")
+	}
 	for key, value := range map[string]*int{
 		"award_hours": p.AwardHours, "award_minutes": p.AwardMinutes, "award_seconds": p.AwardSeconds,
 	} {
 		if value != nil && *value < 0 {
 			return fmt.Errorf("%s must be a non-negative integer; use negative=true for a penalty", key)
+		}
+	}
+	if p.LevelID != nil {
+		b.LevelID = *p.LevelID
+		b.LevelIDs = []int{}
+		if *p.LevelID > 0 {
+			b.LevelIDs = []int{*p.LevelID}
 		}
 	}
 	if p.Name != nil {
@@ -65,6 +76,12 @@ func parseAdminBonusPatch(args []string) (adminBonusPatch, error) {
 			return p, fmt.Errorf("arguments must be in key=value format: %s", arg)
 		}
 		switch strings.ToLower(key) {
+		case "level_id":
+			n, err := strconv.Atoi(val)
+			if err != nil || n < -1 {
+				return p, fmt.Errorf("level_id must be a positive level ID, or 0/-1 for all levels")
+			}
+			p.LevelID = new(n)
 		case "name":
 			p.Name = new(val)
 		case "task":
@@ -93,7 +110,7 @@ func parseAdminBonusPatch(args []string) (adminBonusPatch, error) {
 			}
 			p.Negative = new(v)
 		default:
-			return p, fmt.Errorf("unknown field: %s (supported: name, task, hint, answers, award_hours, award_minutes, award_seconds, negative)", key)
+			return p, fmt.Errorf("unknown field: %s (supported: level_id, name, task, hint, answers, award_hours, award_minutes, award_seconds, negative)", key)
 		}
 	}
 	return p, nil
@@ -148,7 +165,10 @@ func updateAdminBonus(ctx context.Context, cfg *config, client *encx.Client, lev
 		fatal("Failed to update bonus: %v", err)
 	}
 	if cfg.jsonOutput {
-		outputJSON(map[string]any{"success": true, "bonus_id": id})
+		outputJSON(map[string]any{
+			"success": true, "bonus_id": id, "verified": false,
+			"verification_note": "Update request completed; stored values have not been read back. Do not report verified success without a separate read.",
+		})
 		return
 	}
 	fmt.Printf("Bonus %d updated\n", id)

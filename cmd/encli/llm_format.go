@@ -316,6 +316,16 @@ func formatToolApprovalDetails(session *llmSession, name, argsJSON string) []str
 		if name == "admin_update_bonus" {
 			add(fmt.Sprintf("Bonus #%d", getAnyInt(args["bonus_id"])), fmt.Sprintf("Бонус #%d", getAnyInt(args["bonus_id"])))
 		}
+		if name == "admin_update_bonus" {
+			if _, ok := args["level_id"]; ok {
+				id := getAnyInt(args["level_id"])
+				if id > 0 {
+					add(fmt.Sprintf("Available only on level ID %d", id), fmt.Sprintf("Доступен только на уровне с ID %d", id))
+				} else {
+					add("Available on all levels", "Доступен на всех уровнях")
+				}
+			}
+		}
 		for _, field := range []string{"award_hours", "award_minutes", "award_seconds", "negative", "task", "hint"} {
 			if value, ok := args[field]; ok {
 				line := fmt.Sprintf("%s: %v", field, value)
