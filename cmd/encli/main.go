@@ -845,8 +845,8 @@ func printCommandHelp(cmd string) {
 		fmt.Fprintln(os.Stderr, "Usage: encli admin-set-block -game-id <id> <level-number> <attempts> <period HH:MM:SS> [player]")
 		fmt.Fprintln(os.Stderr, "  Set answer block: max attempts per period. Add 'player' to apply per player.")
 	case "admin-create-bonus":
-		fmt.Fprintln(os.Stderr, "Usage: encli admin-create-bonus -game-id <id> <level-num> <level-id> <name> <answer1> [answer2 ...]")
-		fmt.Fprintln(os.Stderr, "  Create a bonus with one or more answers.")
+		fmt.Fprintln(os.Stderr, "Usage: encli admin-create-bonus -game-id <id> <level-num> <level-id> <name> <answer1> [answer2 ...] [-- key=value ...]")
+		fmt.Fprintln(os.Stderr, "  Create a bonus with one or more answers. Optional fields after --: task, hint, award_hours, award_minutes, award_seconds, negative.")
 	case "admin-delete-bonus":
 		fmt.Fprintln(os.Stderr, "Usage: encli admin-delete-bonus -game-id <id> <level-number> <bonus-id>")
 		fmt.Fprintln(os.Stderr, "  Delete a bonus by its ID.")
@@ -941,7 +941,7 @@ func printCommandHelp(cmd string) {
 		fmt.Fprintln(os.Stderr, "  Update task text by its ID.")
 	case "admin-update-bonus":
 		fmt.Fprintln(os.Stderr, "Usage: encli admin-update-bonus -game-id <id> <level-num> <bonus-id> <key=value ...>")
-		fmt.Fprintln(os.Stderr, "  Update bonus fields. Supported keys: name, task, hint, answers (comma-separated).")
+		fmt.Fprintln(os.Stderr, "  Update bonus fields. Supported keys: name, task, hint, answers (comma-separated), award_hours, award_minutes, award_seconds, negative. Omitted time components are preserved.")
 	case "admin-update-hint":
 		fmt.Fprintln(os.Stderr, "Usage: encli admin-update-hint -game-id <id> <level-num> <hint-id> <key=value ...>")
 		fmt.Fprintln(os.Stderr, "  Update hint fields. Supported keys: text, delay (HH:MM:SS).")

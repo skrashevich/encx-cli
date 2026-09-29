@@ -39,6 +39,7 @@ func isAdminMutationTool(name string) bool {
 		"admin_set_autopass",
 		"admin_set_block",
 		"admin_create_bonus",
+		"admin_update_bonus",
 		"admin_delete_bonus",
 		"admin_create_sector",
 		"admin_delete_sector",
@@ -69,6 +70,7 @@ func isProposalMutationTool(name string) bool {
 	case "admin_set_autopass",
 		"admin_set_block",
 		"admin_create_bonus",
+		"admin_update_bonus",
 		"admin_delete_bonus",
 		"admin_create_sector",
 		"admin_delete_sector",
@@ -247,6 +249,8 @@ func describeProposalStep(step pendingFixStep) string {
 		return fmt.Sprintf("update answer block on level %d", getAnyInt(step.Arguments["level_number"]))
 	case "admin_create_bonus":
 		return fmt.Sprintf("create bonus %q on level %d", getAnyString(step.Arguments["name"]), getAnyInt(step.Arguments["level_number"]))
+	case "admin_update_bonus":
+		return fmt.Sprintf("update bonus %d on level %d: %v", getAnyInt(step.Arguments["bonus_id"]), getAnyInt(step.Arguments["level_number"]), step.Arguments)
 	case "admin_delete_bonus":
 		return fmt.Sprintf("delete bonus %d on level %d", getAnyInt(step.Arguments["bonus_id"]), getAnyInt(step.Arguments["level_number"]))
 	case "admin_create_sector":

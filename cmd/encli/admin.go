@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"slices"
 	"strconv"
 	"strings"
 	"text/tabwriter"
@@ -243,7 +244,7 @@ func cmdAdminUpdateAnswerBlock(ctx context.Context, cfg *config, client *encx.Cl
 func cmdAdminCreateBonus(ctx context.Context, cfg *config, client *encx.Client, args []string) {
 	requireGameId(cfg)
 	if len(args) < 4 {
-		fatal("Usage: encli admin-create-bonus -game-id <id> <level-num> <level-id> <name> <answer1> [answer2 ...]")
+		fatal("Usage: encli admin-create-bonus -game-id <id> <level-num> <level-id> <name> <answer1> [answer2 ...] [-- key=value ...]")
 	}
 	lvlNum, err := strconv.Atoi(args[0])
 	if err != nil || lvlNum <= 0 {
@@ -255,11 +256,26 @@ func cmdAdminCreateBonus(ctx context.Context, cfg *config, client *encx.Client, 
 	}
 	name := args[2]
 	answers := args[3:]
+	var fields []string
+	if i := slices.Index(answers, "--"); i >= 0 {
+		fields = answers[i+1:]
+		answers = answers[:i]
+	}
+	if len(answers) == 0 {
+		fatal("At least one bonus answer is required")
+	}
+	patch, err := parseAdminBonusPatch(fields)
+	if err != nil {
+		fatal("%v", err)
+	}
 
 	bonus := encx.AdminBonus{
 		Name:    name,
 		LevelID: lvlID,
 		Answers: answers,
+	}
+	if err := patch.apply(&bonus); err != nil {
+		fatal("%v", err)
 	}
 	if err := client.AdminCreateBonus(ctx, cfg.gameId, lvlNum, bonus); err != nil {
 		fatal("Failed to create bonus: %v", err)
@@ -999,39 +1015,11 @@ func cmdAdminUpdateBonus(ctx context.Context, cfg *config, client *encx.Client, 
 		fatal("Invalid bonus ID: %s", args[1])
 	}
 
-	// Read current bonus to preserve unchanged fields
-	bonus, err := client.AdminGetBonus(ctx, cfg.gameId, lvlNum, bonusId)
+	patch, err := parseAdminBonusPatch(args[2:])
 	if err != nil {
-		fatal("Failed to read current bonus: %v", err)
+		fatal("%v", err)
 	}
-
-	for _, arg := range args[2:] {
-		key, val, ok := strings.Cut(arg, "=")
-		if !ok {
-			fatal("Arguments must be in key=value format. Got: %s", arg)
-		}
-		switch strings.ToLower(key) {
-		case "name":
-			bonus.Name = val
-		case "task":
-			bonus.Task = val
-		case "hint":
-			bonus.Hint = val
-		case "answers":
-			bonus.Answers = strings.Split(val, ",")
-		default:
-			fatal("Unknown field: %s (supported: name, task, hint, answers)", key)
-		}
-	}
-
-	if err := client.AdminUpdateBonus(ctx, cfg.gameId, lvlNum, bonusId, *bonus); err != nil {
-		fatal("Failed to update bonus: %v", err)
-	}
-	if cfg.jsonOutput {
-		outputJSON(map[string]any{"success": true, "bonus_id": bonusId})
-		return
-	}
-	fmt.Printf("Bonus %d updated\n", bonusId)
+	updateAdminBonus(ctx, cfg, client, lvlNum, bonusId, patch, nil)
 }
 
 func cmdAdminUpdateHint(ctx context.Context, cfg *config, client *encx.Client, args []string) {

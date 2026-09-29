@@ -266,11 +266,20 @@ func TestRunShrinksUntilTheModelAcceptsTheRequest(t *testing.T) {
 	// shrink into after three refusals.
 	history, _ := levelReviewTranscript(t, 120)
 	session := &llmSession{agentBytesPerToken: agentMaxBytesPerToken}
+	// Keep this retry test independent of growth in the full tool catalog:
+	// the fake provider rejects exactly three requests regardless of their size.
+	// Full-catalog sizing is covered by TestThirtyLevelReviewFitsTheCalibratedBudget.
+	var tools []llmTool
+	for _, tool := range getTools() {
+		if tool.Function.Name == "status" || tool.Function.Name == "admin_level_content" {
+			tools = append(tools, tool)
+		}
+	}
 	input := &AgentRunInput{
 		Cfg:      &config{},
 		Session:  session,
 		Messages: llmMessagesFrom(history),
-		Tools:    getToolsForSession(session),
+		Tools:    tools,
 	}
 	provider := &oversizedRequestProvider{refusals: 3}
 

@@ -465,7 +465,7 @@ encli admin-set-autopass -game-id 12345 1 1:30:00 0:15:00
 encli admin-set-block -game-id 12345 1 3 0:01:00 player
 
 # Создать бонус (уровень 1, level-id 67890, название, ответы)
-encli admin-create-bonus -game-id 12345 1 67890 "Бонус 1" "ответ1" "ответ2"
+encli admin-create-bonus -game-id 12345 1 67890 "Бонус 1" "ответ1" "ответ2" -- award_minutes=3 award_seconds=0
 
 # Удалить бонус
 # bonus-id берите из admin-level-content
@@ -567,6 +567,11 @@ encli admin-clone-levels -game-id 12345 2 1
 
 # Обновление бонуса и подсказки
 encli admin-update-bonus -game-id 12345 1 <bonus-id> name="Новое имя" answers="код1,код2"
+# Заменить бонусное время на 3 минуты, сохранив остальные поля:
+encli admin-update-bonus -game-id 12345 1 <bonus-id> award_hours=0 award_minutes=3 award_seconds=0
+# Штрафной бонус: negative=true; обычный бонус: negative=false.
+# Время задаётся компонентами; пропущенные компоненты при обновлении сохраняются.
+# LLM: admin_create_bonus и admin_update_bonus принимают эти же поля времени.
 encli admin-update-hint -game-id 12345 1 <hint-id> text="Новый текст" delay=0:45:00
 
 # Удаление задания
