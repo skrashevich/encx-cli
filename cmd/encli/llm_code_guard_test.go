@@ -38,6 +38,7 @@ func TestAgentRejectsCodeWithoutRequestedSuffixBeforeWrite(t *testing.T) {
 	}{
 		{"admin_create_sector", `{"game_id":81348,"level_number":2,"name":"Пиксель 1","answers":["дом"]}`, "дом1"},
 		{"admin_create_bonus", `{"game_id":81348,"level_number":2,"level_id":1542162,"name":"Безметка 41","answers":["год"]}`, "год41"},
+		{"admin_update_bonus", `{"game_id":81348,"level_number":2,"bonus_id":1,"name":"Пиксель 1","answers":["дом"]}`, "дом1"},
 		{"admin_update_sector", `{"game_id":81348,"level_number":2,"sector_id":1,"name":"Пиксель 1","answers":["дом"]}`, "дом1"},
 	} {
 		result := executeToolCallSafe(t.Context(), &config{gameId: 81348}, nil,

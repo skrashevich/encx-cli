@@ -137,7 +137,7 @@ func executeLLMToolCall(ctx context.Context, cfg *config, client *encx.Client, s
 	if securityBlocksMutation(session, name) {
 		fatal("Tool %q is blocked in read-only mode", name)
 	}
-	if session != nil && (name == "admin_create_sector" || name == "admin_create_bonus" || name == "admin_update_sector") {
+	if session != nil && (name == "admin_create_sector" || name == "admin_create_bonus" || name == "admin_update_sector" || name == "admin_update_bonus") {
 		if err := checkRequestedCodeSuffix(session.latestUserMessage, getString("name"), getStringSlice("answers")); err != nil {
 			fatal("%v", err)
 		}
@@ -298,14 +298,28 @@ func executeLLMToolCall(ctx context.Context, cfg *config, client *encx.Client, s
 		cmdAdminUpdateAnswerBlock(ctx, cfg, client, positional)
 
 	case "admin_create_bonus":
-		requireAdminAuth(ctx, cfg, client)
-		positional := []string{
-			strconv.Itoa(getInt("level_number")),
-			strconv.Itoa(getInt("level_id")),
-			getString("name"),
+		patch := decodeAdminBonusPatch(argsJSON)
+		if getInt("level_number") <= 0 || getString("name") == "" || len(getStringSlice("answers")) == 0 {
+			fatal("Creating a bonus requires a level number, name and answers")
 		}
-		positional = append(positional, getStringSlice("answers")...)
-		cmdAdminCreateBonus(ctx, cfg, client, positional)
+		bonus := encx.AdminBonus{LevelID: getInt("level_id")}
+		if err := patch.apply(&bonus); err != nil {
+			fatal("%v", err)
+		}
+		requireGameId(cfg)
+		requireAdminAuth(ctx, cfg, client)
+		if err := client.AdminCreateBonus(ctx, cfg.gameId, getInt("level_number"), bonus); err != nil {
+			fatal("Failed to create bonus: %v", err)
+		}
+		outputJSON(map[string]any{"success": true, "level": getInt("level_number"), "name": bonus.Name})
+
+	case "admin_update_bonus":
+		patch := decodeAdminBonusPatch(argsJSON)
+		if patch == (adminBonusPatch{}) {
+			fatal("Specify at least one bonus field to update")
+		}
+		requireAdminAuth(ctx, cfg, client)
+		updateAdminBonus(ctx, cfg, client, getInt("level_number"), getInt("bonus_id"), patch, session)
 
 	case "admin_delete_bonus":
 		requireAdminAuth(ctx, cfg, client)

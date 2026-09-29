@@ -111,6 +111,8 @@ func formatToolCallForDisplay(session *llmSession, name, argsJSON string) string
 			return format(rt("Creating bonus: ", "Создаю бонус: ") + itemName)
 		}
 		return format(rt("Creating bonus", "Создаю бонус"))
+	case "admin_update_bonus":
+		return format(rt("Updating bonus", "Обновляю бонус"))
 	case "admin_delete_bonus":
 		return format(rt("Deleting bonus", "Удаляю бонус"))
 	case "admin_create_sector":
@@ -296,12 +298,21 @@ func formatToolApprovalDetails(session *llmSession, name, argsJSON string) []str
 		if txt := truncateDisplay(stripHTML(getAnyString(args["text"])), 220); txt != "" {
 			add("Task text: "+txt, "Текст задания: "+txt)
 		}
-	case "admin_create_sector", "admin_create_bonus":
+	case "admin_create_sector", "admin_create_bonus", "admin_update_bonus":
 		if n := getAnyString(args["name"]); n != "" {
 			add("Name: "+n, "Название: "+n)
 		}
 		if ans := getAnyStringSlice(args["answers"]); len(ans) > 0 {
 			add("Answers: "+strings.Join(ans, ", "), "Ответы: "+strings.Join(ans, ", "))
+		}
+		if name == "admin_update_bonus" {
+			add(fmt.Sprintf("Bonus #%d", getAnyInt(args["bonus_id"])), fmt.Sprintf("Бонус #%d", getAnyInt(args["bonus_id"])))
+		}
+		for _, field := range []string{"award_hours", "award_minutes", "award_seconds", "negative", "task", "hint"} {
+			if value, ok := args[field]; ok {
+				line := fmt.Sprintf("%s: %v", field, value)
+				add(line, line)
+			}
 		}
 	case "admin_update_sector":
 		if n := getAnyString(args["name"]); n != "" {
