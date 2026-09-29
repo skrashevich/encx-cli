@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"context"
+	"crypto/rand"
 	"encoding/hex"
 	"fmt"
 	"html"
@@ -13,6 +14,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 
 	_ "golang.org/x/image/webp"
@@ -21,6 +23,33 @@ import (
 )
 
 const maxGameImageBytes = 20 << 20
+
+// randomImageToken has at least 128 bits of entropy. The resulting game URL
+// must not reveal a level's image before the level opens.
+func randomImageToken() string { return strings.ToLower(rand.Text()) }
+
+// An agent may honor a requested filename only when the current user message
+// actually names that file. Source filenames and tool arguments are not a
+// naming instruction: both may be chosen by the model or an attachment.
+func explicitlyRequestedImageName(session *llmSession, name string) bool {
+	if session == nil || name == "" {
+		return false
+	}
+	request, _, _ := strings.Cut(session.latestUserMessage, "[Прикреплённые файлы]\n")
+	pattern := `(?i)(?:имя(?:\s+файла|\s+схемы|\s+картинки)?|именем|под\s+именем|название(?:\s+файла)?|назови(?:\s+файл|\s+схему|\s+картинку)?|назвать(?:\s+файл|\s+схему|\s+картинку)?|называться|сохрани\s+как|filename|file\s+name|name|named|save\s+as)\s*[:=«"'` + "`" + ` ]+` + regexp.QuoteMeta(name) + `(?:$|[\s"'»` + "`" + `,;.!?])`
+	return regexp.MustCompile(pattern).MatchString(request)
+}
+
+func agentImageUploadName(session *llmSession, requested, format string) string {
+	if explicitlyRequestedImageName(session, requested) {
+		return requested
+	}
+	ext := format
+	if format == "jpeg" {
+		ext = "jpg"
+	}
+	return "image-" + randomImageToken() + "." + ext
+}
 
 func readAgentImage(userPath string) (string, []byte, error) {
 	if strings.TrimSpace(userPath) == "" {
@@ -108,17 +137,16 @@ func imageNameMatchesData(name string, data []byte) bool {
 	return false
 }
 
-func toolAdminUploadImage(ctx context.Context, cfg *config, client *encx.Client, path, name string) {
+func toolAdminUploadImage(ctx context.Context, cfg *config, client *encx.Client, session *llmSession, path, name string) {
 	if cfg.gameId <= 0 {
 		fatal("game_id must be positive")
 	}
-	localName, data, err := readAgentImage(path)
+	_, data, err := readAgentImage(path)
 	if err != nil {
 		fatal("Cannot read image: %v", err)
 	}
-	if name == "" {
-		name = localName
-	}
+	_, format, _ := image.DecodeConfig(bytes.NewReader(data))
+	name = agentImageUploadName(session, name, format)
 	if !imageNameMatchesData(name, data) {
 		fatal("Image filename %q has the wrong extension for its content", name)
 	}

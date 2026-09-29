@@ -382,7 +382,7 @@ func executeLLMToolCall(ctx context.Context, cfg *config, client *encx.Client, s
 
 	case "admin_upload_image":
 		requireAdminAuth(ctx, cfg, client)
-		toolAdminUploadImage(ctx, cfg, client, getString("path"), getString("name"))
+		toolAdminUploadImage(ctx, cfg, client, session, getString("path"), getString("name"))
 
 	case "admin_update_task":
 		requireAdminAuth(ctx, cfg, client)
@@ -585,10 +585,14 @@ func executeLLMToolCall(ctx context.Context, cfg *config, client *encx.Client, s
 		toolWikipediaArticle(ctx, getString("title"), getString("lang"))
 
 	case "osm_route_map":
+		mapName := getString("name")
+		if !explicitlyRequestedImageName(session, mapName) {
+			mapName = ""
+		}
 		toolOSMRouteMap(ctx, cfg, client, routeMapRequest{
 			to: getString("to"), from: getString("from"), profile: getString("profile"),
 			levelNumber: getInt("level_number"), zoom: getInt("zoom"), width: getInt("width"), height: getInt("height"),
-		}, getString("name"))
+		}, mapName)
 
 	case "fetch_url":
 		toolFetchURL(ctx, client, getString("url"), getInt("max_bytes"), getInt("offset"))

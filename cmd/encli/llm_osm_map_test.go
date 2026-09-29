@@ -90,9 +90,13 @@ func withFakeOSM(t *testing.T) *fakeOSM {
 	return fake
 }
 
-func runRouteMapTool(t *testing.T, args string) map[string]any {
+func runRouteMapTool(t *testing.T, args string, userMessage ...string) map[string]any {
 	t.Helper()
-	raw := executeToolCallSafe(t.Context(), &config{}, nil, &llmSession{securityMode: SecurityModeFull}, "osm_route_map", args)
+	session := &llmSession{securityMode: SecurityModeFull}
+	if len(userMessage) > 0 {
+		session.latestUserMessage = userMessage[0]
+	}
+	raw := executeToolCallSafe(t.Context(), &config{}, nil, session, "osm_route_map", args)
 	var got map[string]any
 	if err := json.Unmarshal([]byte(raw), &got); err != nil {
 		t.Fatalf("osm_route_map returned undecodable JSON %q: %v", raw, err)
@@ -173,9 +177,21 @@ func TestOSMRouteMapDestinationOnly(t *testing.T) {
 	}
 }
 
+func TestOSMRouteMapIgnoresUnrequestedName(t *testing.T) {
+	withFakeOSM(t)
+	got := runRouteMapTool(t, `{"to":"55.7539,37.6208","profile":"car","name":"doezd-chapel.png"}`, "Построй схему доезда до часовни")
+	if got["error"] != nil {
+		t.Fatalf("tool failed: %v", got)
+	}
+	name := filepath.Base(got["path"].(string))
+	if !strings.HasPrefix(name, "doezd-") || !strings.HasSuffix(name, ".png") || len(name) < len("doezd-")+26+len(".png") || strings.Contains(name, "chapel") {
+		t.Fatalf("predictable map filename %q", name)
+	}
+}
+
 func TestOSMRouteMapWalkingRouteFromAddress(t *testing.T) {
 	fake := withFakeOSM(t)
-	got := runRouteMapTool(t, `{"to":"Красная площадь","from":"55.7500,37.6100","profile":"foot","width":400,"height":300,"name":"shema"}`)
+	got := runRouteMapTool(t, `{"to":"Красная площадь","from":"55.7500,37.6100","profile":"foot","width":400,"height":300,"name":"shema.png"}`, "Сделай схему, имя файла: shema.png")
 	if got["error"] != nil {
 		t.Fatalf("tool failed: %v", got)
 	}
@@ -217,7 +233,7 @@ func TestOSMRouteMapWalkingRouteFromAddress(t *testing.T) {
 		t.Fatalf("map is missing start %v, end %v, or route %v", start, end, line)
 	}
 
-	again := runRouteMapTool(t, `{"to":"55.7539,37.6208","name":"shema.png"}`)
+	again := runRouteMapTool(t, `{"to":"55.7539,37.6208","name":"shema.png"}`, "Сделай схему, имя файла: shema.png")
 	if again["error"] == nil || !strings.Contains(fmt.Sprint(again["error"]), "already exists") {
 		t.Fatalf("existing map was overwritten: %v", again)
 	}

@@ -528,7 +528,7 @@ func routeMapFileName(name, profile string) string {
 		if profile == "car" {
 			prefix = "doezd-"
 		}
-		return prefix + uploadPrefix() + ".png"
+		return prefix + randomImageToken() + ".png"
 	}
 	base := strings.TrimSuffix(name, filepath.Ext(name))
 	if r := []rune(base); len(r) > 100 {

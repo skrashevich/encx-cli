@@ -191,8 +191,8 @@ func getTools() []llmTool {
 		}},
 		{Type: "function", Function: llmFunction{
 			Name:        "admin_upload_image",
-			Description: "Upload a local PNG, JPEG, GIF or WebP image to this game's own file storage and return its direct URL for use in task HTML (<img src=...>). Does not edit any level. The path may refer to an attached chat file or a file under LLM_FILES_ROOT. Refuses an existing filename; choose a unique name when needed.",
-			Parameters:  json.RawMessage(`{"type":"object","properties":{"game_id":{"type":"integer","minimum":1,"description":"Target game ID on the current domain"},"path":{"type":"string","description":"Local image path"},"name":{"type":"string","description":"Optional filename in game storage; defaults to local basename"}},"required":["game_id","path"]}`),
+			Description: "Upload a local PNG, JPEG, GIF or WebP image to this game's own file storage and return its direct URL for use in task HTML (<img src=...>). Does not edit any level. The path may refer to an attached chat file or a file under LLM_FILES_ROOT. Omit name unless the user explicitly requested that exact filename; otherwise a random filename is generated. Refuses an existing filename.",
+			Parameters:  json.RawMessage(`{"type":"object","properties":{"game_id":{"type":"integer","minimum":1,"description":"Target game ID on the current domain"},"path":{"type":"string","description":"Local image path"},"name":{"type":"string","description":"Only the exact filename explicitly requested by the user; otherwise omit for a random filename"}},"required":["game_id","path"]}`),
 		}},
 		{Type: "function", Function: llmFunction{
 			Name:        "admin_create_task",
@@ -307,7 +307,7 @@ func getTools() []llmTool {
 		{Type: "function", Function: llmFunction{
 			Name:        "osm_route_map",
 			Description: "Only when the user explicitly asks for a route scheme. Draws an OpenStreetMap PNG: red start pin, black finish pin, route between. Returns path (for admin_upload_image) and task_html with IMAGE_URL.",
-			Parameters:  json.RawMessage(`{"type":"object","properties":{"profile":{"type":"string","enum":["foot","car"],"description":"foot = схема дохода, car = схема доезда/парковки"},"game_id":{"type":"integer"},"level_number":{"type":"integer","description":"Take the points from this level of game_id"},"to":{"type":"string","description":"Finish: lat,lon or address"},"from":{"type":"string","description":"Start: lat,lon or address"},"zoom":{"type":"integer"},"width":{"type":"integer"},"height":{"type":"integer"},"name":{"type":"string","description":"PNG filename"}},"required":["profile"]}`),
+			Parameters:  json.RawMessage(`{"type":"object","properties":{"profile":{"type":"string","enum":["foot","car"],"description":"foot = схема дохода, car = схема доезда/парковки"},"game_id":{"type":"integer"},"level_number":{"type":"integer","description":"Take the points from this level of game_id"},"to":{"type":"string","description":"Finish: lat,lon or address"},"from":{"type":"string","description":"Start: lat,lon or address"},"zoom":{"type":"integer"},"width":{"type":"integer"},"height":{"type":"integer"},"name":{"type":"string","description":"Only the exact PNG filename explicitly requested by the user; otherwise omit for a random filename"}},"required":["profile"]}`),
 		}},
 		{Type: "function", Function: llmFunction{
 			Name:        "fetch_url",
