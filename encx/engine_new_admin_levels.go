@@ -142,6 +142,39 @@ func (e *newEngine) AdminGetLevels(ctx context.Context, gameId int) ([]AdminLeve
 	return levels, nil
 }
 
+func (e *newEngine) AdminGetLevelSequence(ctx context.Context, gameID int) (*AdminLevelSequence, error) {
+	list, err := e.adminLevelList(ctx, gameID)
+	if err != nil {
+		return nil, err
+	}
+	return &AdminLevelSequence{ID: list.LevelsSequenceID, CanChange: list.CanChangeLevelsSequence}, nil
+}
+
+func (e *newEngine) AdminSetLevelSequence(ctx context.Context, gameID, sequenceID int) error {
+	current, err := e.AdminGetLevelSequence(ctx, gameID)
+	if err != nil {
+		return err
+	}
+	if current.ID == sequenceID {
+		return nil
+	}
+	if !current.CanChange {
+		return fmt.Errorf("encx: game %d does not allow changing its level sequence", gameID)
+	}
+	path := adminLevelsPath(gameID) + "/sequence"
+	if err := e.c.api().PutJSON(ctx, path, map[string]int{"levels_sequence_id": sequenceID}, nil); err != nil {
+		return err
+	}
+	after, err := e.AdminGetLevelSequence(ctx, gameID)
+	if err != nil {
+		return err
+	}
+	if after.ID != sequenceID {
+		return fmt.Errorf("encx: level sequence remains %d after update, wanted %d", after.ID, sequenceID)
+	}
+	return nil
+}
+
 func (e *newEngine) AdminCreateLevels(ctx context.Context, gameId, count int) error {
 	if count <= 0 {
 		return nil

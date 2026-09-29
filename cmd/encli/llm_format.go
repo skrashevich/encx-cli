@@ -87,6 +87,10 @@ func formatToolCallForDisplay(session *llmSession, name, argsJSON string) string
 	case "admin_create_levels":
 		cnt := getAnyInt(args["count"])
 		return format(fmt.Sprintf(rt("Creating %d levels", "Создаю %d уровней"), cnt))
+	case "admin_get_level_sequence":
+		return format(rt("Reading level distribution", "Читаю выдачу уровней"))
+	case "admin_set_level_sequence":
+		return format(rt("Setting level distribution: ", "Меняю выдачу уровней: ") + getAnyString(args["sequence"]))
 	case "admin_delete_level":
 		return format(rt("Deleting level", "Удаляю уровень"))
 	case "admin_rename_level":
@@ -288,6 +292,10 @@ func formatToolApprovalDetails(session *llmSession, name, argsJSON string) []str
 			cnt = 1
 		}
 		add(fmt.Sprintf("Create %d new level(s)", cnt), fmt.Sprintf("Создать новых уровней: %d", cnt))
+	case "admin_set_level_sequence":
+		if sequence := getAnyString(args["sequence"]); sequence != "" {
+			add("Level distribution: "+sequence, "Выдача уровней: "+sequence)
+		}
 	case "admin_delete_level":
 		add("Delete this level permanently", "Удалить уровень без восстановления")
 	case "admin_rename_level":

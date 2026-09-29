@@ -26,6 +26,8 @@ type stubEngine struct {
 	model       *encx.GameModel
 	levelModel  *encx.GameModel
 	sendResult  *encx.GameModel
+	sentLevelID int
+	sentNumber  int
 	hintResult  *encx.GameModel
 	resource    *encx.Resource
 	enterBody   string
@@ -110,8 +112,9 @@ func (s *stubEngine) EnterGame(context.Context, int) (string, error) {
 	return s.enterBody, s.err
 }
 
-func (s *stubEngine) SendCode(_ context.Context, _, _, _ int, _ string) (*encx.GameModel, error) {
+func (s *stubEngine) SendCode(_ context.Context, _, levelID, levelNumber int, _ string) (*encx.GameModel, error) {
 	s.record("SendCode")
+	s.sentLevelID, s.sentNumber = levelID, levelNumber
 	return s.sendResult, s.err
 }
 
@@ -426,6 +429,7 @@ func TestReadToolsReturnProjectedJSON(t *testing.T) {
 
 func TestLevelToolPicksRequestedLevel(t *testing.T) {
 	engine := playableEngine()
+	engine.levelModel = &encx.GameModel{LevelSequence: encx.SequenceAssault, Level: &encx.Level{LevelId: 78, Number: 2}}
 	catalog := newTestCatalog(t, engine, Options{Policy: PolicyReadonly})
 	tool, _ := catalog.Lookup(toolLevel)
 
@@ -441,6 +445,20 @@ func TestLevelToolPicksRequestedLevel(t *testing.T) {
 	}
 	if !engine.called("GetGameModelLevel") {
 		t.Fatal("level_number should route to the per-level endpoint")
+	}
+}
+
+func TestSendCodePicksRequestedAssaultLevel(t *testing.T) {
+	engine := playableEngine()
+	engine.levelModel = &encx.GameModel{LevelSequence: encx.SequenceAssault, Level: &encx.Level{LevelId: 78, Number: 2}}
+	catalog := newTestCatalog(t, engine, Options{Policy: PolicyFull})
+	tool, _ := catalog.Lookup(toolSendCode)
+	result := tool.Execute(t.Context(), map[string]any{"game_id": 42, "level_number": 2, "code": "answer"})
+	if result.IsError || engine.sentLevelID != 78 || engine.sentNumber != 2 {
+		t.Fatalf("result=%q sent=%d/%d", result.ForLLM, engine.sentLevelID, engine.sentNumber)
+	}
+	if !engine.called("GetGameModelLevel") {
+		t.Fatal("selected level was not fetched")
 	}
 }
 
@@ -509,13 +527,13 @@ func TestParametersSchemaIsCopiedAndDescribesRequiredArguments(t *testing.T) {
 		t.Fatalf("game_id and code should be required, got %v", params["required"])
 	}
 	properties, _ := params["properties"].(map[string]any)
-	if len(properties) != 2 {
-		t.Fatalf("send_code should declare two properties, got %v", properties)
+	if len(properties) != 3 || properties["level_number"] == nil || contains(required, "level_number") {
+		t.Fatalf("send_code should declare optional level_number, got %v; required=%v", properties, required)
 	}
 
 	// Mutating the returned schema must not corrupt the catalog.
 	properties["injected"] = "boom"
-	if fresh, _ := tool.Parameters()["properties"].(map[string]any); len(fresh) != 2 {
+	if fresh, _ := tool.Parameters()["properties"].(map[string]any); len(fresh) != 3 {
 		t.Fatalf("Parameters() should return a copy, got %v", fresh)
 	}
 }

@@ -43,6 +43,36 @@ func encx_client_admin_create_game(handle C.longlong, params_json *C.char) *C.ch
 	return cEnvelope(rt.OK(value))
 }
 
+// AdminGetLevelSequence returns JSON with id and can_change for the game's level distribution.
+// id=3 is assault distribution, where players choose a level themselves.
+//
+//export encx_client_admin_get_level_sequence
+func encx_client_admin_get_level_sequence(handle C.longlong, game_id C.longlong) *C.char {
+	client, err := rt.Default.Get(int64(handle))
+	if err != nil {
+		return cEnvelope(rt.Fail(err))
+	}
+	value, err := client.AdminGetLevelSequence(int64(game_id))
+	if err != nil {
+		return cEnvelope(rt.Fail(err))
+	}
+	return cEnvelope(rt.OK(value))
+}
+
+// AdminSetLevelSequence changes the distribution mode (3 = assault).
+//
+//export encx_client_admin_set_level_sequence
+func encx_client_admin_set_level_sequence(handle C.longlong, game_id C.longlong, sequence_id C.longlong) *C.char {
+	client, err := rt.Default.Get(int64(handle))
+	if err != nil {
+		return cEnvelope(rt.Fail(err))
+	}
+	if err = client.AdminSetLevelSequence(int64(game_id), int64(sequence_id)); err != nil {
+		return cEnvelope(rt.Fail(err))
+	}
+	return cEnvelope(rt.OKVoid())
+}
+
 // APIBaseURL returns the host the new engine is reached at.
 //
 //export encx_client_api_base_url

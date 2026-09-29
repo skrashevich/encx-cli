@@ -41,6 +41,13 @@ char *encx_client_accept_team_invitation(long long handle, long long team_id);
 // start_datetime, finish_datetime, ...).
 char *encx_client_admin_create_game(long long handle, char *params_json);
 
+// AdminGetLevelSequence returns JSON with id and can_change for the game's level distribution.
+// id=3 is assault distribution, where players choose a level themselves.
+char *encx_client_admin_get_level_sequence(long long handle, long long game_id);
+
+// AdminSetLevelSequence changes the distribution mode (3 = assault).
+char *encx_client_admin_set_level_sequence(long long handle, long long game_id, long long sequence_id);
+
 // APIBaseURL returns the host the new engine is reached at.
 char *encx_client_api_base_url(long long handle);
 

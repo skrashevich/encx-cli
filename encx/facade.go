@@ -2,6 +2,7 @@ package encx
 
 import (
 	"context"
+	"fmt"
 	"net/url"
 )
 
@@ -175,6 +176,20 @@ func (c *Client) AdminGetGames(ctx context.Context) ([]AdminGame, error) {
 }
 func (c *Client) AdminGetLevels(ctx context.Context, gameId int) ([]AdminLevel, error) {
 	return c.engine(ctx).AdminGetLevels(ctx, gameId)
+}
+
+// AdminGetLevelSequence returns the current level distribution mode and whether
+// the admin panel allows changing it.
+func (c *Client) AdminGetLevelSequence(ctx context.Context, gameId int) (*AdminLevelSequence, error) {
+	return c.engine(ctx).AdminGetLevelSequence(ctx, gameId)
+}
+
+// AdminSetLevelSequence changes level distribution (SequenceAssault = 3).
+func (c *Client) AdminSetLevelSequence(ctx context.Context, gameId, sequenceID int) error {
+	if sequenceID < SequenceLinear || sequenceID > SequenceDynamicRandom {
+		return fmt.Errorf("encx: unsupported level sequence %d", sequenceID)
+	}
+	return c.engine(ctx).AdminSetLevelSequence(ctx, gameId, sequenceID)
 }
 func (c *Client) AdminCreateLevels(ctx context.Context, gameId, count int) error {
 	return c.engine(ctx).AdminCreateLevels(ctx, gameId, count)

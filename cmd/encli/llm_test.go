@@ -19,6 +19,31 @@ func TestGetToolsIncludesAdminLevelContent(t *testing.T) {
 	t.Fatal("admin_level_content tool is not registered")
 }
 
+func TestAssaultToolsExposeSelectionAndAdminMode(t *testing.T) {
+	t.Parallel()
+	seen := map[string]bool{}
+	for _, tool := range getTools() {
+		name := tool.Function.Name
+		if name == "level" || name == "send_code" {
+			if !strings.Contains(string(tool.Function.Parameters), `"level_number"`) {
+				t.Errorf("%s does not offer level_number", name)
+			}
+			seen[name] = true
+		}
+		if name == "admin_get_level_sequence" || name == "admin_set_level_sequence" {
+			seen[name] = true
+		}
+	}
+	for _, name := range []string{"level", "send_code", "admin_get_level_sequence", "admin_set_level_sequence"} {
+		if !seen[name] {
+			t.Errorf("%s tool is missing", name)
+		}
+	}
+	if !isAdminMutationTool("admin_set_level_sequence") || isAdminMutationTool("admin_get_level_sequence") {
+		t.Fatal("admin sequence tools have incorrect mutation classification")
+	}
+}
+
 func TestPrintCommandHelpIncludesAdminLevelContent(t *testing.T) {
 	oldStderr := os.Stderr
 	r, w, err := os.Pipe()

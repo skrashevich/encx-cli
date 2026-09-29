@@ -105,6 +105,8 @@ ENCX_LIVE_DOMAIN=demo.en.cx ENCX_LIVE_LOGIN=… ENCX_LIVE_PASSWORD=… \
 | `AdminUploadGameImage` | multipart POST /Administration/Games/FileUploader.aspx?gid={id}, поле inputFile1; проверка через LevelManager и прямой URL | multipart POST /admin/games/{id}/files, поле file; URL из ответа |
 | `GetAdminGameScenario` | GameScenario.aspx | GET /games/{id}/scenario + level editor bonus flags |
 | `AdminGetLevels` | GET /Administration/Games/LevelManager.aspx | GET /admin/games/{id}/levels |
+| `AdminGetLevelSequence` | GET LevelManager.aspx, поле ddlLevelsSequence | GET /admin/games/{id}/levels (levels_sequence_id, can_change_levels_sequence) |
+| `AdminSetLevelSequence` | GET LevelManager.aspx?sequences=change&ddlLevelsSequence={id}, затем проверка | PUT /admin/games/{id}/levels/sequence, затем проверка |
 | `AdminCreateLevels` | LevelManager.aspx?levels=create | POST /admin/games/{id}/levels (по одному на уровень) |
 | `AdminDeleteLevel` | LevelManager.aspx?levels=delete | DELETE /admin/games/{id}/levels/{levelId} |
 | `AdminRenameLevels` | форма LevelManager | PUT /admin/games/{id}/levels/{levelId}/meta |

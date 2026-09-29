@@ -158,6 +158,30 @@ final class Client
     }
 
     /**
+     * AdminGetLevelSequence returns JSON with id and can_change for the game's level distribution.
+     * id=3 is assault distribution, where players choose a level themselves.
+     *
+     * @throws EncxException
+     */
+    public function adminGetLevelSequence(int $gameID): string
+    {
+        return (string) Ffi::call('encx_client_admin_get_level_sequence', [
+            $this->handle(),
+            $gameID,
+        ]);
+    }
+
+    /**
+     * AdminSetLevelSequence changes the distribution mode (3 = assault).
+     *
+     * @throws EncxException
+     */
+    public function adminSetLevelSequence(int $gameID, int $sequenceID): void
+    {
+        Ffi::call('encx_client_admin_set_level_sequence', [$this->handle(), $gameID, $sequenceID]);
+    }
+
+    /**
      * APIBaseURL returns the host the new engine is reached at.
      *
      * @throws EncxException

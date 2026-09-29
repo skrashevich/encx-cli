@@ -35,6 +35,7 @@ type config struct {
 	login              string
 	password           string
 	gameId             int
+	levelNumber        int // optional level chosen by a player in an assault game
 	insecure           bool
 	useHTTP            bool
 	jsonOutput         bool
@@ -196,6 +197,7 @@ func main() {
 	fs.StringVar(&cfg.login, "login", os.Getenv("ENCX_LOGIN"), "Login username (env: ENCX_LOGIN)")
 	fs.StringVar(&cfg.password, "password", os.Getenv("ENCX_PASSWORD"), "Login password (env: ENCX_PASSWORD)")
 	fs.IntVar(&cfg.gameId, "game-id", envInt("ENCX_GAME_ID", 0), "Game ID (env: ENCX_GAME_ID)")
+	fs.IntVar(&cfg.levelNumber, "level-number", 0, "Level number to view or answer in an assault game")
 	fs.BoolVar(&cfg.insecure, "insecure", envBool("ENCX_INSECURE"), "Skip TLS verification (env: ENCX_INSECURE)")
 	fs.BoolVar(&cfg.useHTTP, "http", false, "Use plain HTTP instead of HTTPS")
 	fs.BoolVar(&cfg.jsonOutput, "json", false, "Output results as JSON")
@@ -340,6 +342,9 @@ func main() {
 	case "admin-levels":
 		requireAdminAuth(ctx, cfg, client)
 		cmdAdminLevels(ctx, cfg, client)
+	case "admin-level-sequence":
+		requireAdminAuth(ctx, cfg, client)
+		cmdAdminLevelSequence(ctx, cfg, client, positional)
 	case "admin-level-content":
 		requireAdminAuth(ctx, cfg, client)
 		cmdAdminLevelContent(ctx, cfg, client, positional)
@@ -581,6 +586,7 @@ Commands:
 Admin commands (require game editor rights):
   admin-games              List your authored games
   admin-levels             List levels with IDs (admin)
+  admin-level-sequence     Show or change level distribution mode
   admin-level-content      Read full level content from admin panel
   admin-create-levels      Create new levels
   admin-delete-level       Delete a level by number
@@ -732,8 +738,8 @@ func printCommandHelp(cmd string) {
 		fmt.Fprintln(os.Stderr, "Usage: encli status -game-id <id> [-domain <domain>]")
 		fmt.Fprintln(os.Stderr, "  Show current game state: level, sectors, bonuses, hints, messages.")
 	case "level":
-		fmt.Fprintln(os.Stderr, "Usage: encli level -game-id <id>")
-		fmt.Fprintln(os.Stderr, "  Show current level task/assignment text.")
+		fmt.Fprintln(os.Stderr, "Usage: encli level -game-id <id> [-level-number <number>]")
+		fmt.Fprintln(os.Stderr, "  Show a task; -level-number selects a level in an assault game.")
 	case "messages":
 		fmt.Fprintln(os.Stderr, "Usage: encli messages -game-id <id>")
 		fmt.Fprintln(os.Stderr, "  Show messages from game organizers.")
@@ -756,10 +762,10 @@ func printCommandHelp(cmd string) {
 		fmt.Fprintln(os.Stderr, "Usage: encli enter -game-id <id>")
 		fmt.Fprintln(os.Stderr, "  Submit application to enter a game.")
 	case "send-code":
-		fmt.Fprintln(os.Stderr, "Usage: encli send-code -game-id <id> <code>")
+		fmt.Fprintln(os.Stderr, "Usage: encli send-code -game-id <id> [-level-number <number>] <code>")
 		fmt.Fprintln(os.Stderr, "  Send a level/sector answer with LevelAction.Answer.")
 	case "send-bonus":
-		fmt.Fprintln(os.Stderr, "Usage: encli send-bonus -game-id <id> <code>")
+		fmt.Fprintln(os.Stderr, "Usage: encli send-bonus -game-id <id> [-level-number <number>] <code>")
 		fmt.Fprintln(os.Stderr, "  Send a bonus answer with BonusAction.Answer.")
 	case "hint":
 		fmt.Fprintln(os.Stderr, "Usage: encli hint -game-id <id> <hint-id>")
@@ -826,6 +832,9 @@ func printCommandHelp(cmd string) {
 	case "admin-levels":
 		fmt.Fprintln(os.Stderr, "Usage: encli admin-levels -game-id <id>")
 		fmt.Fprintln(os.Stderr, "  List all levels with their IDs (admin panel).")
+	case "admin-level-sequence":
+		fmt.Fprintln(os.Stderr, "Usage: encli admin-level-sequence -game-id <id> [linear|specified|random|assault|dynamic-random]")
+		fmt.Fprintln(os.Stderr, "  Show or change how levels are distributed; assault makes them player-selectable.")
 	case "admin-level-content":
 		fmt.Fprintln(os.Stderr, "Usage: encli admin-level-content -game-id <id> <level-number>")
 		fmt.Fprintln(os.Stderr, "  Read admin-side level content: task text, sector answers, bonuses, hints, comments, settings.")
@@ -1224,9 +1233,32 @@ func cmdGameList(ctx context.Context, cfg *config, client *encx.Client) {
 	}
 }
 
+func playerGameModel(ctx context.Context, cfg *config, client *encx.Client) (*encx.GameModel, error) {
+	if cfg.levelNumber == 0 {
+		return client.GetGameModel(ctx, cfg.gameId)
+	}
+	if cfg.levelNumber < 0 {
+		return nil, fmt.Errorf("level-number must be positive")
+	}
+	model, err := client.GetGameModelLevel(ctx, cfg.gameId, cfg.levelNumber)
+	if err != nil {
+		return nil, err
+	}
+	if model == nil {
+		return nil, fmt.Errorf("game %d returned no state for level %d", cfg.gameId, cfg.levelNumber)
+	}
+	if model.LevelSequence != encx.SequenceAssault {
+		return nil, fmt.Errorf("game %d does not use assault level distribution", cfg.gameId)
+	}
+	if model.Level == nil || model.Level.Number != cfg.levelNumber {
+		return nil, fmt.Errorf("game %d did not return assault level %d", cfg.gameId, cfg.levelNumber)
+	}
+	return model, nil
+}
+
 func cmdStatus(ctx context.Context, cfg *config, client *encx.Client) {
 	requireGameId(cfg)
-	model, err := client.GetGameModel(ctx, cfg.gameId)
+	model, err := playerGameModel(ctx, cfg, client)
 	if err != nil {
 		fatal("Failed to get game model: %v", err)
 	}
@@ -1390,7 +1422,7 @@ func cmdStatus(ctx context.Context, cfg *config, client *encx.Client) {
 
 func cmdLevel(ctx context.Context, cfg *config, client *encx.Client) {
 	requireGameId(cfg)
-	model, err := client.GetGameModel(ctx, cfg.gameId)
+	model, err := playerGameModel(ctx, cfg, client)
 	if err != nil {
 		fatal("Failed to get game model: %v", err)
 	}
@@ -1418,7 +1450,7 @@ func cmdLevel(ctx context.Context, cfg *config, client *encx.Client) {
 
 func cmdMessages(ctx context.Context, cfg *config, client *encx.Client) {
 	requireGameId(cfg)
-	model, err := client.GetGameModel(ctx, cfg.gameId)
+	model, err := playerGameModel(ctx, cfg, client)
 	if err != nil {
 		fatal("Failed to get game model: %v", err)
 	}
@@ -1470,7 +1502,7 @@ func cmdLevels(ctx context.Context, cfg *config, client *encx.Client) {
 
 func cmdBonuses(ctx context.Context, cfg *config, client *encx.Client) {
 	requireGameId(cfg)
-	model, err := client.GetGameModel(ctx, cfg.gameId)
+	model, err := playerGameModel(ctx, cfg, client)
 	if err != nil {
 		fatal("Failed to get game model: %v", err)
 	}
@@ -1514,7 +1546,7 @@ func cmdBonuses(ctx context.Context, cfg *config, client *encx.Client) {
 
 func cmdHints(ctx context.Context, cfg *config, client *encx.Client) {
 	requireGameId(cfg)
-	model, err := client.GetGameModel(ctx, cfg.gameId)
+	model, err := playerGameModel(ctx, cfg, client)
 	if err != nil {
 		fatal("Failed to get game model: %v", err)
 	}
@@ -1576,7 +1608,7 @@ func cmdHints(ctx context.Context, cfg *config, client *encx.Client) {
 
 func cmdSectors(ctx context.Context, cfg *config, client *encx.Client) {
 	requireGameId(cfg)
-	model, err := client.GetGameModel(ctx, cfg.gameId)
+	model, err := playerGameModel(ctx, cfg, client)
 	if err != nil {
 		fatal("Failed to get game model: %v", err)
 	}
@@ -1609,7 +1641,7 @@ func cmdSectors(ctx context.Context, cfg *config, client *encx.Client) {
 
 func cmdLog(ctx context.Context, cfg *config, client *encx.Client) {
 	requireGameId(cfg)
-	model, err := client.GetGameModel(ctx, cfg.gameId)
+	model, err := playerGameModel(ctx, cfg, client)
 	if err != nil {
 		fatal("Failed to get game model: %v", err)
 	}
@@ -1664,7 +1696,7 @@ func cmdSendCode(ctx context.Context, cfg *config, client *encx.Client, args []s
 	}
 	code := args[0]
 
-	model, err := client.GetGameModel(ctx, cfg.gameId)
+	model, err := playerGameModel(ctx, cfg, client)
 	if err != nil {
 		fatal("Failed to get game model: %v", err)
 	}
@@ -1693,7 +1725,7 @@ func cmdSendBonus(ctx context.Context, cfg *config, client *encx.Client, args []
 	}
 	code := args[0]
 
-	model, err := client.GetGameModel(ctx, cfg.gameId)
+	model, err := playerGameModel(ctx, cfg, client)
 	if err != nil {
 		fatal("Failed to get game model: %v", err)
 	}

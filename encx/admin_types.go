@@ -7,6 +7,13 @@ type AdminLevel struct {
 	ID     int    `json:"id"`
 }
 
+// AdminLevelSequence describes how the game distributes its levels.
+// SequenceAssault makes every level available for the player to choose.
+type AdminLevelSequence struct {
+	ID        int  `json:"id"`
+	CanChange bool `json:"can_change"`
+}
+
 // AdminLevelSettings holds the configuration of a level (autopass, answer block, attempts).
 type AdminLevelSettings struct {
 	// Autopass

@@ -40,6 +40,37 @@
       ]
     },
     {
+      "goName": "AdminGetLevelSequence",
+      "cName": "encx_client_admin_get_level_sequence",
+      "kind": "value_err",
+      "valueType": "string",
+      "params": [
+        {
+          "name": "gameID",
+          "cName": "game_id",
+          "type": "int64"
+        }
+      ]
+    },
+    {
+      "goName": "AdminSetLevelSequence",
+      "cName": "encx_client_admin_set_level_sequence",
+      "kind": "error",
+      "valueType": "void",
+      "params": [
+        {
+          "name": "gameID",
+          "cName": "game_id",
+          "type": "int64"
+        },
+        {
+          "name": "sequenceID",
+          "cName": "sequence_id",
+          "type": "int64"
+        }
+      ]
+    },
+    {
       "goName": "APIBaseURL",
       "cName": "encx_client_api_base_url",
       "kind": "value",

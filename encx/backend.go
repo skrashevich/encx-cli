@@ -58,6 +58,8 @@ type backend interface {
 	AdminGetGames(ctx context.Context) ([]AdminGame, error)
 	AdminUploadGameImage(ctx context.Context, gameID int, name string, data []byte) (*AdminGameFile, error)
 	AdminGetLevels(ctx context.Context, gameId int) ([]AdminLevel, error)
+	AdminGetLevelSequence(ctx context.Context, gameId int) (*AdminLevelSequence, error)
+	AdminSetLevelSequence(ctx context.Context, gameId, sequenceID int) error
 	AdminCreateLevels(ctx context.Context, gameId, count int) error
 	AdminDeleteLevel(ctx context.Context, gameId, levelNum int) error
 	AdminRenameLevels(ctx context.Context, gameId int, names map[int]string) error
@@ -260,6 +262,12 @@ func (e *legacyEngine) AdminGetGames(ctx context.Context) ([]AdminGame, error) {
 }
 func (e *legacyEngine) AdminGetLevels(ctx context.Context, gameId int) ([]AdminLevel, error) {
 	return e.c.legacyAdminGetLevels(ctx, gameId)
+}
+func (e *legacyEngine) AdminGetLevelSequence(ctx context.Context, gameId int) (*AdminLevelSequence, error) {
+	return e.c.legacyAdminGetLevelSequence(ctx, gameId)
+}
+func (e *legacyEngine) AdminSetLevelSequence(ctx context.Context, gameId, sequenceID int) error {
+	return e.c.legacyAdminSetLevelSequence(ctx, gameId, sequenceID)
 }
 func (e *legacyEngine) AdminCreateLevels(ctx context.Context, gameId, count int) error {
 	return e.c.legacyAdminCreateLevels(ctx, gameId, count)

@@ -134,6 +134,7 @@ func executeLLMToolCall(ctx context.Context, cfg *config, client *encx.Client, s
 		cfg.gameId = gid
 		debugf("tool execution context: set cfg.gameId=%d from tool args", gid)
 	}
+	cfg.levelNumber = getInt("level_number")
 	if securityBlocksMutation(session, name) {
 		fatal("Tool %q is blocked in read-only mode", name)
 	}
@@ -239,6 +240,14 @@ func executeLLMToolCall(ctx context.Context, cfg *config, client *encx.Client, s
 	case "admin_levels":
 		requireAdminAuth(ctx, cfg, client)
 		cmdAdminLevels(ctx, cfg, client)
+
+	case "admin_get_level_sequence":
+		requireAdminAuth(ctx, cfg, client)
+		cmdAdminLevelSequence(ctx, cfg, client, nil)
+
+	case "admin_set_level_sequence":
+		requireAdminAuth(ctx, cfg, client)
+		cmdAdminLevelSequence(ctx, cfg, client, []string{getString("sequence")})
 
 	case "admin_level_content":
 		requireAdminAuth(ctx, cfg, client)

@@ -330,7 +330,9 @@ let resultJSON = client.sendCode(12345, levelID: 67890, levelNumber: 1, code: "�
 | `NewClient` / `NewClientWithOptions` | Создание клиента |
 | `Login` / `LoginWithCaptcha` | Авторизация |
 | `GetGameModel` | Состояние игры |
+| `GetGameModelLevel` | Состояние выбранного уровня штурмовой игры |
 | `SendCode` | Отправка кодов |
+| `AdminGetLevelSequence` / `AdminSetLevelSequence` | Чтение и смена выдачи уровней (3 = штурмовая) |
 | `GetPenaltyHint` | Штрафная подсказка |
 | `GetGameList` / `GetDomainGames` | Список игр |
 | `GetGameStatistics` | Статистика |
@@ -387,6 +389,10 @@ encli status -game-id 12345
 
 # Задание текущего уровня
 encli level -game-id 12345
+
+# В штурмовой игре посмотреть задание №2 и отправить в него код
+encli level -game-id 12345 -level-number 2
+encli send-code -game-id 12345 -level-number 2 "КОД123"
 
 # Все уровни с прогрессом
 encli levels -game-id 12345
@@ -448,6 +454,10 @@ encli admin-games
 
 # Список уровней с ID
 encli admin-levels -game-id 12345
+
+# Посмотреть режим выдачи; переключить на штурмовую выдачу
+encli admin-level-sequence -game-id 12345
+encli admin-level-sequence -game-id 12345 assault
 
 # Создать 3 уровня
 encli admin-create-levels -game-id 12345 3
@@ -1196,6 +1206,7 @@ Endpoint'ы в таблице — старого движка; чем кажды
 |---|---|---|
 | `Login` | `POST /login/signin` | Авторизация |
 | `GetGameModel` | `POST /gameengines/encounter/play/{id}` | Состояние игры |
+| `GetGameModelLevel` | `GET /gameengines/encounter/play/{id}?level={number}` | Уровень, выбранный игроком в штурмовой игре |
 | `SendCode` | `POST /gameengines/encounter/play/{id}` | Отправка кода (`LevelAction.Answer`) |
 | `GetPenaltyHint` | `GET /gameengines/encounter/play/{id}` | Запрос штрафной подсказки |
 | `GetGameList` | `GET /home/?json=1` | Список игр (JSON, с пагинацией) |
@@ -1212,6 +1223,8 @@ Endpoint'ы в таблице — старого движка; чем кажды
 | Метод | Endpoint | Описание |
 |---|---|---|
 | `AdminGetLevels` | `GET /Administration/Games/LevelManager.aspx` | Список уровней (ID, названия) |
+| `AdminGetLevelSequence` | `GET /Administration/Games/LevelManager.aspx` | Режим выдачи уровней |
+| `AdminSetLevelSequence` | `GET /Administration/Games/LevelManager.aspx?sequences=change` | Сменить режим выдачи (`3` = штурмовая) |
 | `AdminCreateLevels` | `GET /Administration/Games/LevelManager.aspx?levels=create` | Создание уровней |
 | `AdminDeleteLevel` | `GET /Administration/Games/LevelManager.aspx?levels=delete` | Удаление уровня |
 | `AdminRenameLevels` | `POST /Administration/Games/LevelManager.aspx?level_names=update` | Переименование уровней |

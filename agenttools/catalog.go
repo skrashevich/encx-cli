@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/sipeed/picoclaw/pkg/tools"
+	"github.com/skrashevich/encx-cli/encx"
 )
 
 // Options configures a catalog.
@@ -427,8 +428,9 @@ func mutatingTools(engine Engine, g *gate) []*Tool {
 			description: "Submit a level or sector answer. A wrong code costs time and may trigger the level's " +
 				"answer-block rule, so only submit codes the user asked for or that you are confident about.",
 			parameters: schema(map[string]any{
-				"game_id": intProp("Game ID."),
-				"code":    stringProp("The answer to submit, exactly as it should reach the engine."),
+				"game_id":      intProp("Game ID."),
+				"code":         stringProp("The answer to submit, exactly as it should reach the engine."),
+				"level_number": intProp("Level number in an assault game. Omit for the active level."),
 			}, "game_id", "code"),
 			mutating: true,
 			gate:     g,
@@ -438,10 +440,11 @@ func mutatingTools(engine Engine, g *gate) []*Tool {
 		},
 		{
 			name:        toolSendBonusCode,
-			description: "Submit a bonus answer on the active level.",
+			description: "Submit a bonus answer on the active or selected assault level.",
 			parameters: schema(map[string]any{
-				"game_id": intProp("Game ID."),
-				"code":    stringProp("The bonus answer to submit."),
+				"game_id":      intProp("Game ID."),
+				"code":         stringProp("The bonus answer to submit."),
+				"level_number": intProp("Level number in an assault game. Omit for the active level."),
 			}, "game_id", "code"),
 			mutating: true,
 			gate:     g,
@@ -536,7 +539,17 @@ func loadLevelModel(ctx context.Context, engine Engine, args arguments) (*gameMo
 		return nil, err
 	}
 	if levelNumber, ok := args.optionalInt("level_number"); ok {
-		return engine.GetGameModelLevel(ctx, gameID, levelNumber)
+		if levelNumber <= 0 {
+			return nil, errors.New("level_number must be positive")
+		}
+		model, err := engine.GetGameModelLevel(ctx, gameID, levelNumber)
+		if err != nil {
+			return nil, err
+		}
+		if model == nil || model.LevelSequence != encx.SequenceAssault || model.Level == nil || model.Level.Number != levelNumber {
+			return nil, fmt.Errorf("game %d did not return assault level %d", gameID, levelNumber)
+		}
+		return model, nil
 	}
 	return engine.GetGameModel(ctx, gameID)
 }
@@ -551,7 +564,7 @@ func submitAnswer(ctx context.Context, engine Engine, args arguments, bonus bool
 		return nil, err
 	}
 
-	model, err := engine.GetGameModel(ctx, gameID)
+	model, err := loadLevelModel(ctx, engine, args)
 	if err != nil {
 		return nil, fmt.Errorf("read game state before submitting: %w", err)
 	}

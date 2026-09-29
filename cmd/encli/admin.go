@@ -116,6 +116,63 @@ func cmdAdminLevels(ctx context.Context, cfg *config, client *encx.Client) {
 	w.Flush()
 }
 
+func cmdAdminLevelSequence(ctx context.Context, cfg *config, client *encx.Client, args []string) {
+	requireGameId(cfg)
+	if len(args) > 1 {
+		fatal("Usage: encli admin-level-sequence -game-id <id> [linear|specified|random|assault|dynamic-random]")
+	}
+	if len(args) == 1 {
+		sequenceID, ok := levelSequenceID(args[0])
+		if !ok {
+			fatal("Unknown level sequence %q (linear, specified, random, assault, dynamic-random)", args[0])
+		}
+		if err := client.AdminSetLevelSequence(ctx, cfg.gameId, sequenceID); err != nil {
+			fatal("Failed to set level sequence: %v", err)
+		}
+	}
+	sequence, err := client.AdminGetLevelSequence(ctx, cfg.gameId)
+	if err != nil {
+		fatal("Failed to get level sequence: %v", err)
+	}
+	if cfg.jsonOutput {
+		outputJSON(sequence)
+		return
+	}
+	fmt.Printf("Level sequence: %s (%d); can change: %v\n", levelSequenceName(sequence.ID), sequence.ID, sequence.CanChange)
+}
+
+func levelSequenceID(name string) (int, bool) {
+	switch strings.ToLower(strings.TrimSpace(name)) {
+	case "linear", "0":
+		return encx.SequenceLinear, true
+	case "specified", "1":
+		return encx.SequenceSpecified, true
+	case "random", "2":
+		return encx.SequenceRandom, true
+	case "assault", "storm", "3":
+		return encx.SequenceAssault, true
+	case "dynamic-random", "4":
+		return encx.SequenceDynamicRandom, true
+	}
+	return 0, false
+}
+
+func levelSequenceName(id int) string {
+	switch id {
+	case encx.SequenceLinear:
+		return "linear"
+	case encx.SequenceSpecified:
+		return "specified"
+	case encx.SequenceRandom:
+		return "random"
+	case encx.SequenceAssault:
+		return "assault"
+	case encx.SequenceDynamicRandom:
+		return "dynamic-random"
+	}
+	return "unknown"
+}
+
 func cmdAdminCreateLevels(ctx context.Context, cfg *config, client *encx.Client, args []string) {
 	requireGameId(cfg)
 	if len(args) == 0 {

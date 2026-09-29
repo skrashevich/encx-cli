@@ -21,3 +21,18 @@ func (c *EncClient) AdminCreateGame(paramsJSON string) (int64, error) {
 	}
 	return int64(id), nil
 }
+
+// AdminGetLevelSequence returns JSON with id and can_change for the game's level distribution.
+// id=3 is assault distribution, where players choose a level themselves.
+func (c *EncClient) AdminGetLevelSequence(gameID int64) (string, error) {
+	sequence, err := c.client.AdminGetLevelSequence(c.pacedBG(), int(gameID))
+	if err != nil {
+		return "", err
+	}
+	return marshalJSON(sequence)
+}
+
+// AdminSetLevelSequence changes the distribution mode (3 = assault).
+func (c *EncClient) AdminSetLevelSequence(gameID, sequenceID int64) error {
+	return c.client.AdminSetLevelSequence(c.pacedBG(), int(gameID), int(sequenceID))
+}

@@ -26,13 +26,13 @@ func getTools() []llmTool {
 		}},
 		{Type: "function", Function: llmFunction{
 			Name:        "status",
-			Description: "Show current game state: level, sectors, bonuses, hints, messages",
-			Parameters:  json.RawMessage(`{"type":"object","properties":{"game_id":{"type":"integer","description":"Game ID"}},"required":["game_id"]}`),
+			Description: "Show game state; level_number selects a level in an assault game",
+			Parameters:  json.RawMessage(`{"type":"object","properties":{"game_id":{"type":"integer","description":"Game ID"},"level_number":{"type":"integer","description":"Optional level number in an assault game"}},"required":["game_id"]}`),
 		}},
 		{Type: "function", Function: llmFunction{
 			Name:        "level",
-			Description: "Show current level task/assignment text",
-			Parameters:  json.RawMessage(`{"type":"object","properties":{"game_id":{"type":"integer","description":"Game ID"}},"required":["game_id"]}`),
+			Description: "Show task text for current or selected assault level",
+			Parameters:  json.RawMessage(`{"type":"object","properties":{"game_id":{"type":"integer","description":"Game ID"},"level_number":{"type":"integer","description":"Optional level number in an assault game"}},"required":["game_id"]}`),
 		}},
 		{Type: "function", Function: llmFunction{
 			Name:        "levels",
@@ -41,28 +41,28 @@ func getTools() []llmTool {
 		}},
 		{Type: "function", Function: llmFunction{
 			Name:        "bonuses",
-			Description: "Show bonuses for the current level",
-			Parameters:  json.RawMessage(`{"type":"object","properties":{"game_id":{"type":"integer","description":"Game ID"}},"required":["game_id"]}`),
+			Description: "Show bonuses for current or selected assault level",
+			Parameters:  json.RawMessage(`{"type":"object","properties":{"game_id":{"type":"integer","description":"Game ID"},"level_number":{"type":"integer","description":"Optional level number in an assault game"}},"required":["game_id"]}`),
 		}},
 		{Type: "function", Function: llmFunction{
 			Name:        "hints",
-			Description: "Show hints (regular and penalty) for the current level",
-			Parameters:  json.RawMessage(`{"type":"object","properties":{"game_id":{"type":"integer","description":"Game ID"}},"required":["game_id"]}`),
+			Description: "Show hints for current or selected assault level",
+			Parameters:  json.RawMessage(`{"type":"object","properties":{"game_id":{"type":"integer","description":"Game ID"},"level_number":{"type":"integer","description":"Optional level number in an assault game"}},"required":["game_id"]}`),
 		}},
 		{Type: "function", Function: llmFunction{
 			Name:        "sectors",
-			Description: "Show sectors for the current level",
-			Parameters:  json.RawMessage(`{"type":"object","properties":{"game_id":{"type":"integer","description":"Game ID"}},"required":["game_id"]}`),
+			Description: "Show sectors for current or selected assault level",
+			Parameters:  json.RawMessage(`{"type":"object","properties":{"game_id":{"type":"integer","description":"Game ID"},"level_number":{"type":"integer","description":"Optional level number in an assault game"}},"required":["game_id"]}`),
 		}},
 		{Type: "function", Function: llmFunction{
 			Name:        "log",
-			Description: "Show recent code submissions (action log)",
-			Parameters:  json.RawMessage(`{"type":"object","properties":{"game_id":{"type":"integer","description":"Game ID"}},"required":["game_id"]}`),
+			Description: "Show recent code submissions for current or selected assault level",
+			Parameters:  json.RawMessage(`{"type":"object","properties":{"game_id":{"type":"integer","description":"Game ID"},"level_number":{"type":"integer","description":"Optional level number in an assault game"}},"required":["game_id"]}`),
 		}},
 		{Type: "function", Function: llmFunction{
 			Name:        "messages",
-			Description: "Show messages from game organizers",
-			Parameters:  json.RawMessage(`{"type":"object","properties":{"game_id":{"type":"integer","description":"Game ID"}},"required":["game_id"]}`),
+			Description: "Show organizer messages for current or selected assault level",
+			Parameters:  json.RawMessage(`{"type":"object","properties":{"game_id":{"type":"integer","description":"Game ID"},"level_number":{"type":"integer","description":"Optional level number in an assault game"}},"required":["game_id"]}`),
 		}},
 		{Type: "function", Function: llmFunction{
 			Name:        "enter",
@@ -72,7 +72,7 @@ func getTools() []llmTool {
 		{Type: "function", Function: llmFunction{
 			Name:        "send_code",
 			Description: "Send a code answer (level, sector, or bonus)",
-			Parameters:  json.RawMessage(`{"type":"object","properties":{"game_id":{"type":"integer","description":"Game ID"},"code":{"type":"string","description":"The code to submit"}},"required":["game_id","code"]}`),
+			Parameters:  json.RawMessage(`{"type":"object","properties":{"game_id":{"type":"integer","description":"Game ID"},"code":{"type":"string","description":"The code to submit"},"level_number":{"type":"integer","description":"Optional level number in an assault game"}},"required":["game_id","code"]}`),
 		}},
 		{Type: "function", Function: llmFunction{
 			Name:        "hint",
@@ -98,6 +98,16 @@ func getTools() []llmTool {
 			Name:        "admin_levels",
 			Description: "List all levels with their IDs (admin panel). Works for any game you author — use this to find level numbers/IDs, then use admin_game_scenario for the full scenario or admin_level_content for one level.",
 			Parameters:  json.RawMessage(`{"type":"object","properties":{"game_id":{"type":"integer","description":"Game ID"}},"required":["game_id"]}`),
+		}},
+		{Type: "function", Function: llmFunction{
+			Name:        "admin_get_level_sequence",
+			Description: "Read the game's level distribution mode and whether it can be changed (3 = assault).",
+			Parameters:  json.RawMessage(`{"type":"object","properties":{"game_id":{"type":"integer","description":"Game ID"}},"required":["game_id"]}`),
+		}},
+		{Type: "function", Function: llmFunction{
+			Name:        "admin_set_level_sequence",
+			Description: "Change level distribution. assault makes all levels player-selectable; read the current mode first.",
+			Parameters:  json.RawMessage(`{"type":"object","properties":{"game_id":{"type":"integer","description":"Game ID"},"sequence":{"type":"string","enum":["linear","specified","random","assault","dynamic-random"]}},"required":["game_id","sequence"]}`),
 		}},
 		{Type: "function", Function: llmFunction{
 			Name:        "admin_level_content",

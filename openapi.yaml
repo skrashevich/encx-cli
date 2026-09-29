@@ -542,6 +542,18 @@ paths:
           schema:
             type: string
             enum: [create, delete, swap, insert, createlike]
+        - name: sequences
+          in: query
+          description: change для сохранения последовательности прохождения
+          schema:
+            type: string
+            enum: [change]
+        - name: ddlLevelsSequence
+          in: query
+          description: 0=линейная, 1=указанная, 2=случайная, 3=штурмовая, 4=динамически случайная
+          schema:
+            type: integer
+            enum: [0, 1, 2, 3, 4]
         - name: ddlCreateLevelsNum
           in: query
           schema:
