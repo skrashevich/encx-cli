@@ -286,6 +286,8 @@ func main() {
 	case "game-stats":
 		requireAuth(ctx, cfg, client)
 		cmdGameStats(ctx, cfg, client)
+	case "route-map":
+		cmdRouteMap(ctx, cfg, client, positional)
 	case "profile":
 		requireAuth(ctx, cfg, client)
 		cmdProfile(ctx, cfg, client)
@@ -573,6 +575,7 @@ Commands:
   team-set-site   Update team website URL
   team-set-forum  Update team external forum URL
   import-scenario  Import scenario from GameScenario HTML export
+  route-map   Draw a walking (схема дохода) or driving (схема доезда) scheme PNG from OpenStreetMap
   mcp         Serve the engine toolset over MCP on stdio (for PicoClaw and other agents)
 
 Admin commands (require game editor rights):
@@ -764,6 +767,16 @@ func printCommandHelp(cmd string) {
 	case "game-stats":
 		fmt.Fprintln(os.Stderr, "Usage: encli game-stats -game-id <id>")
 		fmt.Fprintln(os.Stderr, "  Show game statistics: levels, teams, rankings.")
+	case "route-map":
+		fmt.Fprintln(os.Stderr, "Usage: encli route-map [-game-id <id>] <key=value ...>")
+		fmt.Fprintln(os.Stderr, "  Draw a route scheme PNG from OpenStreetMap: red pin at the start, black pin at the finish.")
+		fmt.Fprintln(os.Stderr, "  profile=foot  схема дохода (walking; default): pedestrian games, or parking to location in car games")
+		fmt.Fprintln(os.Stderr, "  profile=car   схема доезда/парковки (driving, car games)")
+		fmt.Fprintln(os.Stderr, "  level=<n>     with -game-id: finish = that level's coordinates, start = last coordinates of earlier levels")
+		fmt.Fprintln(os.Stderr, "  to=, from=    \"lat,lon\" or an address; override the scenario points")
+		fmt.Fprintln(os.Stderr, "  zoom=, width=, height=  optional framing (256-1280 px); out=<file.png> (default ./dohod-XXXX.png)")
+		fmt.Fprintln(os.Stderr, "  A start within 15 m of the finish is dropped. The game is never edited.")
+		fmt.Fprintln(os.Stderr, "  Example: encli route-map -game-id 32055 level=8")
 	case "profile":
 		fmt.Fprintln(os.Stderr, "Usage: encli profile")
 		fmt.Fprintln(os.Stderr, "  Show your profile (login, name, rank, team, points).")

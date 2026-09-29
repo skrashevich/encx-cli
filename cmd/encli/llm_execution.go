@@ -570,6 +570,12 @@ func executeLLMToolCall(ctx context.Context, cfg *config, client *encx.Client, s
 	case "wikipedia_article":
 		toolWikipediaArticle(ctx, getString("title"), getString("lang"))
 
+	case "osm_route_map":
+		toolOSMRouteMap(ctx, cfg, client, routeMapRequest{
+			to: getString("to"), from: getString("from"), profile: getString("profile"),
+			levelNumber: getInt("level_number"), zoom: getInt("zoom"), width: getInt("width"), height: getInt("height"),
+		}, getString("name"))
+
 	case "fetch_url":
 		toolFetchURL(ctx, client, getString("url"), getInt("max_bytes"), getInt("offset"))
 

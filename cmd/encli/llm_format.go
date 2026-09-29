@@ -204,6 +204,15 @@ func formatToolCallForDisplay(session *llmSession, name, argsJSON string) string
 	case "wikipedia_article":
 		t := getAnyString(args["title"])
 		return format(rt("Wikipedia article: ", "Статья Википедии: ") + t)
+	case "osm_route_map":
+		target := getAnyString(args["to"])
+		if target == "" {
+			target = rt("level ", "уровня ") + fmt.Sprint(args["level_number"])
+		}
+		if profile, _ := normalizeRouteProfile(getAnyString(args["profile"])); profile == "car" {
+			return format(rt("Drawing driving scheme for: ", "Рисую схему доезда для: ") + target)
+		}
+		return format(rt("Drawing walking scheme for: ", "Рисую схему дохода для: ") + target)
 	case "fetch_url":
 		u := getAnyString(args["url"])
 		if u != "" {
