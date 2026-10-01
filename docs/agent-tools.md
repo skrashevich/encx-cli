@@ -1,5 +1,41 @@
 # Engine tools for AI agents
 
+## JEV scope evaluation with Polza.ai
+
+The CLI/Web agent and the embedded mobile agent evaluate user intent and proposed
+tool calls with `typesafe/jev` when the resolved API-key provider endpoint is
+`https://polza.ai/api/v1`. They use the active Polza key and
+`POST /api/v1/systemone`; no separate credential or model selection is needed.
+Other providers, including ChatGPT subscription and GigaChat transports, keep
+their existing execution path. A custom gateway does not enable JEV merely
+because its model or provider label mentions Polza.
+
+Each user turn is classified using the chronological user messages, preserving
+earlier authorization for requests such as “continue” and letting newer requests
+override conflicting earlier instructions. A confident read/audit classification
+without authorization to change content refuses direct content mutations. The
+CLI/Web agent can queue `propose_admin_fix`; a mobile agent can describe the fix.
+Proposals and exact calls already approved by the user remain distinct from
+unapproved edits.
+
+Before a tool runs, JEV evaluates its arguments against the user task and a
+bounded set of recent read results. A confident scope violation is refused;
+uncertain mutations require confirmation of the exact call. Missing, malformed
+or timed-out JEV responses also require confirmation for mutations, while reads
+remain available. The initial thresholds are 0.8 for confident choices/positive
+signals and 0.2 for negative signals; these are conservative defaults, not
+accuracy guarantees. Engine policies and deterministic checks still apply, and
+JEV never grants access or replaces exact-code validation or server read-back.
+
+The evaluator has a 15-second request timeout and an 80 KB local request budget.
+It does not silently truncate authorization or tool arguments. Structured
+credentials, the active API key and inline binary payloads are removed from
+evaluation data. At most three whole read results of up to 12 KB each are retained;
+larger documents are omitted, and attempted mutations invalidate old evidence.
+JEV cannot judge image content or guarantee resistance to prompt injection.
+The returned model version and ruble cost are recorded in CLI debug logs/mobile
+JEV events; JEV costs are separate from the main chat-model execution report.
+
 The `agenttools` package turns the Encounter engine into a catalog of tools an LLM
 agent can call. One catalog serves every agent surface in the project:
 

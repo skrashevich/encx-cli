@@ -15,6 +15,7 @@ import (
 	"github.com/sipeed/picoclaw/pkg/providers"
 	"github.com/sipeed/picoclaw/pkg/tools"
 	"github.com/skrashevich/encx-cli/agenttools"
+	"github.com/skrashevich/encx-cli/internal/jevguard"
 )
 
 // readCacheTTL bounds how long a memoized engine read may be reused. It is a
@@ -170,11 +171,13 @@ func (c agentConfig) llmOptions() map[string]any {
 //
 // Mutating tools do not emit an event; they call OnConfirmationRequest and wait.
 type AgentSession struct {
-	provider providers.LLMProvider
-	model    string
-	registry *tools.ToolRegistry
-	catalog  *agenttools.Catalog
-	options  map[string]any
+	provider  providers.LLMProvider
+	model     string
+	registry  *tools.ToolRegistry
+	catalog   *agenttools.Catalog
+	options   map[string]any
+	jevClient *jevguard.Client
+	jevTurn   *jevguard.Turn // protected by mu; reset for each SendMessage
 
 	maxIterations int
 	systemPrompt  string
@@ -253,6 +256,13 @@ func newAgentSession(
 		endpoint:        strings.TrimSpace(cfg.APIBase),
 		pending:         map[string]chan bool{},
 		pendingLocation: map[string]chan locationReply{},
+	}
+	apiBase := strings.TrimSpace(cfg.APIBase)
+	if apiBase == "" {
+		apiBase = defaultAPIBases[strings.ToLower(strings.TrimSpace(cfg.Provider))]
+	}
+	if jevguard.Enabled(apiBase, cfg.AuthMethod) {
+		session.jevClient = jevguard.New(cfg.modelConfig().APIKey())
 	}
 
 	// An LLM runs the tool calls of one turn in parallel, so a single question can
@@ -353,6 +363,24 @@ func (s *AgentSession) SendMessage(text string) (string, error) {
 	s.catalog.InvalidateCache()
 
 	s.emit(turn, map[string]any{"type": "turn_started"})
+	if s.jevClient != nil {
+		var users []string
+		for _, m := range conversation {
+			if m.Role == "user" {
+				users = append(users, m.Content)
+			}
+		}
+		evaluation, err := s.jevClient.Start(ctx, users)
+		s.mu.Lock()
+		s.jevTurn = evaluation
+		s.mu.Unlock()
+		if err != nil {
+			s.emit(turn, map[string]any{"type": "jev_warning", "message": "JEV unavailable; mutations require confirmation of the exact call"})
+		} else {
+			s.emit(turn, map[string]any{"type": "jev_intent", "intent": evaluation.Intent, "confidence": evaluation.Confidence, "model": evaluation.Model, "cost_rub": evaluation.CostRub})
+		}
+		conversation[0].Content += evaluation.Prompt()
+	}
 
 	result, err := tools.RunToolLoop(ctx, tools.ToolLoopConfig{
 		Provider:      s.provider,

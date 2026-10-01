@@ -355,6 +355,16 @@ func (p *observedPicoProvider) Chat(
 	p.seen = messages
 	p.seenTools = toolDefs
 	p.pendingResultBytes = 0
+	// Keep the per-turn assessment out of persisted history and cached prompts
+	// for other providers. Include it in this request's normal byte budget.
+	if p.session.jev != nil {
+		messages = append([]providers.Message(nil), messages...)
+		if len(messages) > 0 && messages[0].Role == "system" {
+			messages[0].Content += p.session.jev.Prompt()
+		} else {
+			messages = append([]providers.Message{{Role: "system", Content: p.session.jev.Prompt()}}, messages...)
+		}
+	}
 	if p.session.antiSpamResult != "" {
 		var challenge struct {
 			URL string `json:"verification_url"`
@@ -724,7 +734,22 @@ func (r *picoLegacyToolRuntime) execute(ctx context.Context, name, argsJSON stri
 	legacyToolExecutionMu.Lock()
 	defer legacyToolExecutionMu.Unlock()
 
-	if r.input.Session.antiSpamResult == "" && securityRequiresApproval(r.input.Session, name) {
+	needsJEVApproval := false
+	if r.input.Session.antiSpamResult == "" && !securityBlocksMutation(r.input.Session, name) {
+		decision := r.checkJEVCall(ctx, name, argsJSON)
+		switch decision.Action {
+		case "deny", "propose":
+			result := jevRefusal(decision)
+			emitAgent(r.cb, AgentEvent{Type: agentEventToolDone, ToolName: name, ToolArgs: argsJSON, ToolResult: result})
+			refused := toolshared.SilentResult(result)
+			refused.IsError = true
+			return refused
+		case "confirm":
+			needsJEVApproval = true
+			emitStatus(r.cb, "jev", jevApprovalStatus(r.input.Session, decision))
+		}
+	}
+	if r.input.Session.antiSpamResult == "" && (securityRequiresApproval(r.input.Session, name) || needsJEVApproval) {
 		if r.cb.ApproveToolCall == nil {
 			message := r.input.Session.reviewText(
 				"Tool approval required but no approval handler is configured",
@@ -777,6 +802,14 @@ func (r *picoLegacyToolRuntime) execute(ctx context.Context, name, argsJSON stri
 		r.provider.pendingResultBytes += wireBytes(llmResult)
 	}
 	r.afterToolResult(name, argsJSON, llmResult)
+	if r.input.Session.jev != nil && isMutationTool(name) && name != "propose_admin_fix" {
+		r.input.Session.jev.ForgetEvidence()
+	}
+	if r.input.Session.jev != nil && !isMutationTool(name) && !toolResultLooksLikeError(llmResult) {
+		var args map[string]any
+		_ = json.Unmarshal([]byte(argsJSON), &args)
+		r.input.Session.jev.Remember(name, args, llmResult)
+	}
 	emitAgent(r.cb, AgentEvent{Type: agentEventToolDone, ToolName: name, ToolArgs: argsJSON, ToolResult: llmResult})
 	debugf("picoclaw tool result: name=%s raw_bytes=%d llm_bytes=%d result=%q",
 		name, len(rawResult), len(llmResult), summarizeDebugText(llmResult, 0))
@@ -1088,6 +1121,12 @@ func runAgentLoop(ctx context.Context, agentCfg AgentConfig, input *AgentRunInpu
 	}
 	input.Session.antiSpamResult = ""
 	input.Session.latestUserMessage = lastUserMessageContent(input.Messages)
+	startJEVTurn(ctx, agentCfg, input, cb)
+	if input.Session.jev != nil {
+		if err := ctx.Err(); err != nil {
+			return input.Messages, err
+		}
+	}
 
 	disablePicoClawLogging.Do(logger.DisableConsole)
 	stats := &agentRunStats{}

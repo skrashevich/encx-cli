@@ -8,6 +8,7 @@ import (
 	"os"
 
 	"github.com/skrashevich/encx-cli/encx"
+	"github.com/skrashevich/encx-cli/internal/jevguard"
 )
 
 const (
@@ -74,7 +75,8 @@ type llmSession struct {
 	webChatID string // current WebUI chat; enables downloadable local artifacts
 	// Reset for each user turn; prevents a challenged batch from sending more requests.
 	antiSpamResult         string
-	latestUserMessage      string // source text for checking answer codes before admin writes
+	latestUserMessage      string         // source text for checking answer codes before admin writes
+	jev                    *jevguard.Turn // per-turn Polza-only semantic evaluation
 	securityMode           AgentSecurityMode
 	applyingApprovedFix    bool
 	preferRussian          bool
@@ -135,7 +137,7 @@ func cmdLLM(ctx context.Context, cfg *config, client *encx.Client, prompt string
 		Tools:    tools,
 	}
 
-	_, err = runAgentLoop(ctx, ac, &loopIn, AgentCallbacks{
+	callbacks := AgentCallbacks{
 		OnEvent: func(ev AgentEvent) {
 			switch ev.Type {
 			case agentEventAssistantText:
@@ -153,7 +155,20 @@ func cmdLLM(ctx context.Context, cfg *config, client *encx.Client, prompt string
 		Stderrf: func(format string, args ...any) {
 			fmt.Fprintf(os.Stderr, format, args...)
 		},
-	})
+	}
+	if jevguard.Enabled(ac.BaseURL, ac.AuthMethod) {
+		callbacks.ApproveToolCall = func(ctx context.Context, name, args string) (bool, error) {
+			if err := ctx.Err(); err != nil {
+				return false, err
+			}
+			printApprovalMessage(session, formatToolApprovalAction(session, name, args))
+			for _, detail := range formatToolApprovalDetails(session, name, args) {
+				printApprovalMessage(session, detail)
+			}
+			return promptApprovalDecision(session) == "yes", nil
+		}
+	}
+	_, err = runAgentLoop(ctx, ac, &loopIn, callbacks)
 	if err != nil {
 		fatal("%v", err)
 	}

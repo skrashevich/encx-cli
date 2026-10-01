@@ -6,6 +6,8 @@ import (
 	"fmt"
 
 	toolshared "github.com/sipeed/picoclaw/pkg/tools/shared"
+	"github.com/skrashevich/encx-cli/agenttools"
+	"github.com/skrashevich/encx-cli/internal/jevguard"
 )
 
 // eventResultLimit caps the tool output copied into a progress event. The UI
@@ -60,7 +62,44 @@ func (t *observedTool) Execute(ctx context.Context, args map[string]any) *toolsh
 		"args":    args,
 	})
 
-	result := t.inner.Execute(ctx, args)
+	var result *toolshared.ToolResult
+	t.session.mu.Lock()
+	evaluation := t.session.jevTurn
+	t.session.mu.Unlock()
+	mutating := false
+	if tool, ok := t.inner.(interface{ Mutating() bool }); ok {
+		mutating = tool.Mutating()
+	}
+	// Readonly remains an unconditional catalog restriction. No JEV call or
+	// extra approval can turn it into permission to execute a mutation.
+	if evaluation != nil && !(mutating && t.session.catalog.Policy() == agenttools.PolicyReadonly) {
+		decision := evaluation.Check(ctx, jevguard.Call{Name: t.Name(), Arguments: args, Mutating: mutating, ContentMutation: mutating})
+		t.session.emit(turn, map[string]any{"type": "jev_tool", "call_id": callID, "tool": t.Name(), "action": decision.Action, "model": decision.Model, "cost_rub": decision.CostRub})
+		switch decision.Action {
+		case "deny", "propose":
+			result = toolshared.ErrorResult(decision.Reason)
+		case "confirm":
+			// The approve catalog already confirms this exact call. Full access
+			// needs an extra confirmation when semantic scope is uncertain.
+			if t.session.catalog.Policy() != agenttools.PolicyApprove {
+				allowed, err := (sessionConfirmer{session: t.session}).ConfirmToolCall(ctx, agenttools.ConfirmRequest{Tool: t.Name(), Args: args})
+				if err != nil {
+					result = toolshared.ErrorResult(err.Error()).WithError(err)
+				} else if !allowed {
+					result = toolshared.ErrorResult("The user declined this action. Do not retry it.")
+				}
+			}
+		}
+	}
+	if result == nil {
+		result = t.inner.Execute(ctx, args)
+		if evaluation != nil && mutating {
+			evaluation.ForgetEvidence()
+		}
+	}
+	if evaluation != nil && !mutating && result != nil && !result.IsError {
+		evaluation.Remember(t.Name(), args, result.ForLLM)
+	}
 
 	event := map[string]any{
 		"type":    "tool_finished",
