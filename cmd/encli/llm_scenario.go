@@ -146,6 +146,10 @@ func toolImportScenario(ctx context.Context, cfg *config, client *encx.Client, p
 }
 
 func importAgentScenario(ctx context.Context, cfg *config, client *encx.Client, doc *scenario.Document) {
+	outputJSON(importAgentScenarioResult(ctx, cfg, client, doc))
+}
+
+func importAgentScenarioResult(ctx context.Context, cfg *config, client *encx.Client, doc *scenario.Document) map[string]any {
 	stats, err := syncMissingScenario(ctx, cfg, client, doc, func(string) {})
 	result := scenarioSummary(doc)
 	result["game_id"] = cfg.gameId
@@ -154,8 +158,7 @@ func importAgentScenario(ctx context.Context, cfg *config, client *encx.Client, 
 	result["verified"] = false
 	if err != nil {
 		result["error"] = fmt.Sprintf("Import interrupted; changes already applied are in stats. Verify before retrying: %v", err)
-		outputJSON(result)
-		return
+		return result
 	}
 	differences, err := verifyScenarioImport(ctx, client, cfg.gameId, doc)
 	if err != nil {
@@ -168,5 +171,5 @@ func importAgentScenario(ctx context.Context, cfg *config, client *encx.Client, 
 		result["success"] = true
 		result["verified"] = true
 	}
-	outputJSON(result)
+	return result
 }

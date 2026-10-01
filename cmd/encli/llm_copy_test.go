@@ -30,9 +30,98 @@ func TestCopyGameSourceDomainSchema(t *testing.T) {
 		if schema.Properties["source_domain"] == nil {
 			t.Error("copy cannot address a source on another domain")
 		}
+		if schema.Properties["target_domain"] == nil {
+			t.Error("copy cannot address a target on another domain")
+		}
 	}
 	if !foundInspect {
 		t.Error("agent cannot inspect source before creating target")
+	}
+}
+
+// Reproduces copying from the selected Moscow game to a game on svk.en.cx.
+// The target must use its own session; a repeated copy must not duplicate tasks.
+func TestCopyGameToExplicitTargetDomain(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	taskCreated := false
+	writes := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		domain := r.Header.Get("X-En-Domain")
+		if r.Header.Get("Authorization") != "Bearer "+domain {
+			t.Errorf("session does not belong to request domain %s", domain)
+		}
+		if r.Method != http.MethodGet {
+			writes++
+			if domain != "svk.en.cx" {
+				t.Errorf("write reached source: %s", r.URL.Path)
+			}
+		}
+		switch {
+		case r.URL.Path == "/auth/session":
+			fmt.Fprint(w, `{}`)
+		case domain == "moscow.en.cx" && r.URL.Path == "/games/82432/scenario":
+			fmt.Fprint(w, `{"game":{"id":82432,"title":"Source"},"levels":[{"level_id":1,"level_number":1,"level_name":"Start","tasks":[{"task_id":1,"task_text":"Source task"}]}]}`)
+		case domain == "svk.en.cx" && r.URL.Path == "/admin/games/82975/levels":
+			fmt.Fprint(w, `{"levels":[{"level_id":2,"level_number":1,"level_name":"Start"}]}`)
+		case domain == "svk.en.cx" && r.URL.Path == "/admin/games/82975/levels/2/editor":
+			fmt.Fprint(w, `{}`)
+		case domain == "svk.en.cx" && r.URL.Path == "/admin/games/82975/levels/2/tasks" && r.Method == http.MethodPost:
+			var task struct {
+				Text string `json:"task_text"`
+			}
+			if err := json.UnmarshalRead(r.Body, &task); err != nil || task.Text != "Source task" {
+				t.Errorf("wrong imported task: %+v, %v", task, err)
+			}
+			taskCreated = true
+			fmt.Fprint(w, `{}`)
+		case domain == "svk.en.cx" && r.URL.Path == "/games/82975/scenario":
+			tasks := `[]`
+			if taskCreated {
+				tasks = `[{"task_id":3,"task_text":"Source task"}]`
+			}
+			fmt.Fprintf(w, `{"game":{"id":82975},"levels":[{"level_id":2,"level_number":1,"level_name":"Start","tasks":%s}]}`, tasks)
+		default:
+			t.Errorf("wrong domain or endpoint: %s %s %s", domain, r.Method, r.URL.Path)
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+	for _, domain := range []string{"moscow.en.cx", "svk.en.cx"} {
+		client := encx.New(domain, encx.WithEngine(encx.EngineNew), encx.WithAPIBaseURL(server.URL))
+		if err := client.ImportCookies([]byte(fmt.Sprintf(`{"apiToken":%q}`, domain))); err != nil {
+			t.Fatal(err)
+		}
+		saveSession(&config{domain: domain}, client)
+	}
+	cfg := &config{domain: "moscow.en.cx", gameId: 82432, engine: "new", apiBaseURL: server.URL}
+	client := encx.New(cfg.domain, appendEncOpts(cfg)...)
+	for range 2 {
+		raw := executeToolCallSafe(t.Context(), cfg, client, &llmSession{}, "admin_copy_game", `{"source_game_id":82432,"target_game_id":82975,"target_domain":"https://SVK.en.cx/"}`)
+		var result struct {
+			Success      bool   `json:"success"`
+			Verified     bool   `json:"verified"`
+			SourceDomain string `json:"source_domain"`
+			TargetDomain string `json:"target_domain"`
+		}
+		if err := json.Unmarshal([]byte(raw), &result); err != nil {
+			t.Fatal(err)
+		}
+		if !result.Success || !result.Verified || result.SourceDomain != "moscow.en.cx" || result.TargetDomain != "svk.en.cx" {
+			t.Fatalf("copy failed: %s", raw)
+		}
+	}
+	if writes != 1 || !taskCreated {
+		t.Fatalf("writes=%d taskCreated=%v", writes, taskCreated)
+	}
+	if cfg.domain != "moscow.en.cx" || cfg.gameId != 82432 {
+		t.Fatalf("context changed: %+v", cfg)
+	}
+	raw := executeToolCallSafe(t.Context(), cfg, client, &llmSession{}, "admin_copy_game", `{"source_game_id":82432,"target_game_id":82975,"target_domain":"other.en.cx"}`)
+	if !strings.Contains(raw, "No saved session for target domain other.en.cx") {
+		t.Fatalf("missing target session was not identified: %s", raw)
+	}
+	if writes != 1 || cfg.domain != "moscow.en.cx" || cfg.gameId != 82432 {
+		t.Fatal("missing target session changed a game or current context")
 	}
 }
 
@@ -41,6 +130,8 @@ func TestCopyGameInvalidIDsPreserveTargetContext(t *testing.T) {
 		`{"source_game_id":82864,"target_game_id":0,"source_domain":"svk.en.cx"}`,
 		`{"source_game_id":0,"target_game_id":123,"source_domain":"svk.en.cx"}`,
 		`{"source_game_id":123,"target_game_id":123}`,
+		`{"source_game_id":123,"target_game_id":123,"source_domain":"svk.en.cx","target_domain":"https://SVK.en.cx/"}`,
+		`{"source_game_id":123,"target_game_id":42,"target_domain":"https://svk.en.cx.evil.example"}`,
 	} {
 		cfg := &config{domain: "tech.en.cx", gameId: 123}
 		result := executeToolCallSafe(t.Context(), cfg, nil, &llmSession{}, "admin_copy_game", args)
@@ -50,6 +141,15 @@ func TestCopyGameInvalidIDsPreserveTargetContext(t *testing.T) {
 		if cfg.domain != "tech.en.cx" || cfg.gameId != 123 {
 			t.Fatalf("target context overwritten: %+v", cfg)
 		}
+	}
+}
+
+func TestCopyGameSameIDOnDifferentDomainsIsNotSelfCopy(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	cfg := &config{domain: "tech.en.cx", gameId: 42}
+	raw := executeToolCallSafe(t.Context(), cfg, nil, &llmSession{}, "admin_copy_game", `{"source_game_id":42,"target_game_id":42,"source_domain":"svk.en.cx","target_domain":"tech.en.cx"}`)
+	if !strings.Contains(raw, "No saved session for source domain svk.en.cx") {
+		t.Fatalf("equal IDs on different domains were rejected as self-copy: %s", raw)
 	}
 }
 

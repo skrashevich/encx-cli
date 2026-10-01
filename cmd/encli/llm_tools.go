@@ -261,8 +261,8 @@ func getTools() []llmTool {
 		}},
 		{Type: "function", Function: llmFunction{
 			Name:        "admin_copy_game",
-			Description: "Copy the complete scenario from a source game to an existing target game on the CURRENT domain, then verify by reading back. Specify source_domain for cross-domain copying. If no target exists, inspect_game_scenario first and admin_create_game before copying. Never use the source ID as the target ID just because the user says here. Reports verified=true only when the scenario matches.",
-			Parameters:  json.RawMessage(`{"type":"object","properties":{"source_domain":{"type":"string","description":"Source Encounter domain, e.g. svk.en.cx; defaults to current domain. Target always stays on current domain."},"source_game_id":{"type":"integer","description":"Source game ID to copy from"},"target_game_id":{"type":"integer","description":"Target game ID to copy to"}},"required":["source_game_id","target_game_id"]}`),
+			Description: "Copy the complete scenario from a source game to an existing target game, then verify by reading back. Source and target default independently to the current domain. Specify source_domain and/or target_domain for cross-domain copying; each domain uses its own saved session. If no target exists, inspect_game_scenario first and admin_create_game before copying. Never use the source ID as the target ID just because the user says here. Reports verified=true only when the scenario matches.",
+			Parameters:  json.RawMessage(`{"type":"object","properties":{"source_domain":{"type":"string","description":"Source Encounter domain, e.g. moscow.en.cx; defaults to current domain."},"source_game_id":{"type":"integer","description":"Source game ID to copy from"},"target_domain":{"type":"string","description":"Destination Encounter domain, e.g. svk.en.cx; defaults to current domain. Set this when the user specifies a destination on another domain."},"target_game_id":{"type":"integer","description":"Target game ID to copy to"}},"required":["source_game_id","target_game_id"]}`),
 		}},
 		{Type: "function", Function: llmFunction{
 			Name:        "admin_delete_game",

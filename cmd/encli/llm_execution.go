@@ -502,16 +502,22 @@ func executeLLMToolCall(ctx context.Context, cfg *config, client *encx.Client, s
 		if err != nil {
 			fatal("%v", err)
 		}
-		if sourceDomain == cfg.domain && sourceID == targetID {
+		targetDomain, err := scenarioDomain(getString("target_domain"), cfg.domain, "target_domain")
+		if err != nil {
+			fatal("%v", err)
+		}
+		if sourceDomain == targetDomain && sourceID == targetID {
 			fatal("Source and target must be different games")
 		}
 		_, source := agentScenarioSource(ctx, cfg, client, sourceDomain)
 		// Read the entire source before authenticating or writing to the target.
 		doc := readRemoteAgentScenario(ctx, source, sourceID)
-		requireAdminAuth(ctx, cfg, client)
-		targetCfg := *cfg
+		targetCfg, target := agentScenarioClient(ctx, cfg, client, targetDomain, "target")
 		targetCfg.gameId = targetID
-		importAgentScenario(ctx, &targetCfg, client, doc)
+		result := importAgentScenarioResult(ctx, targetCfg, target, doc)
+		result["source_domain"] = sourceDomain
+		result["target_domain"] = targetDomain
+		outputJSON(result)
 
 	case "admin_delete_game":
 		requireAdminAuth(ctx, cfg, client)
