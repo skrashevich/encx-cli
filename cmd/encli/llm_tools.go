@@ -161,7 +161,7 @@ func getTools() []llmTool {
 		}},
 		{Type: "function", Function: llmFunction{
 			Name:        "admin_create_bonus",
-			Description: "Create a bonus on a level",
+			Description: "Create a bonus on a level. If bonus names contain ordinal numbers, create the bonuses in ascending numeric order (1, 2, ..., 10), so their order in the engine matches that numbering. Call this tool sequentially, waiting for each creation to finish before creating the next bonus; do not create numbered bonuses in parallel or arbitrary order.",
 			Parameters:  json.RawMessage(`{"type":"object","properties":{"game_id":{"type":"integer","description":"Game ID"},"level_number":{"type":"integer","description":"Level number"},"level_id":{"type":"integer","description":"Level ID"},"name":{"type":"string","description":"Bonus name"},"answers":{"type":"array","items":{"type":"string"},"description":"Accepted answers"},"task":{"type":"string"},"hint":{"type":"string"},"award_hours":{"type":"integer","minimum":0,"description":"Time component (not total)."},"award_minutes":{"type":"integer","minimum":0,"description":"Time component (not total)."},"award_seconds":{"type":"integer","minimum":0,"description":"Time component (not total)."},"negative":{"type":"boolean","description":"True for a penalty, false for a bonus"}},"required":["game_id","level_number","level_id","name","answers"]}`),
 		}},
 		{Type: "function", Function: llmFunction{
