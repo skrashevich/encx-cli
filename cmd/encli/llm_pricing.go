@@ -16,6 +16,7 @@ type llmPricing struct {
 	promptCostPerToken     float64
 	completionCostPerToken float64
 	isLocal                bool // local proxy = free subscription
+	subscriptionName       string
 	isSubscription         bool // ChatGPT plan: tokens are not billed per call
 }
 

@@ -16,7 +16,7 @@ import (
 
 // resolveAgentConfig is the single LLM transport resolution used by --llm,
 // -chat and -web. The transport is an OpenAI-compatible API key, a ChatGPT
-// subscription stored by `encli codex-login`, or GigaChat's OAuth key.
+// subscription stored by `encli codex-login`, a Claude setup token, or GigaChat's OAuth key.
 //
 // Each field is resolved the same way: the command line, then the environment,
 // then what the -web settings panel stored, then the built-in default.
@@ -46,6 +46,8 @@ func resolveAgentConfig(cfg *config) (AgentConfig, error) {
 			authMethod = authMethodCodex
 		case hasGigaChatCredentials():
 			authMethod = authMethodGigaChat
+		case hasClaudeCredential():
+			authMethod = authMethodClaude
 		}
 	}
 
@@ -58,6 +60,14 @@ func resolveAgentConfig(cfg *config) (AgentConfig, error) {
 			AuthMethod: authMethodCodex,
 			Model:      codexModel(model),
 		}, nil
+	case authMethodClaude:
+		if err := validateClaudeEnvironment(); err != nil {
+			return AgentConfig{}, err
+		}
+		if _, err := loadClaudeCredential(); err != nil {
+			return AgentConfig{}, err
+		}
+		return AgentConfig{AuthMethod: authMethodClaude, Model: claudeModel(model)}, nil
 	case authMethodGigaChat:
 		gigachat, err := gigachatConfigFromEnv(model)
 		if err != nil {
@@ -70,7 +80,7 @@ func resolveAgentConfig(cfg *config) (AgentConfig, error) {
 		}, nil
 	case "", authMethodAPIKey:
 	default:
-		return AgentConfig{}, fmt.Errorf("unknown LLM auth method %q: use apikey, codex or gigachat", authMethod)
+		return AgentConfig{}, fmt.Errorf("unknown LLM auth method %q: use apikey, codex, claude or gigachat", authMethod)
 	}
 
 	baseURL := cmp.Or(endpoint, defaultLLMBaseURL)

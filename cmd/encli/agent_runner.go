@@ -211,7 +211,7 @@ func formatAgentExecutionReport(session *llmSession, model string, pricing *llmP
 			fmt.Fprintf(&report, "Токены:           %d (вход: %d, выход: %d)\n",
 				totalPromptTokens+totalCompletionTokens, totalPromptTokens, totalCompletionTokens)
 			if pricing != nil && pricing.isSubscription {
-				fmt.Fprintf(&report, "Стоимость:        $0 (подписка ChatGPT)\n")
+				fmt.Fprintf(&report, "Стоимость:        $0 (подписка %s)\n", cmp.Or(pricing.subscriptionName, "ChatGPT"))
 			} else if pricing != nil && pricing.isLocal {
 				fmt.Fprintf(&report, "Стоимость:        $0 (локальный прокси)\n")
 			} else if pricing != nil {
@@ -231,7 +231,7 @@ func formatAgentExecutionReport(session *llmSession, model string, pricing *llmP
 			fmt.Fprintf(&report, "Tokens:        %d (in: %d, out: %d)\n",
 				totalPromptTokens+totalCompletionTokens, totalPromptTokens, totalCompletionTokens)
 			if pricing != nil && pricing.isSubscription {
-				fmt.Fprintf(&report, "Cost:          $0 (ChatGPT subscription)\n")
+				fmt.Fprintf(&report, "Cost:          $0 (%s subscription)\n", cmp.Or(pricing.subscriptionName, "ChatGPT"))
 			} else if pricing != nil && pricing.isLocal {
 				fmt.Fprintf(&report, "Cost:          $0 (local proxy)\n")
 			} else if pricing != nil {
@@ -809,6 +809,8 @@ func newPicoProvider(agentCfg AgentConfig) (providers.LLMProvider, error) {
 		return agentCfg.Provider, nil
 	}
 	switch agentCfg.AuthMethod {
+	case authMethodClaude:
+		return newClaudeProvider()
 	case authMethodCodex:
 		return newCodexProvider()
 	case authMethodGigaChat:
@@ -854,6 +856,8 @@ func resolveAgentPricing(ctx context.Context, agentCfg AgentConfig) *llmPricing 
 	switch agentCfg.AuthMethod {
 	case authMethodCodex:
 		return &llmPricing{isSubscription: true}
+	case authMethodClaude:
+		return &llmPricing{isSubscription: true, subscriptionName: "Claude"}
 	case authMethodGigaChat:
 		return nil
 	}
@@ -864,7 +868,7 @@ func resolveAgentPricing(ctx context.Context, agentCfg AgentConfig) *llmPricing 
 // in tokens; 0 means unknown, and the budget assumes 128K.
 func resolveAgentContextWindow(ctx context.Context, agentCfg AgentConfig) int {
 	switch agentCfg.AuthMethod {
-	case authMethodCodex, authMethodGigaChat:
+	case authMethodCodex, authMethodClaude, authMethodGigaChat:
 		return 0
 	}
 	return fetchLLMContextWindow(ctx, agentCfg.BaseURL, agentCfg.APIKey, agentCfg.Model)

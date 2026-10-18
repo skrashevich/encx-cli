@@ -1526,6 +1526,7 @@ const LLM_OVERRIDE_FIELDS = ['auth_method', 'base_url', 'model', 'api_key'];
 
 const LLM_TRANSPORT_RU = {
   codex: 'подписка ChatGPT',
+  claude: 'подписка Claude',
   gigachat: 'GigaChat',
   apikey: 'OpenAI-совместимый провайдер',
 };
@@ -1577,7 +1578,7 @@ function polzaInitialMethod(data) {
   if (method === 'apikey' && isPolzaURL(base)) return 'polza';
   const stored = data?.stored || {};
   const configured = stored.auth_method || stored.base_url || stored.model || stored.has_api_key ||
-    data?.effective?.api_key?.has_value || data?.codex?.signed_in ||
+    data?.effective?.api_key?.has_value || data?.codex?.signed_in || data?.claude?.configured ||
     (data?.env_overrides || []).length || (method && !['codex', 'apikey'].includes(method));
   return configured ? (method || 'apikey') : 'polza';
 }
@@ -1753,16 +1754,142 @@ async function submitPolzaCode(pre) {
   } catch (e) { if (polzaFlow === flow) polzaResult(pre, e.message || String(e), 'err'); }
 }
 
+let claudeCatalog = null;
+let claudeCatalogRequest = null;
+let claudeCatalogEpoch = 0;
+let claudeCatalogError = '';
+const CLAUDE_PANELS = ['llm', 'onboarding-llm'];
+
+function resetClaudeModels() {
+  claudeCatalogEpoch++;
+  claudeCatalog = null;
+  claudeCatalogRequest = null;
+  claudeCatalogError = '';
+  for (const pre of CLAUDE_PANELS) {
+    renderClaudeModelSelect(pre);
+    $(`${pre}-claude-models-retry`).disabled = false;
+    $(`${pre}-claude-models-status`).textContent = '';
+  }
+}
+
+function renderClaudeModelSelect(pre, selected = $(`${pre}-claude-model`).value) {
+  const select = $(`${pre}-claude-model`);
+  const models = claudeCatalog?.models || [];
+  selected = String(selected || '').replace(/^anthropic\//, '').replaceAll('.', '-');
+  if (!selected.startsWith('claude-')) selected = '';
+  const wanted = selected || claudeCatalog?.default_model || '';
+  const options = models.map(m => `<option value="${escapeHtml(m.id)}">${escapeHtml(m.name || m.id)}</option>`);
+  if (wanted && !models.some(m => m.id === wanted)) {
+    options.unshift(`<option value="${escapeHtml(wanted)}">${escapeHtml(wanted)} — ${claudeCatalog ? 'сохранённая, отсутствует в каталоге' : 'текущий выбор'}</option>`);
+  }
+  select.innerHTML = options.join('') || '<option value="">Сначала подключите Claude</option>';
+  select.value = wanted;
+  select.disabled = !models.length;
+}
+
+async function loadClaudeModels(force = false) {
+  if (!state.llm?.claude?.configured) return null;
+  if (claudeCatalogRequest) return claudeCatalogRequest;
+  if (!force && (claudeCatalog || claudeCatalogError)) return claudeCatalog;
+  const epoch = claudeCatalogEpoch;
+  for (const pre of CLAUDE_PANELS) {
+    $(`${pre}-claude-models-status`).textContent = 'Загружаем доступные модели…';
+    $(`${pre}-claude-models-retry`).disabled = true;
+  }
+  claudeCatalogRequest = (async () => {
+    try {
+      const data = await api('/llm/claude/models');
+      if (epoch !== claudeCatalogEpoch) return null;
+      if (!data.models?.length) throw new Error('Claude не вернул доступных моделей.');
+      claudeCatalog = data;
+      claudeCatalogError = '';
+      for (const pre of CLAUDE_PANELS) {
+        renderClaudeModelSelect(pre);
+        $(`${pre}-claude-models-status`).textContent = 'Список получен от Claude.';
+      }
+      return data;
+    } catch (e) {
+      if (epoch !== claudeCatalogEpoch) return null;
+      claudeCatalogError = e.message || String(e);
+      for (const pre of CLAUDE_PANELS) {
+        $(`${pre}-claude-models-status`).textContent = `${claudeCatalogError} Нажмите «Обновить список», чтобы повторить.`;
+      }
+      return null;
+    } finally {
+      if (epoch === claudeCatalogEpoch) {
+        claudeCatalogRequest = null;
+        for (const pre of CLAUDE_PANELS) $(`${pre}-claude-models-retry`).disabled = false;
+      }
+    }
+  })();
+  return claudeCatalogRequest;
+}
+
+function renderClaudeStatus(status) {
+  const c = status || {};
+  for (const pre of ['llm', 'onboarding-llm']) {
+    $(`${pre}-claude-status`).textContent = c.error || (c.configured
+      ? `Токен настроен (${c.source === 'env' ? 'CLAUDE_CODE_OAUTH_TOKEN — заменяется в окружении' : 'сохранённый файл'}). Действительность проверяется при запросе к Claude.`
+      : 'Токен подписки ещё не настроен.');
+  }
+}
+
+async function connectClaude(pre) {
+  const button = $(`${pre}-claude-connect`);
+  if (button.disabled) return false;
+  button.disabled = true;
+  try {
+    const token = $(`${pre}-claude-token`).value.trim();
+    if (token) {
+      await api('/llm/claude/login', { method: 'POST', body: { token } });
+      $(`${pre}-claude-token`).value = '';
+      resetClaudeModels();
+    }
+    const current = await api('/llm/settings');
+    if (!current.claude?.configured) throw new Error('Сначала вставьте токен из claude setup-token.');
+    state.llm = current;
+    await loadClaudeModels();
+    const model = $(`${pre}-claude-model`).value.trim();
+    if (!model) throw new Error('Не удалось загрузить модели Claude. Токен сохранён; обновите список и выберите модель.');
+    const data = await api('/llm/settings', { method: 'PUT', body: {
+      auth_method: 'claude', model, base_url: current.stored?.base_url || '',
+    } });
+    applyLLMSnapshot(data);
+    fillOnboardingLLM(data);
+    void loadAgentConfig();
+    if (data.agent?.error) throw new Error(data.agent.error);
+    toast(data.agent?.auth_method === 'claude' ? 'Токен Claude сохранён, провайдер выбран.' : 'Claude сохранён. Выбор провайдера переопределён настройками запуска.');
+    return true;
+  } catch (e) {
+    toast(e.message || String(e), true);
+    return false;
+  } finally { button.disabled = false; }
+}
+
+async function logoutClaude() {
+  try {
+    await api('/llm/claude/logout', { method: 'POST' });
+    resetClaudeModels();
+    applyLLMSnapshot(await api('/llm/settings'), { keepEdits: true });
+    void loadAgentConfig();
+    toast('Сохранённый токен удалён. CLAUDE_CODE_OAUTH_TOKEN, если задан, продолжает действовать.');
+  } catch (e) { toast(e.message || String(e), true); }
+}
+
 function bindPolza() {
   for (const pre of POLZA_PANELS) {
     const selectTab = pre === 'llm' ? selectLLMTab : selectOnboardingLLMTab;
     $(`${pre}-tab-polza`).addEventListener('click', () => selectTab('polza'));
-    const methods = ['polza', 'codex', 'apikey'];
+    $(`${pre}-tab-claude`).addEventListener('click', () => selectTab('claude'));
+    $(`${pre}-claude-connect`).addEventListener('click', () => void connectClaude(pre));
+    $(`${pre}-claude-logout`).addEventListener('click', () => void logoutClaude());
+    $(`${pre}-claude-models-retry`).addEventListener('click', () => void loadClaudeModels(true));
+    const methods = ['polza', 'codex', 'claude', 'apikey'];
     for (const [index, method] of methods.entries()) {
       $(`${pre}-tab-${method}`).addEventListener('keydown', e => {
         if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(e.key)) return;
         e.preventDefault();
-        const next = e.key === 'Home' ? 0 : e.key === 'End' ? 2 : (index + (e.key === 'ArrowRight' ? 1 : 2)) % 3;
+        const next = e.key === 'Home' ? 0 : e.key === 'End' ? methods.length - 1 : (index + (e.key === 'ArrowRight' ? 1 : methods.length - 1)) % methods.length;
         selectTab(methods[next]);
         $(`${pre}-tab-${methods[next]}`).focus();
       });
@@ -1781,9 +1908,9 @@ function initialAuthMethod(data) {
   const stored = String(data?.stored?.auth_method || '').trim();
   if (stored) return stored;
   const effective = String(data?.effective?.auth_method?.value || '').trim();
-  if (effective === 'codex' || effective === 'apikey') return effective;
+  if (['codex', 'claude', 'apikey'].includes(effective)) return effective;
   const resolved = String(data?.agent?.auth_method || '').trim();
-  return resolved === 'codex' || resolved === 'apikey' ? resolved : '';
+  return ['codex', 'claude', 'apikey'].includes(resolved) ? resolved : '';
 }
 
 function isModalOpen() {
@@ -1875,6 +2002,9 @@ function applyLLMSnapshot(data, opts = {}) {
     state.llmAuth = polzaInitialMethod(data);
     const key = $('llm-api-key');
     if (key) key.value = '';
+    for (const pre of ['llm', 'onboarding-llm']) {
+      renderClaudeModelSelect(pre, data?.stored?.auth_method === 'claude' ? data.stored.model || '' : '');
+    }
   }
   renderLLMSettings();
 }
@@ -1971,9 +2101,11 @@ function renderLLMSettings() {
   const stored = data?.stored || {};
   const method = state.llmAuth;
   const isCodex = method === 'codex';
-  const isOther = method !== '' && method !== 'codex' && method !== 'apikey' && method !== 'polza';
+  const isOther = method !== '' && method !== 'codex' && method !== 'claude' && method !== 'apikey' && method !== 'polza';
 
   setTabState($('llm-tab-codex'), isCodex, isOther);
+  setTabState($('llm-tab-claude'), method === 'claude', isOther);
+  $('llm-pane-claude').hidden = method !== 'claude';
   setTabState($('llm-tab-apikey'), method === 'apikey' || !method, isOther);
   setTabState($('llm-tab-polza'), method === 'polza', isOther);
   if ($('llm-pane-polza')) $('llm-pane-polza').hidden = method !== 'polza';
@@ -1981,7 +2113,7 @@ function renderLLMSettings() {
   const codexPane = $('llm-pane-codex');
   const apikeyPane = $('llm-pane-apikey');
   if (codexPane) codexPane.hidden = !isCodex;
-  if (apikeyPane) apikeyPane.hidden = isCodex || isOther || method === 'polza';
+  if (apikeyPane) apikeyPane.hidden = isCodex || isOther || method === 'polza' || method === 'claude';
 
   const note = $('llm-transport-note');
   if (note) {
@@ -2018,6 +2150,8 @@ function renderLLMSettings() {
 
   renderLLMOverrides(data?.env_overrides);
   renderCodexStatus(data?.codex);
+  renderClaudeStatus(data?.claude);
+  if (method === 'claude') void loadClaudeModels();
 
   const pending = !!state.codexFlow;
   for (const target of CODEX_TARGETS) {
@@ -2085,6 +2219,7 @@ async function putLLMSettings(extra, successMsg) {
 }
 
 async function saveLLMSettings() {
+  if (state.llmAuth === 'claude') { await connectClaude('llm'); return; }
   if (state.llmAuth === 'polza') { await connectPolza('llm'); return; }
   await putLLMSettings(undefined, 'Настройки LLM сохранены.');
 }
@@ -2508,7 +2643,8 @@ function onboardingLLMTab() {
 
 function renderOnboardingLLMTabs() {
   const method = onboardingLLMTab();
-  for (const kind of ['polza', 'codex', 'apikey']) {
+  if (method === 'claude') void loadClaudeModels();
+  for (const kind of ['polza', 'codex', 'claude', 'apikey']) {
     setTabState($(`onboarding-llm-tab-${kind}`), method === kind, false);
     const pane = $(`onboarding-llm-pane-${kind}`);
     if (pane) pane.hidden = method !== kind;
@@ -2594,6 +2730,7 @@ async function loadOnboardingLLM() {
  * OpenAI-провайдера очищаются: подписка их не использует, а сохранённая модель
  * провайдера подменила бы модель подписки. */
 async function saveOnboardingLLM() {
+  if (onboardingLLMTab() === 'claude') return connectClaude('onboarding-llm');
   if (onboardingLLMTab() === 'polza') return connectPolza('onboarding-llm');
   const isCodex = onboardingLLMTab() === 'codex';
   try {

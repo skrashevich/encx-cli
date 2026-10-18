@@ -133,6 +133,7 @@
           <div class="llm-tabs" role="tablist" aria-label="Способ подключения">
             <button type="button" class="llm-tab" id="llm-tab-polza" role="tab" aria-selected="false" aria-controls="llm-pane-polza" tabindex="-1">Polza.ai</button>
             <button type="button" class="llm-tab" id="llm-tab-codex" role="tab" aria-selected="false" aria-controls="llm-pane-codex" tabindex="-1">Подписка ChatGPT</button>
+            <button type="button" class="llm-tab" id="llm-tab-claude" role="tab" aria-selected="false" aria-controls="llm-pane-claude" tabindex="-1">Подписка Claude</button>
             <button type="button" class="llm-tab is-active" id="llm-tab-apikey" role="tab" aria-selected="true" aria-controls="llm-pane-apikey">OpenAI-совместимый провайдер</button>
           </div>
           <div class="llm-override-slot" id="llm-override-auth_method"></div>
@@ -191,6 +192,28 @@
               </div>
             </div>
           </details>
+        </section>
+
+        <section class="llm-pane" id="llm-pane-claude" role="tabpanel" aria-labelledby="llm-tab-claude" tabindex="0" hidden>
+          <p class="llm-hint">Нужен установленный Claude Code CLI. В обычном терминале ОС (Terminal или PowerShell), вне чата Claude Code, выполните <code>claude setup-token</code>, войдите в аккаунт с подпиской и вставьте полученный токен.</p>
+          <p class="llm-hint" id="llm-claude-status" role="status" aria-live="polite"></p>
+          <div class="llm-field">
+            <label class="llm-field-label" for="llm-claude-token">Токен подписки</label>
+            <input type="password" id="llm-claude-token" class="llm-input" placeholder="sk-ant-oat01-…" autocomplete="off" spellcheck="false" />
+          </div>
+          <div class="llm-field">
+            <label class="llm-field-label" for="llm-claude-model">Модель Claude</label>
+            <div class="llm-field-row">
+              <select id="llm-claude-model" class="llm-input" aria-describedby="llm-claude-models-status" disabled><option value="">Сначала подключите Claude</option></select>
+              <button type="button" class="btn btn-secondary btn-sm" id="llm-claude-models-retry">Обновить список</button>
+            </div>
+            <p class="llm-hint" id="llm-claude-models-status" role="status" aria-live="polite"></p>
+          </div>
+          <div class="llm-actions">
+            <button type="button" class="btn btn-primary" id="llm-claude-connect">Подключить Claude</button>
+            <button type="button" class="btn btn-secondary" id="llm-claude-logout">Удалить сохранённый токен</button>
+          </div>
+          <p class="llm-hint">Пустое поле сохраняет текущий токен. При истечении срока получите новый через <code>claude setup-token</code>.</p>
         </section>
 
         <section class="llm-pane" id="llm-pane-apikey" role="tabpanel" aria-labelledby="llm-tab-apikey" tabindex="0">
@@ -267,7 +290,8 @@
             <div class="llm-tabs" role="tablist" aria-label="Способ подключения">
               <button type="button" class="llm-tab" id="onboarding-llm-tab-polza" role="tab" aria-selected="false" aria-controls="onboarding-llm-pane-polza" tabindex="-1">Polza.ai</button>
             <button type="button" class="llm-tab is-active" id="onboarding-llm-tab-codex" role="tab" aria-selected="true" aria-controls="onboarding-llm-pane-codex">Подписка ChatGPT</button>
-              <button type="button" class="llm-tab" id="onboarding-llm-tab-apikey" role="tab" aria-selected="false" aria-controls="onboarding-llm-pane-apikey" tabindex="-1">OpenAI-совместимый провайдер</button>
+              <button type="button" class="llm-tab" id="onboarding-llm-tab-claude" role="tab" aria-selected="false" aria-controls="onboarding-llm-pane-claude" tabindex="-1">Подписка Claude</button>
+            <button type="button" class="llm-tab" id="onboarding-llm-tab-apikey" role="tab" aria-selected="false" aria-controls="onboarding-llm-pane-apikey" tabindex="-1">OpenAI-совместимый провайдер</button>
             </div>
           </div>
 
@@ -323,7 +347,29 @@
             </details>
           </section>
 
-          <section class="llm-pane" id="onboarding-llm-pane-apikey" role="tabpanel" aria-labelledby="onboarding-llm-tab-apikey" tabindex="0" hidden>
+          <section class="llm-pane" id="onboarding-llm-pane-claude" role="tabpanel" aria-labelledby="onboarding-llm-tab-claude" tabindex="0" hidden>
+          <p class="llm-hint">Нужен установленный Claude Code CLI. В обычном терминале ОС (Terminal или PowerShell), вне чата Claude Code, выполните <code>claude setup-token</code>, войдите в аккаунт с подпиской и вставьте полученный токен.</p>
+          <p class="llm-hint" id="onboarding-llm-claude-status" role="status" aria-live="polite"></p>
+          <div class="llm-field">
+            <label class="llm-field-label" for="onboarding-llm-claude-token">Токен подписки</label>
+            <input type="password" id="onboarding-llm-claude-token" class="llm-input" placeholder="sk-ant-oat01-…" autocomplete="off" spellcheck="false" />
+          </div>
+          <div class="llm-field">
+            <label class="llm-field-label" for="onboarding-llm-claude-model">Модель Claude</label>
+            <div class="llm-field-row">
+              <select id="onboarding-llm-claude-model" class="llm-input" aria-describedby="onboarding-llm-claude-models-status" disabled><option value="">Сначала подключите Claude</option></select>
+              <button type="button" class="btn btn-secondary btn-sm" id="onboarding-llm-claude-models-retry">Обновить список</button>
+            </div>
+            <p class="llm-hint" id="onboarding-llm-claude-models-status" role="status" aria-live="polite"></p>
+          </div>
+          <div class="llm-actions">
+            <button type="button" class="btn btn-primary" id="onboarding-llm-claude-connect">Подключить Claude</button>
+            <button type="button" class="btn btn-secondary" id="onboarding-llm-claude-logout">Удалить сохранённый токен</button>
+          </div>
+          <p class="llm-hint">Пустое поле сохраняет текущий токен. При истечении срока получите новый через <code>claude setup-token</code>.</p>
+        </section>
+
+        <section class="llm-pane" id="onboarding-llm-pane-apikey" role="tabpanel" aria-labelledby="onboarding-llm-tab-apikey" tabindex="0" hidden>
             <div class="llm-field">
               <label class="llm-field-label" for="onboarding-llm-base-url">Base URL</label>
               <input type="text" id="onboarding-llm-base-url" class="llm-input" placeholder="https://api.openai.com/v1" autocomplete="off" spellcheck="false" />

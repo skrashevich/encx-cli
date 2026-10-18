@@ -9,11 +9,11 @@ import (
 	"time"
 )
 
-// The -web settings panel configures the two transports an operator can set up
-// from a browser: an OpenAI-compatible provider, and a ChatGPT subscription.
+// The -web settings panel configures API-key providers and ChatGPT/Claude
+// subscription credentials.
 // GigaChat stays on the environment for now; it is still accepted here so the
 // API and resolveAgentConfig agree on what a valid auth method is.
-var llmSettableAuthMethods = []string{authMethodAPIKey, authMethodCodex, authMethodGigaChat}
+var llmSettableAuthMethods = []string{authMethodAPIKey, authMethodCodex, authMethodClaude, authMethodGigaChat}
 
 // llmAPIKeyStatus describes the key without disclosing it. The panel needs to
 // know that a key exists and which one, not what it is: -web binds to localhost
@@ -108,6 +108,7 @@ type llmSettingsPayload struct {
 	EnvOverrides []llmEnvOverride     `json:"env_overrides"`
 	Defaults     map[string]string    `json:"defaults"`
 	AuthMethods  []string             `json:"auth_methods"`
+	Claude       llmClaudeStatus      `json:"claude"`
 	Codex        llmCodexStatus       `json:"codex"`
 	Agent        llmAgentSummary      `json:"agent"`
 	SettingsPath string               `json:"settings_path"`
@@ -245,12 +246,14 @@ func (h *webHub) llmSettingsPayload() (llmSettingsPayload, error) {
 			APIKeyMasked: maskAPIKey(stored.APIKey),
 		},
 		Defaults: map[string]string{
-			"base_url":    defaultLLMBaseURL,
-			"model":       defaultLLMModel,
-			"codex_model": defaultCodexModel,
+			"base_url":     defaultLLMBaseURL,
+			"model":        defaultLLMModel,
+			"codex_model":  defaultCodexModel,
+			"claude_model": defaultClaudeModel,
 		},
 		AuthMethods:  llmSettableAuthMethods,
 		Codex:        codexStatusForWeb(),
+		Claude:       claudeStatus(),
 		SettingsPath: llmSettingsFile(),
 	}
 

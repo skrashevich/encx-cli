@@ -478,7 +478,7 @@ func TestResolveAgentConfigRejectsAnUnknownStoredAuthMethod(t *testing.T) {
 	writeTestLLMSettings(t, llmSettings{AuthMethod: "chatgpt"})
 
 	_, err := resolveAgentConfig(&config{})
-	if err == nil || !strings.Contains(err.Error(), "apikey, codex or gigachat") {
+	if err == nil || !strings.Contains(err.Error(), "apikey, codex, claude or gigachat") {
 		t.Fatalf("error = %v, want the accepted values", err)
 	}
 }

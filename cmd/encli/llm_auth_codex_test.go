@@ -21,7 +21,7 @@ import (
 func isolateLLMEnv(t *testing.T) string {
 	t.Helper()
 	for _, key := range []string{
-		"LLM_AUTH", "LLM_API_KEY", "OPENROUTER_API_KEY",
+		claudeTokenEnvVar, "ANTHROPIC_API_KEY", "LLM_AUTH", "LLM_API_KEY", "OPENROUTER_API_KEY",
 		"LLM_MODEL", "OPENROUTER_MODEL", "LLM_BASE_URL", "OPENROUTER_BASE_URL",
 		"GIGACHAT_CREDENTIALS", "GIGACHAT_SCOPE", "GIGACHAT_AUTH_URL",
 		"GIGACHAT_BASE_URL", "GIGACHAT_MODEL", "GIGACHAT_CA_BUNDLE", "GIGACHAT_INSECURE",
@@ -31,6 +31,7 @@ func isolateLLMEnv(t *testing.T) string {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "codex-auth.json")
 	t.Setenv(codexAuthFileEnvVar, path)
+	t.Setenv(claudeAuthFileEnvVar, filepath.Join(dir, "claude", "auth.json"))
 	// The settings file is resolved under sessionDir() by default, so without
 	// this every resolveAgentConfig test would read the developer's real one.
 	t.Setenv(llmSettingsFileEnvVar, filepath.Join(dir, "llm-settings.json"))
@@ -985,7 +986,7 @@ func TestResolveAgentConfigMissingKeyPointsAtCodexLogin(t *testing.T) {
 func TestResolveAgentConfigRejectsAnUnknownAuthMethod(t *testing.T) {
 	isolateLLMEnv(t)
 	_, err := resolveAgentConfig(&config{llmAuth: "chatgpt"})
-	if err == nil || !strings.Contains(err.Error(), "apikey, codex or gigachat") {
+	if err == nil || !strings.Contains(err.Error(), "apikey, codex, claude or gigachat") {
 		t.Fatalf("error = %v, want the accepted values", err)
 	}
 }

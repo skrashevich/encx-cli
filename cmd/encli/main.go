@@ -50,7 +50,7 @@ type config struct {
 	engine             string // legacy | new | auto (env: ENCX_ENGINE)
 	apiRequestInterval time.Duration
 	apiBaseURL         string // new-engine API host (env: ENCX_API_BASE_URL)
-	llmAuth            string // agent transport: apikey (default) | codex | gigachat (env: LLM_AUTH)
+	llmAuth            string // agent transport: apikey (default) | codex | claude | gigachat (env: LLM_AUTH)
 	codexDevice        bool   // codex-login: use the device-code flow
 	codexNoBrowser     bool   // codex-login: do not open a browser
 }
@@ -237,6 +237,12 @@ func main() {
 		cmdLogin(ctx, cfg, client)
 	case "logout":
 		cmdLogout(cfg)
+	case "claude-login":
+		cmdClaudeLogin(cfg)
+	case "claude-logout":
+		cmdClaudeLogout(cfg)
+	case "claude-status":
+		cmdClaudeStatus(cfg)
 	case "codex-login":
 		cmdCodexLogin(cfg)
 	case "codex-logout":
@@ -550,6 +556,9 @@ Usage: encli <command> [flags]
 Commands:
   login       Authenticate and save session
   logout      Clear saved session
+  claude-login  Store a Claude subscription token from claude setup-token
+  claude-status Show whether a Claude subscription token is configured
+  claude-logout Remove the stored Claude subscription token
   codex-login   Sign in to a ChatGPT subscription for the agent (OAuth)
   codex-logout  Clear the stored ChatGPT credential
   codex-status  Show the stored ChatGPT credential
@@ -634,7 +643,7 @@ LLM mode:
                   Example: encli --llm "скопируй игру 82033 в 82034"
   --readonly      Block agent tools that modify or delete data (LLM and -web)
   -llm-auth       Transport: apikey (default), codex for a ChatGPT subscription,
-                  or gigachat for the Sber GigaChat API
+                  claude for a Claude subscription, or gigachat for the Sber GigaChat API
                   Run 'encli codex-login' once; without LLM_API_KEY it is implied
 
 TUI chat:
@@ -674,7 +683,7 @@ Environment variables:
   LLM_BASE_URL         OpenAI-compatible API base URL (default: https://openrouter.ai/api/v1)
   LLM_API_KEY          API key for --llm mode (not required for localhost)
   LLM_MODEL            LLM model override (default: openai/gpt-oss-120b:free)
-  LLM_AUTH             Agent transport: apikey (default), codex or gigachat (see -llm-auth)
+  LLM_AUTH             Agent transport: apikey (default), codex, claude or gigachat (see -llm-auth)
   ENCLI_CODEX_AUTH_FILE  ChatGPT credential path (default: ~/.config/encli/codex/auth.json)
   GIGACHAT_CREDENTIALS   GigaChat authorization key (base64 of "Client ID:Client Secret")
   GIGACHAT_SCOPE         GigaChat API version (default: GIGACHAT_API_PERS)
@@ -710,6 +719,10 @@ func printCommandHelp(cmd string) {
 	case "logout":
 		fmt.Fprintln(os.Stderr, "Usage: encli logout [-domain <domain>]")
 		fmt.Fprintln(os.Stderr, "  Clear saved session for the specified domain.")
+	case "claude-login", "claude-status", "claude-logout":
+		fmt.Fprintf(os.Stderr, "Usage: encli %s [-json]\n", cmd)
+		fmt.Fprintln(os.Stderr, "  claude-login reads a subscription token from stdin (hidden on a terminal).")
+		fmt.Fprintln(os.Stderr, "  Generate it with claude setup-token. Status never reveals the token.")
 	case "codex-login":
 		fmt.Fprintln(os.Stderr, "Usage: encli codex-login [-device] [-no-browser] [-json]")
 		fmt.Fprintln(os.Stderr, "  Sign in to a ChatGPT subscription (the backend the Codex CLI uses) so the")
