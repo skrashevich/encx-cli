@@ -183,6 +183,7 @@ ENCX_LIVE_DOMAIN=demo.en.cx ENCX_LIVE_LOGIN=… ENCX_LIVE_PASSWORD=… \
 | `SetAPIToken` | восстановление ранее полученного JWT |
 | `APIBaseURL` | хост нового движка |
 | `Engine` | фактически выбранный движок |
+| `ResolveEngine` | выбранный движок и признак подтверждённого результата; временный fallback не кешируется |
 | `EngineMode` | запрошенный режим (может быть auto) |
 | `SetEngine` | смена движка в рантайме |
 | `AdminDelay` | троттлинг ASP-форм, к REST не применяется |

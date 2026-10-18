@@ -181,6 +181,50 @@ func (c *Client) Engine() EngineMode {
 	return c.resolveEngine(context.Background())
 }
 
+// EngineResolution describes the selected backend and whether the selection is
+// confirmed rather than a temporary fallback after a failed auto probe.
+type EngineResolution struct {
+	Engine     EngineMode `json:"engine"`
+	Definitive bool       `json:"definitive"`
+}
+
+// ResolveEngine resolves the backend using ctx for the auto probe. Definitive
+// is false when a probe fails and legacy is only a temporary fallback. Such a
+// result must not be persisted or pinned with SetEngine: a later call retries.
+// Explicit modes and successful probes are definitive. A confirmed result is a
+// snapshot, not a guarantee that the domain will never migrate to another engine.
+func (c *Client) ResolveEngine(ctx context.Context) EngineResolution {
+	c.engineMu.RLock()
+	mode, resolved := c.engineMode, c.engineResolved
+	c.engineMu.RUnlock()
+
+	if mode != EngineAuto {
+		return EngineResolution{Engine: mode, Definitive: true}
+	}
+	if resolved != "" {
+		return EngineResolution{Engine: resolved, Definitive: true}
+	}
+
+	migrated, definitive := c.probeNewEngine(ctx)
+	detected := EngineLegacy
+	if migrated {
+		detected = EngineNew
+	}
+	if !definitive {
+		return EngineResolution{Engine: detected}
+	}
+
+	c.engineMu.Lock()
+	// A concurrent probe may have stored a verdict already; keep the first one
+	// so the engine cannot flip between requests.
+	if c.engineResolved == "" {
+		c.engineResolved = detected
+	}
+	detected = c.engineResolved
+	c.engineMu.Unlock()
+	return EngineResolution{Engine: detected, Definitive: true}
+}
+
 // SetEngine switches the backend at runtime and discards a cached auto probe.
 func (c *Client) SetEngine(mode EngineMode) {
 	parsed, ok := ParseEngineMode(string(mode))
@@ -199,38 +243,7 @@ func (c *Client) useNewEngine(ctx context.Context) bool {
 }
 
 func (c *Client) resolveEngine(ctx context.Context) EngineMode {
-	c.engineMu.RLock()
-	mode, resolved := c.engineMode, c.engineResolved
-	c.engineMu.RUnlock()
-
-	if mode != EngineAuto {
-		return mode
-	}
-	if resolved != "" {
-		return resolved
-	}
-
-	migrated, definitive := c.probeNewEngine(ctx)
-	detected := EngineLegacy
-	if migrated {
-		detected = EngineNew
-	}
-	if !definitive {
-		// The probe could not reach the API host. Serve this request from the
-		// legacy engine but leave the question open, so a client that outlives a
-		// network blip is not pinned to one engine for the rest of the process.
-		return detected
-	}
-
-	c.engineMu.Lock()
-	// A concurrent probe may have stored a verdict already; keep the first one
-	// so the engine cannot flip between requests.
-	if c.engineResolved == "" {
-		c.engineResolved = detected
-	}
-	detected = c.engineResolved
-	c.engineMu.Unlock()
-	return detected
+	return c.ResolveEngine(ctx).Engine
 }
 
 // probeNewEngine reports whether this domain is served by the new backend.

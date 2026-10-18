@@ -22,6 +22,17 @@ final class Helpers
     }
 
     /**
+     * LevelSectorProgress returns total, done, required and remaining as JSON for a
+     * Level JSON object. A null level or no answer requirement has remaining=null.
+     *
+     * @throws EncxException
+     */
+    public static function levelSectorProgress(string $levelJSON): string
+    {
+        return (string) Ffi::call('encx_level_sector_progress', [$levelJSON]);
+    }
+
+    /**
      * LoginErrorText returns a human-readable login error description.
      *
      * @throws EncxException

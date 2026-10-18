@@ -126,6 +126,26 @@ $checks->run('client creation and domain()', static function () use ($client, $a
     assertSame($addr, $client->domain(), 'domain()');
 });
 
+$checks->run('resolveEngine() distinguishes a confirmed local legacy backend', static function () use ($client): void {
+    $resolution = decodeObject($client->resolveEngine(), 'resolveEngine()');
+    assertSame('legacy', $resolution['engine'] ?? null, 'resolved engine');
+    assertSame(true, $resolution['definitive'] ?? null, 'resolution confidence');
+    assertSame('legacy', $client->engine(), 'existing engine()');
+});
+
+$checks->run('levelSectorProgress() supports implicit codes and unknown levels', static function (): void {
+    $progress = decodeObject(Helpers::levelSectorProgress('{"RequiredSectorsCount":1,"Sectors":[]}'), 'levelSectorProgress()');
+    assertSame(['total' => 1, 'done' => 0, 'required' => 1, 'remaining' => 1], $progress, 'implicit code progress');
+    $unknown = decodeObject(Helpers::levelSectorProgress('null'), 'unknown level progress');
+    assertSame(null, $unknown['remaining'], 'unknown remaining');
+    try {
+        Helpers::levelSectorProgress('{');
+    } catch (EncxException $e) {
+        return;
+    }
+    fail('malformed level did not arrive as EncxException');
+});
+
 $checks->run('login() returns a successful LoginResponse', static function () use ($client): void {
     $response = $client->login(MOCK_LOGIN, MOCK_PASSWORD);
     $decoded = decodeObject($response, 'login()');

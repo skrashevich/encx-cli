@@ -29,6 +29,7 @@ var engineIndependentMethods = map[string]string{
 	"GetAdminGameScenario": "author scenario export plus administrative bonus flags",
 	"APIBaseURL":           "engine selection",
 	"Engine":               "engine selection",
+	"ResolveEngine":        "engine selection with probe confidence",
 	"EngineMode":           "engine selection",
 	"SetEngine":            "engine selection",
 

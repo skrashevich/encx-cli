@@ -161,6 +161,51 @@ go generate ./bindings/...
 cd bindings/php && go run ./cmd/encxphpgen -out . -check
 ```
 
+## Определение движка и прогресс уровня
+
+Существующий `engine()` по-прежнему возвращает строку `legacy` или `new`.
+Для кеширования используйте новый `resolveEngine()`:
+
+```php
+$resolution = json_decode($client->resolveEngine(), true, 512, JSON_THROW_ON_ERROR);
+if ($resolution['definitive']) {
+    // Сохранить подтверждённый выбор в кеше приложения.
+    $engine = $resolution['engine'];
+}
+```
+
+При DNS-сбое, таймауте или другой ошибке проверки результат имеет вид
+`{"engine":"legacy","definitive":false}`. Его нельзя сохранять как найденный
+backend или закреплять через `setEngine()`: следующий вызов должен повторить
+проверку. Явно выбранный режим также имеет `definitive=true`, поэтому при
+сохранении автоопределения учитывайте настройки приложения. Подтверждение
+описывает текущее состояние домена; срок хранения и обновление кеша после
+миграции домена определяет приложение.
+
+`Helpers::levelSectorProgress($levelJSON)` принимает JSON объекта `Level`
+из `getGameModel()`. Результат содержит `total`, `done`, `required`, `remaining`.
+Для уровня с одним проходным кодом без списка секторов:
+
+```php
+$progress = json_decode(
+    Encx\Helpers::levelSectorProgress('{"RequiredSectorsCount":1,"Sectors":[]}'),
+    true,
+    512,
+    JSON_THROW_ON_ERROR
+);
+// {"total":1,"done":0,"required":1,"remaining":1}
+```
+
+Положительные агрегатные счётчики движка имеют приоритет. При отсутствующих
+или нулевых счётчиках используются состояния секторов и условие прохождения.
+Если список секторов скрыт, `total` — нижняя оценка по доступным счётчикам,
+а не гарантия полного числа секторов. Для пройденного или снятого уровня
+с известным требованием к ответам `remaining=0`. Для `null` или уровня без такого требования
+`remaining=null`. Некорректный JSON вызывает `EncxException`.
+
+В Go эти операции доступны как `client.ResolveEngine(ctx)` и
+`level.SectorProgress()`. Они не меняют формат JSON `GameModel`/`Level`.
+
 ## Тесты
 
 ```sh

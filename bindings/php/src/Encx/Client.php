@@ -531,6 +531,17 @@ final class Client
     }
 
     /**
+     * ResolveEngine returns engine and definitive as JSON. Only confirmed auto
+     * selections may be persisted; a temporary legacy fallback must remain retryable.
+     *
+     * @throws EncxException
+     */
+    public function resolveEngine(): string
+    {
+        return (string) Ffi::call('encx_client_resolve_engine', [$this->handle()]);
+    }
+
+    /**
      * SendBonusCode submits a bonus answer via BonusAction.Answer. Returns updated GameModel JSON.
      *
      * @throws EncxException

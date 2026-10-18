@@ -149,6 +149,10 @@ char *encx_client_rename_team(long long handle, long long team_id, char *name);
 // RequestTeamMembership sends a request to join a team by name.
 char *encx_client_request_team_membership(long long handle, char *team_name);
 
+// ResolveEngine returns engine and definitive as JSON. Only confirmed auto
+// selections may be persisted; a temporary legacy fallback must remain retryable.
+char *encx_client_resolve_engine(long long handle);
+
 // SendBonusCode submits a bonus answer via BonusAction.Answer. Returns updated GameModel JSON.
 char *encx_client_send_bonus_code(long long handle, long long game_id, long long level_id, long long level_number, char *code);
 
@@ -182,6 +186,10 @@ char *encx_client_set_team_site(long long handle, long long team_id, char *site)
 
 // EventText returns a human-readable game event status description.
 char *encx_event_text(long long code);
+
+// LevelSectorProgress returns total, done, required and remaining as JSON for a
+// Level JSON object. A null level or no answer requirement has remaining=null.
+char *encx_level_sector_progress(char *level_json);
 
 // LoginErrorText returns a human-readable login error description.
 char *encx_login_error_text(long long code);

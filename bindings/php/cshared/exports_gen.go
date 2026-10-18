@@ -541,6 +541,22 @@ func encx_client_request_team_membership(handle C.longlong, team_name *C.char) *
 	return cEnvelope(rt.OKVoid())
 }
 
+// ResolveEngine returns engine and definitive as JSON. Only confirmed auto
+// selections may be persisted; a temporary legacy fallback must remain retryable.
+//
+//export encx_client_resolve_engine
+func encx_client_resolve_engine(handle C.longlong) *C.char {
+	client, err := rt.Default.Get(int64(handle))
+	if err != nil {
+		return cEnvelope(rt.Fail(err))
+	}
+	value, err := client.ResolveEngine()
+	if err != nil {
+		return cEnvelope(rt.Fail(err))
+	}
+	return cEnvelope(rt.OK(value))
+}
+
 // SendBonusCode submits a bonus answer via BonusAction.Answer. Returns updated GameModel JSON.
 //
 //export encx_client_send_bonus_code
@@ -659,6 +675,18 @@ func encx_client_set_team_site(handle C.longlong, team_id C.longlong, site *C.ch
 //export encx_event_text
 func encx_event_text(code C.longlong) *C.char {
 	return cEnvelope(rt.OK(encxmobile.EventText(int64(code))))
+}
+
+// LevelSectorProgress returns total, done, required and remaining as JSON for a
+// Level JSON object. A null level or no answer requirement has remaining=null.
+//
+//export encx_level_sector_progress
+func encx_level_sector_progress(level_json *C.char) *C.char {
+	value, err := encxmobile.LevelSectorProgress(C.GoString(level_json))
+	if err != nil {
+		return cEnvelope(rt.Fail(err))
+	}
+	return cEnvelope(rt.OK(value))
 }
 
 // LoginErrorText returns a human-readable login error description.

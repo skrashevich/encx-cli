@@ -483,6 +483,13 @@
       ]
     },
     {
+      "goName": "ResolveEngine",
+      "cName": "encx_client_resolve_engine",
+      "kind": "value_err",
+      "valueType": "string",
+      "params": []
+    },
+    {
       "goName": "SendBonusCode",
       "cName": "encx_client_send_bonus_code",
       "kind": "value_err",
@@ -636,6 +643,19 @@
           "name": "code",
           "cName": "code",
           "type": "int64"
+        }
+      ]
+    },
+    {
+      "goName": "LevelSectorProgress",
+      "cName": "encx_level_sector_progress",
+      "kind": "value_err",
+      "valueType": "string",
+      "params": [
+        {
+          "name": "levelJSON",
+          "cName": "level_json",
+          "type": "string"
         }
       ]
     },
