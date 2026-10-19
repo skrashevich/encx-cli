@@ -106,6 +106,7 @@ func (h *webHub) mount(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/v1/llm/polza/connect", h.httpPolzaConnect)
 	mux.HandleFunc("POST /api/v1/llm/polza/check", h.httpPolzaCheck)
 	mux.HandleFunc("GET /api/v1/llm/claude/models", h.httpClaudeModels)
+	mux.HandleFunc("GET /api/v1/llm/codex/models", h.httpCodexModels)
 	mux.HandleFunc("POST /api/v1/llm/claude/login", h.httpClaudeLogin)
 	mux.HandleFunc("POST /api/v1/llm/claude/logout", h.httpClaudeLogout)
 	mux.HandleFunc("GET /api/v1/llm/codex/status", h.httpCodexStatus)

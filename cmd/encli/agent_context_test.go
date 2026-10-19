@@ -38,7 +38,7 @@ func TestAgentBoundsRequestWithoutLosingStoredHistory(t *testing.T) {
 }
 
 func TestAgentRejectsEmptyAndIncompleteResponses(t *testing.T) {
-	for _, reason := range []string{"stop", "length", "error", "canceled"} {
+	for _, reason := range []string{"stop", "error", "canceled"} {
 		t.Run(reason, func(t *testing.T) {
 			p := &scriptedPicoProvider{responses: []*providers.LLMResponse{{FinishReason: reason}}}
 			in := &AgentRunInput{Cfg: &config{}, Session: &llmSession{}, Messages: []llmMessage{{Role: "user", Content: "?"}}}

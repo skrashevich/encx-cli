@@ -1754,6 +1754,77 @@ async function submitPolzaCode(pre) {
   } catch (e) { if (polzaFlow === flow) polzaResult(pre, e.message || String(e), 'err'); }
 }
 
+let codexCatalog = null;
+let codexCatalogRequest = null;
+let codexCatalogEpoch = 0;
+let codexCatalogError = '';
+const CODEX_PANELS = ['llm', 'onboarding-llm'];
+
+function resetCodexModels() {
+  codexCatalogEpoch++;
+  codexCatalog = null;
+  codexCatalogRequest = null;
+  codexCatalogError = '';
+  for (const pre of CODEX_PANELS) {
+    renderCodexModelSelect(pre);
+    $(`${pre}-codex-models-retry`).disabled = false;
+    $(`${pre}-codex-models-status`).textContent = '';
+  }
+}
+
+function renderCodexModelSelect(pre, selected = $(`${pre}-codex-model`).value) {
+  const select = $(`${pre}-codex-model`);
+  const models = codexCatalog?.models || [];
+  selected = String(selected || '').trim().toLowerCase().replace(/^openai\//, '');
+  if (!/^(gpt-|o3|o4)/.test(selected) || selected.includes('/')) selected = '';
+  const wanted = selected || codexCatalog?.default_model || '';
+  const options = models.map(m => `<option value="${escapeHtml(m.id)}">${escapeHtml(m.name || m.id)}</option>`);
+  if (wanted && !models.some(m => m.id === wanted)) {
+    options.unshift(`<option value="${escapeHtml(wanted)}">${escapeHtml(wanted)} — ${codexCatalog ? 'сохранённая, отсутствует в каталоге' : 'текущий выбор'}</option>`);
+  }
+  select.innerHTML = options.join('') || '<option value="">Сначала войдите через ChatGPT</option>';
+  select.value = wanted;
+  select.disabled = !models.length;
+}
+
+async function loadCodexModels(force = false) {
+  if (!state.llm?.codex?.signed_in) return null;
+  if (codexCatalogRequest) return codexCatalogRequest;
+  if (!force && (codexCatalog || codexCatalogError)) return codexCatalog;
+  const epoch = codexCatalogEpoch;
+  for (const pre of CODEX_PANELS) {
+    $(`${pre}-codex-models-status`).textContent = 'Загружаем доступные модели…';
+    $(`${pre}-codex-models-retry`).disabled = true;
+  }
+  codexCatalogRequest = (async () => {
+    try {
+      const data = await api('/llm/codex/models');
+      if (epoch !== codexCatalogEpoch) return null;
+      if (!data.models?.length) throw new Error('Codex не вернул доступных моделей.');
+      codexCatalog = data;
+      codexCatalogError = '';
+      for (const pre of CODEX_PANELS) {
+        renderCodexModelSelect(pre);
+        $(`${pre}-codex-models-status`).textContent = 'Список получен от Codex.';
+      }
+      return data;
+    } catch (e) {
+      if (epoch !== codexCatalogEpoch) return null;
+      codexCatalogError = e.message || String(e);
+      for (const pre of CODEX_PANELS) {
+        $(`${pre}-codex-models-status`).textContent = `${codexCatalogError} Нажмите «Обновить список», чтобы повторить.`;
+      }
+      return null;
+    } finally {
+      if (epoch === codexCatalogEpoch) {
+        codexCatalogRequest = null;
+        for (const pre of CODEX_PANELS) $(`${pre}-codex-models-retry`).disabled = false;
+      }
+    }
+  })();
+  return codexCatalogRequest;
+}
+
 let claudeCatalog = null;
 let claudeCatalogRequest = null;
 let claudeCatalogEpoch = 0;
@@ -1883,6 +1954,7 @@ function bindPolza() {
     $(`${pre}-tab-claude`).addEventListener('click', () => selectTab('claude'));
     $(`${pre}-claude-connect`).addEventListener('click', () => void connectClaude(pre));
     $(`${pre}-claude-logout`).addEventListener('click', () => void logoutClaude());
+    $(`${pre}-codex-models-retry`).addEventListener('click', () => void loadCodexModels(true));
     $(`${pre}-claude-models-retry`).addEventListener('click', () => void loadClaudeModels(true));
     const methods = ['polza', 'codex', 'claude', 'apikey'];
     for (const [index, method] of methods.entries()) {
@@ -2003,6 +2075,7 @@ function applyLLMSnapshot(data, opts = {}) {
     const key = $('llm-api-key');
     if (key) key.value = '';
     for (const pre of ['llm', 'onboarding-llm']) {
+      renderCodexModelSelect(pre, data?.stored?.auth_method === 'codex' ? data.stored.model || '' : '');
       renderClaudeModelSelect(pre, data?.stored?.auth_method === 'claude' ? data.stored.model || '' : '');
     }
   }
@@ -2152,6 +2225,7 @@ function renderLLMSettings() {
   renderCodexStatus(data?.codex);
   renderClaudeStatus(data?.claude);
   if (method === 'claude') void loadClaudeModels();
+  if (method === 'codex') void loadCodexModels();
 
   const pending = !!state.codexFlow;
   for (const target of CODEX_TARGETS) {
@@ -2197,7 +2271,7 @@ function llmFormBody(extra) {
   return {
     auth_method: state.llmAuth,
     base_url: ($('llm-base-url')?.value || '').trim(),
-    model: ($('llm-model')?.value || '').trim(),
+    model: ($(state.llmAuth === 'codex' ? 'llm-codex-model' : 'llm-model')?.value || '').trim(),
     api_key: ($('llm-api-key')?.value || '').trim(),
     clear_api_key: false,
     ...extra,
@@ -2341,6 +2415,7 @@ async function finishCodexFlow(ok, message) {
   // Тост один на всё завершение: #toast — единственный элемент с перезаписью
   // текста, поэтому предупреждение, показанное перед сообщением об успехе,
   // прожило бы нулевое время и оператор увидел бы только «Вход выполнен».
+  if (ok) resetCodexModels();
   const failedToSave = ok ? await persistCodexTransport() : '';
   if (!ok) {
     toast(message || 'Вход через ChatGPT не удался.', true);
@@ -2470,6 +2545,7 @@ async function codexLogout() {
   try {
     const codex = await api('/llm/codex/logout', { method: 'POST' });
     if (state.llm) state.llm.codex = codex;
+    resetCodexModels();
     renderLLMSettings();
     toast('Выход из ChatGPT выполнен.');
     await refreshLLMAfterAuth();
@@ -2644,6 +2720,7 @@ function onboardingLLMTab() {
 function renderOnboardingLLMTabs() {
   const method = onboardingLLMTab();
   if (method === 'claude') void loadClaudeModels();
+  if (method === 'codex') void loadCodexModels();
   for (const kind of ['polza', 'codex', 'claude', 'apikey']) {
     setTabState($(`onboarding-llm-tab-${kind}`), method === kind, false);
     const pane = $(`onboarding-llm-pane-${kind}`);
@@ -2726,9 +2803,8 @@ async function loadOnboardingLLM() {
 }
 
 /** Шаг обязан оставить настройку записанной, а не только показанной, поэтому
- * переход дальше начинается с сохранения. Для вкладки подписки поля
- * OpenAI-провайдера очищаются: подписка их не использует, а сохранённая модель
- * провайдера подменила бы модель подписки. */
+ * переход дальше начинается с сохранения. Модель подписки берётся из её
+ * отдельного списка; endpoint и ключ API для подписки не используются. */
 async function saveOnboardingLLM() {
   if (onboardingLLMTab() === 'claude') return connectClaude('onboarding-llm');
   if (onboardingLLMTab() === 'polza') return connectPolza('onboarding-llm');
@@ -2739,7 +2815,7 @@ async function saveOnboardingLLM() {
       body: {
         auth_method: isCodex ? 'codex' : 'apikey',
         base_url: isCodex ? '' : ($('onboarding-llm-base-url')?.value || '').trim(),
-        model: isCodex ? '' : ($('onboarding-llm-model')?.value || '').trim(),
+        model: ($(isCodex ? 'onboarding-llm-codex-model' : 'onboarding-llm-model')?.value || '').trim(),
         api_key: isCodex ? '' : ($('onboarding-llm-api-key')?.value || '').trim(),
         clear_api_key: false,
       },

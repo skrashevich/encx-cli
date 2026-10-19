@@ -345,7 +345,7 @@ func (p *observedPicoProvider) resultRoom() int {
 
 func (p *observedPicoProvider) GetDefaultModel() string { return p.delegate.GetDefaultModel() }
 
-func (p *observedPicoProvider) Chat(
+func (p *observedPicoProvider) chat(
 	ctx context.Context,
 	messages []providers.Message,
 	toolDefs []providers.ToolDefinition,
@@ -454,12 +454,15 @@ func (p *observedPicoProvider) Chat(
 	if lastErr != nil {
 		return nil, fmt.Errorf("LLM API error after 3 attempts: %w", lastErr)
 	}
+	duration := time.Since(started)
+	// Truncated responses still consume tokens and time, even though none of
+	// their tool calls may reach the execution loop.
+	if response != nil {
+		p.stats.addLLM(duration, response.Usage)
+	}
 	if err := validateAgentResponse(response); err != nil {
 		return nil, err
 	}
-
-	duration := time.Since(started)
-	p.stats.addLLM(duration, response.Usage)
 	// The provider just priced a request whose size we measured, which is the
 	// only tokenizer available here. Without it the byte budget has to assume one
 	// byte per token and spends a quarter of the window.

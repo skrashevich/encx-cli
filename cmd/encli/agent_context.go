@@ -357,7 +357,7 @@ func validateAgentResponse(response *providers.LLMResponse) error {
 	}
 	switch response.FinishReason {
 	case "length", "max_tokens", "max_output_tokens":
-		return fmt.Errorf("модель не завершила ответ: достигнут лимит токенов (finish_reason=%s); изменения инструментов не повторялись", response.FinishReason)
+		return &agentOutputLimitError{reason: response.FinishReason}
 	case "error", "failed", "canceled", "cancelled", "content_filter":
 		return fmt.Errorf("модель не завершила ответ (finish_reason=%s)", response.FinishReason)
 	}

@@ -175,6 +175,14 @@
 
         <section class="llm-pane" id="llm-pane-codex" role="tabpanel" aria-labelledby="llm-tab-codex" tabindex="0" hidden>
           <div class="llm-codex-status" id="llm-codex-status" aria-live="polite"></div>
+          <div class="llm-field">
+            <label class="llm-field-label" for="llm-codex-model">Модель ChatGPT / Codex</label>
+            <div class="llm-field-row">
+              <select id="llm-codex-model" class="llm-input" aria-describedby="llm-codex-models-status" disabled><option value="">Сначала войдите через ChatGPT</option></select>
+              <button type="button" class="btn btn-secondary btn-sm" id="llm-codex-models-retry">Обновить список</button>
+            </div>
+            <p class="llm-hint" id="llm-codex-models-status" role="status" aria-live="polite"></p>
+          </div>
           <div class="llm-actions">
             <button type="button" class="btn btn-primary" id="btn-codex-login">Войти через ChatGPT</button>
             <button type="button" class="btn btn-secondary" id="btn-codex-logout">Выйти</button>
@@ -330,6 +338,14 @@
 
         <section class="llm-pane" id="onboarding-llm-pane-codex" role="tabpanel" aria-labelledby="onboarding-llm-tab-codex" tabindex="0">
             <div class="llm-codex-status" id="onboarding-codex-status" aria-live="polite"></div>
+          <div class="llm-field">
+            <label class="llm-field-label" for="onboarding-llm-codex-model">Модель ChatGPT / Codex</label>
+            <div class="llm-field-row">
+              <select id="onboarding-llm-codex-model" class="llm-input" aria-describedby="onboarding-llm-codex-models-status" disabled><option value="">Сначала войдите через ChatGPT</option></select>
+              <button type="button" class="btn btn-secondary btn-sm" id="onboarding-llm-codex-models-retry">Обновить список</button>
+            </div>
+            <p class="llm-hint" id="onboarding-llm-codex-models-status" role="status" aria-live="polite"></p>
+          </div>
             <div class="llm-actions">
               <button type="button" class="btn btn-primary" id="btn-onboarding-codex-login">Войти через ChatGPT</button>
             </div>

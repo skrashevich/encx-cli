@@ -24,9 +24,9 @@ const authMethodCodex = "codex"
 // LLM_AUTH can be used to opt out of a stored ChatGPT credential.
 const authMethodAPIKey = "apikey"
 
-// defaultCodexModel is what the ChatGPT backend serves. The OpenRouter default
+// defaultCodexModel is a model from the ChatGPT subscription catalog. The OpenRouter default
 // would be rejected by the Codex endpoint, so subscription runs need their own.
-const defaultCodexModel = "gpt-5.5"
+const defaultCodexModel = "gpt-5.6-sol"
 
 // codexAuthFileEnvVar relocates the credential file; tests use it to stay out
 // of the developer's real home directory.
