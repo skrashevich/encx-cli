@@ -162,6 +162,10 @@ func formatToolCallForDisplay(session *llmSession, name, argsJSON string) string
 			return format(fmt.Sprintf(rt("Copying to game#%d", "Копирую в game#%d"), dst))
 		}
 		return format(rt("Copying game", "Копирую игру"))
+	case "admin_players":
+		return format(rt("Reading participation requests and participants", "Читаю заявки и участников"))
+	case "admin_delete_player":
+		return format(fmt.Sprintf(rt("Deleting participation entry #%d", "Удаляю заявку/участника #%d"), getAnyInt(args["player_id"])))
 	case "admin_delete_game":
 		if id := getAnyInt(args["game_id"]); id > 0 {
 			return format(fmt.Sprintf(rt("Deleting game#%d", "Удаляю игру game#%d"), id))
@@ -394,6 +398,11 @@ func formatToolApprovalDetails(session *llmSession, name, argsJSON string) []str
 		if dst := getAnyInt(args["target_game_id"]); dst > 0 {
 			add(fmt.Sprintf("Copy all content to game #%d", dst), fmt.Sprintf("Скопировать всё в игру #%d", dst))
 		}
+	case "admin_players":
+		add("All participation statuses and pages", "Все статусы и страницы заявок и участников")
+	case "admin_delete_player":
+		add(fmt.Sprintf("Remove participation entry #%d and verify", getAnyInt(args["player_id"])),
+			fmt.Sprintf("Удалить заявку/участника #%d и проверить", getAnyInt(args["player_id"])))
 	case "admin_delete_game":
 		if id := getAnyInt(args["game_id"]); id > 0 {
 			add(fmt.Sprintf("Delete game #%d for good (irreversible)", id),

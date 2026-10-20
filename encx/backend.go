@@ -54,6 +54,9 @@ type backend interface {
 	SetTeamSite(ctx context.Context, teamID int, site string) error
 	SetTeamForum(ctx context.Context, teamID int, forum string) error
 
+	AdminGetPlayers(ctx context.Context, gameID int) ([]AdminGamePlayer, error)
+	AdminDeletePlayer(ctx context.Context, gameID, playerID int) error
+
 	// Admin level editor
 	AdminGetGames(ctx context.Context) ([]AdminGame, error)
 	AdminUploadGameImage(ctx context.Context, gameID int, name string, data []byte) (*AdminGameFile, error)

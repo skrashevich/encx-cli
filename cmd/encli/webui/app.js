@@ -13,6 +13,7 @@ const state = {
   es: null,
   streamBuf: '',
   agentRunning: false,
+  messageSending: false,
   agentStatus: { phase: '', message: '' },
   lastActivityAt: 0,
   activityTimer: null,
@@ -1094,7 +1095,9 @@ function syncRunningFromDetail() {
 function refreshSendState() {
   const hasChat = !!state.activeId;
   const busy = state.agentRunning;
-  const canCompose = !busy;
+  const canCompose = !busy && !state.messageSending;
+  const gameSelect = $('field-game-id');
+  if (gameSelect) gameSelect.disabled = !canCompose || gameSelect.options.length <= 1;
   $('message-input').disabled = !canCompose;
   $('btn-send').disabled = !canCompose;
   const attachBtn = $('btn-attach');
@@ -1404,7 +1407,7 @@ async function createChat() {
 async function sendMessage() {
   const input = $('message-input');
   const text = input.value.trim();
-  if (state.agentRunning) return;
+  if (state.agentRunning || state.messageSending) return;
   if (state.attachments.some((a) => a.status === 'uploading')) {
     toast('Файлы ещё загружаются…', true);
     return;
@@ -1412,28 +1415,40 @@ async function sendMessage() {
   const failed = state.attachments.filter((a) => a.status === 'error');
   const ready = state.attachments.filter((a) => a.status === 'done');
   if (!text && ready.length === 0) return;
-  if (!state.activeId) {
-    const id = await ensureActiveChat();
-    if (!id) {
-      return;
-    }
-  }
-  clearToolChips();
+  const selectedContext = { domain: getSelectedDomain(), game_id: getSelectedGameId() };
+  state.messageSending = true;
+  refreshSendState();
   try {
+    if (!state.activeId) {
+      const id = await ensureActiveChat();
+      if (!id) return;
+    }
+    const chatId = state.activeId;
+    // The selectors may contain unsaved changes. Never run against the old
+    // stored game when the user refers to the game visible in the header.
+    const updated = await api(`/chats/${encodeURIComponent(chatId)}`, {
+      method: 'PATCH',
+      body: selectedContext,
+    });
+    if (state.activeId !== chatId) return;
+    state.detail = updated;
+    clearToolChips();
     const files = ready.map((a) => ({ path: a.path, name: a.name }));
-    await api(`/chats/${encodeURIComponent(state.activeId)}/messages`, {
+    await api(`/chats/${encodeURIComponent(chatId)}/messages`, {
       method: 'POST',
       body: { content: text, files },
     });
+    if (state.activeId !== chatId) return;
     input.value = '';
     state.attachments = failed;
     renderAttachments();
     state.agentRunning = true;
     clearToolChips();
     setAgentStatus('start', 'Запуск агента…');
-    startRunningPoll(state.activeId);
+    startRunningPoll(chatId);
     state.streamBuf = '';
-    const detail = await api(`/chats/${encodeURIComponent(state.activeId)}`);
+    const detail = await api(`/chats/${encodeURIComponent(chatId)}`);
+    if (state.activeId !== chatId) return;
     state.detail = detail;
     renderMessages();
     refreshSendState();
@@ -1441,6 +1456,9 @@ async function sendMessage() {
   } catch (e) {
     toast(e.message || String(e), true);
     state.agentRunning = false;
+    refreshSendState();
+  } finally {
+    state.messageSending = false;
     refreshSendState();
   }
 }

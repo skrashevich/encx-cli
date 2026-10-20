@@ -151,6 +151,8 @@ ENCX_LIVE_DOMAIN=demo.en.cx ENCX_LIVE_LOGIN=… ENCX_LIVE_PASSWORD=… \
 | `AdminUpdateAutopass` | форма LevelEditor | PUT .../levels/{levelId}/autopass |
 | `AdminUpdateAnswerBlock` | форма LevelEditor | PUT .../levels/{levelId}/settings (section=blocking) |
 | `AdminUpdateSectorCompletion` | форма LevelEditor | PUT .../levels/{levelId}/settings (section=sectors) |
+| `AdminGetPlayers` | GET GamePlayers.aspx?gid={id}&status=-1; все страницы | GET /games/{id}/players?status=-1; все страницы |
+| `AdminDeletePlayer` | ссылка строки GamePlayers.aspx?action=delete&player={playerId}; повторное чтение списка | POST /games/{id}/players/{playerId}/delete {confirm:true}; повторное чтение списка |
 | `AdminGetTeams` | выпадающий список forMemberID на TaskEdit.aspx | editor-документ (members) |
 
 ## Админка: управление игрой

@@ -1205,11 +1205,11 @@ func (c *Client) legacyAdminDeleteGame(ctx context.Context, gameId int) error {
 		return fmt.Errorf("encx: admin delete game: %w", err)
 	}
 	// The answer is the games list, and a game the engine kept is still on it:
-	// a game that has applications or players cannot be deleted, and saying so
-	// is the only thing that distinguishes that from a deletion.
+	// the list proves refusal, but does not tell us its cause. Requests and
+	// participants must be inspected separately before attributing the refusal.
 	if gameManagerListsGame(body, gameId) {
 		return fmt.Errorf("encx: admin delete game: игра %d осталась в списке после удаления — "+
-			"движок не удаляет игру, в которой есть заявки или участники", gameId)
+			"причина отказа не указана; проверьте заявки и участников через AdminGetPlayers", gameId)
 	}
 	return nil
 }

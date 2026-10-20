@@ -1376,3 +1376,44 @@ func parseHMS(s string) (h, m, sec int) {
 	}
 	return
 }
+
+func cmdAdminPlayers(ctx context.Context, cfg *config, client *encx.Client) {
+	requireGameId(cfg)
+	players, err := client.AdminGetPlayers(ctx, cfg.gameId)
+	if err != nil {
+		fatalEncx("Failed to get participation entries", err)
+	}
+	if cfg.jsonOutput {
+		outputJSON(players)
+		return
+	}
+	if len(players) == 0 {
+		fmt.Println("No participation requests or participants found")
+		return
+	}
+	w := tabwriter.NewWriter(os.Stdout, 0, 4, 2, ' ', 0)
+	fmt.Fprintln(w, "Player ID\tName\tUser ID\tTeam ID\tStatus\tCan delete")
+	for _, player := range players {
+		fmt.Fprintf(w, "%d\t%s\t%d\t%d\t%d\t%t\n", player.PlayerID, player.Name, player.UserID, player.TeamID, player.Status, player.CanDelete)
+	}
+	w.Flush()
+}
+
+func cmdAdminDeletePlayer(ctx context.Context, cfg *config, client *encx.Client, args []string) {
+	requireGameId(cfg)
+	if len(args) != 1 {
+		fatal("Usage: encli admin-delete-player -game-id <id> <player-id> (entry ID from admin-players)")
+	}
+	playerID, err := strconv.Atoi(args[0])
+	if err != nil || playerID <= 0 {
+		fatal("Invalid participation entry ID: %s", args[0])
+	}
+	if err := client.AdminDeletePlayer(ctx, cfg.gameId, playerID); err != nil {
+		fatalEncx("Failed to delete participation entry", err)
+	}
+	if cfg.jsonOutput {
+		outputJSON(map[string]any{"success": true, "game_id": cfg.gameId, "player_id": playerID})
+		return
+	}
+	fmt.Printf("Participation entry %d removed from game %d\n", playerID, cfg.gameId)
+}

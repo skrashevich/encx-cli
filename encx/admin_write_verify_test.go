@@ -143,8 +143,8 @@ func TestAdminCreateTaskStillPostsTheTask(t *testing.T) {
 	}
 }
 
-// Deleting a game answers with the games list either way. A game that still has
-// applications or players is simply kept, and the only way to tell is to look
+// Deleting a game answers with the games list either way. A game with a
+// declined deletion is simply kept, and the only way to tell is to look
 // for it in the answer: a probe game reported "deleted" three times and stayed.
 func TestAdminDeleteGameReportsAGameTheEngineKept(t *testing.T) {
 	t.Parallel()
@@ -158,8 +158,11 @@ func TestAdminDeleteGameReportsAGameTheEngineKept(t *testing.T) {
 	if err == nil {
 		t.Fatal("a game that survived deletion was reported as deleted")
 	}
+	if strings.Contains(err.Error(), "движок не удаляет игру, в которой есть") {
+		t.Fatalf("must not invent the reason for a refused deletion: %v", err)
+	}
 	if !strings.Contains(err.Error(), "заявки") {
-		t.Fatalf("error must name the reason: %v", err)
+		t.Fatalf("error must suggest inspecting participation entries: %v", err)
 	}
 }
 

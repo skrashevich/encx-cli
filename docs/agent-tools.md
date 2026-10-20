@@ -316,3 +316,29 @@ be worse than a fresh read.
 The agent runtime is [PicoClaw](https://github.com/sipeed/picoclaw) (MIT),
 vendored as a Go module dependency. Its MIT notice applies to the PicoClaw code
 this project links against.
+
+## Removing game requests and participants in encli
+
+The CLI and web assistant expose `admin_players(game_id)` to list participation
+requests and registered participants across all statuses and pages. Each result
+includes `player_id`, `name`, `user_id`, `team_id`, `status`, and `can_delete`.
+The `player_id` identifies the participation entry, not the user or team.
+
+When the user asks to remove entries, call `admin_players` first and then
+`admin_delete_player(game_id, player_id)` for the intended deletable entries.
+The delete operation reads the list again to verify that the entry disappeared;
+errors must not be presented as successful removals. Read-only mode exposes the
+list tool and blocks the delete tool.
+
+Equivalent CLI commands:
+
+```sh
+encli admin-players -game-id 83074 -json
+encli admin-delete-player -game-id 83074 <player-id>
+```
+
+Removing entries keeps the game. If the engine refuses to delete a game because
+it has requests or participants, obtain user intent to remove those entries,
+remove them, and then call the separate `admin_delete_game` operation if game
+deletion was requested. A request to add these tools does not authorize removing
+entries from a live game.

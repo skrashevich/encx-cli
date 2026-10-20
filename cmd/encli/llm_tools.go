@@ -265,6 +265,16 @@ func getTools() []llmTool {
 			Parameters:  json.RawMessage(`{"type":"object","properties":{"source_domain":{"type":"string","description":"Source Encounter domain, e.g. moscow.en.cx; defaults to current domain."},"source_game_id":{"type":"integer","description":"Source game ID to copy from"},"target_domain":{"type":"string","description":"Destination Encounter domain, e.g. svk.en.cx; defaults to current domain. Set this when the user specifies a destination on another domain."},"target_game_id":{"type":"integer","description":"Target game ID to copy to"}},"required":["source_game_id","target_game_id"]}`),
 		}},
 		{Type: "function", Function: llmFunction{
+			Name:        "admin_players",
+			Description: "List all participation requests and registered participants for a game, across all statuses and pages. Returns player_id (participation entry ID), name, user_id, team_id, status and can_delete. Read this before removing entries.",
+			Parameters:  json.RawMessage(`{"type":"object","properties":{"game_id":{"type":"integer","description":"Game ID"}},"required":["game_id"]}`),
+		}},
+		{Type: "function", Function: llmFunction{
+			Name:        "admin_delete_player",
+			Description: "Delete one participation request or registered participant, then verify its removal. Only use when the user has asked to remove requests/participants, including explicitly preparing a game for deletion. First list admin_players and use a deletable player_id from that result: it is an entry ID, not a user_id or team_id. The game remains; deleting the game is a separate action.",
+			Parameters:  json.RawMessage(`{"type":"object","properties":{"game_id":{"type":"integer","description":"Game ID"},"player_id":{"type":"integer","description":"Participation entry ID from admin_players, not user_id or team_id"}},"required":["game_id","player_id"]}`),
+		}},
+		{Type: "function", Function: llmFunction{
 			Name:        "admin_delete_game",
 			Description: "Delete a game entirely, together with its levels, bonuses, hints and results. Irreversible: only call it when the user explicitly asked to delete that game. To empty a game but keep it, use admin_wipe_game instead.",
 			Parameters:  json.RawMessage(`{"type":"object","properties":{"game_id":{"type":"integer","description":"Game ID"}},"required":["game_id"]}`),

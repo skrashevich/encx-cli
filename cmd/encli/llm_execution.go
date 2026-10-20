@@ -519,6 +519,23 @@ func executeLLMToolCall(ctx context.Context, cfg *config, client *encx.Client, s
 		result["target_domain"] = targetDomain
 		outputJSON(result)
 
+	case "admin_players":
+		if getInt("game_id") <= 0 {
+			fatal("game_id must be positive")
+		}
+		requireAdminAuth(ctx, cfg, client)
+		cmdAdminPlayers(ctx, cfg, client)
+
+	case "admin_delete_player":
+		if getInt("game_id") <= 0 {
+			fatal("game_id must be positive")
+		}
+		if getInt("player_id") <= 0 {
+			fatal("player_id must be positive")
+		}
+		requireAdminAuth(ctx, cfg, client)
+		cmdAdminDeletePlayer(ctx, cfg, client, []string{strconv.Itoa(getInt("player_id"))})
+
 	case "admin_delete_game":
 		requireAdminAuth(ctx, cfg, client)
 		// The confirmation the CLI asks a human to type is the game id itself,

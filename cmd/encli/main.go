@@ -414,6 +414,12 @@ func main() {
 	case "admin-copy-game":
 		requireAdminAuth(ctx, cfg, client)
 		cmdAdminCopyGame(ctx, cfg, client, positional)
+	case "admin-players":
+		requireAdminAuth(ctx, cfg, client)
+		cmdAdminPlayers(ctx, cfg, client)
+	case "admin-delete-player":
+		requireAdminAuth(ctx, cfg, client)
+		cmdAdminDeletePlayer(ctx, cfg, client, positional)
 	case "admin-delete-game":
 		requireAdminAuth(ctx, cfg, client)
 		cmdAdminDeleteGame(ctx, cfg, client, positional)
@@ -633,6 +639,8 @@ Admin commands (require game editor rights):
   admin-calc-ik            Calculate game coefficient (IK)
   admin-wipe-game          Completely reset a game (delete all content)
   admin-copy-game          Copy entire game to another game
+  admin-players            List participation requests and registered players
+  admin-delete-player      Delete one participation entry by its player ID
   admin-delete-game        Delete a game entirely (irreversible)
   admin-create-game        Create a new game
   admin-game-info          Show game settings
@@ -913,6 +921,13 @@ func printCommandHelp(cmd string) {
 		fmt.Fprintln(os.Stderr, "Usage: encli admin-copy-game -game-id <source-id> <target-id>")
 		fmt.Fprintln(os.Stderr, "  Copy entire game (levels, settings, bonuses, sectors, hints) to target game.")
 		fmt.Fprintln(os.Stderr, "  Target game levels are created automatically if needed.")
+	case "admin-players":
+		fmt.Fprintln(os.Stderr, "Usage: encli admin-players -game-id <id>")
+		fmt.Fprintln(os.Stderr, "  List requests and participants across all statuses and pages, with deletable entry IDs.")
+	case "admin-delete-player":
+		fmt.Fprintln(os.Stderr, "Usage: encli admin-delete-player -game-id <id> <player-id>")
+		fmt.Fprintln(os.Stderr, "  Delete one request or participant and verify its removal. List admin-players first.")
+		fmt.Fprintln(os.Stderr, "  player-id is the participation entry ID, not a user or team ID. The game is kept.")
 	case "admin-delete-game":
 		fmt.Fprintln(os.Stderr, "Usage: encli admin-delete-game -game-id <id> <id>")
 		fmt.Fprintln(os.Stderr, "  Delete the game itself, with every level, bonus, hint, and result in it.")

@@ -58,6 +58,7 @@ func isAdminMutationTool(name string) bool {
 		"admin_wipe_game",
 		"admin_copy_game",
 		"admin_delete_game",
+		"admin_delete_player",
 		"admin_update_game",
 		"admin_not_deliver":
 		return true
