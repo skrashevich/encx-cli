@@ -13,7 +13,7 @@ require (
 	github.com/openai/openai-go/v3 v3.22.0
 	github.com/phpdave11/gofpdf v1.4.3
 	github.com/sipeed/picoclaw v0.3.1
-	github.com/yuin/goldmark v1.8.6
+	github.com/yuin/goldmark v1.8.7
 	golang.org/x/image v0.47.0
 	golang.org/x/mobile v0.0.0-20260908204917-8b95e45f8d3e
 	golang.org/x/net v0.59.0
