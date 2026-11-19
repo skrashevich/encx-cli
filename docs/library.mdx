@@ -1,0 +1,422 @@
+---
+title: Go-библиотека encx
+description: API пакета encx — создание клиента, опции, методы авторизации, игры, статистики и admin API
+---
+
+Пакет `encx` — это Go-библиотека для работы с API движка Encounter. Используйте её для встраивания в собственные приложения.
+
+## Установка
+
+```sh
+go get github.com/skrashevich/encx-cli/encx
+```
+
+Модуль: `github.com/skrashevich/encx-cli`
+
+---
+
+## Создание клиента
+
+### `encx.New`
+
+```go
+func New(domain string, opts ...Option) *Client
+```
+
+Создаёт новый HTTP-клиент для указанного домена Encounter. По умолчанию использует HTTPS, таймаут 15 секунд и стандартный User-Agent.
+
+```go
+import "github.com/skrashevich/encx-cli/encx"
+
+// Минимальный вариант
+client := encx.New("en.cx")
+
+// С опциями
+client := encx.New("tech.en.cx",
+    encx.WithInsecureTLS(),
+    encx.WithTimeout(30 * time.Second),
+    encx.WithLang("ru"),
+)
+```
+
+---
+
+## Опции клиента
+
+Опции передаются в `encx.New(...)` и позволяют настроить поведение клиента.
+
+| Опция | Сигнатура | Описание |
+|---|---|---|
+| `WithInsecureTLS()` | `func() Option` | Отключить проверку TLS-сертификата |
+| `WithHTTP()` | `func() Option` | Использовать HTTP вместо HTTPS |
+| `WithTimeout(d)` | `func(time.Duration) Option` | Установить таймаут HTTP-клиента |
+| `WithUserAgent(ua)` | `func(string) Option` | Установить User-Agent |
+| `WithLang(lang)` | `func(string) Option` | Язык запросов (по умолчанию: `ru`) |
+| `WithDebugLogger(logf)` | `func(func(string, ...any)) Option` | Включить подробное логирование HTTP |
+
+**Примеры:**
+
+```go
+// Для тестового домена с самоподписанным сертификатом
+client := encx.New("tech.en.cx", encx.WithInsecureTLS())
+
+// Для локального прокси
+client := encx.New("localhost:8080",
+    encx.WithHTTP(),
+    encx.WithTimeout(5 * time.Second),
+)
+
+// С отладочным логированием
+client := encx.New("en.cx",
+    encx.WithDebugLogger(func(format string, args ...any) {
+        log.Printf("[encx] "+format, args...)
+    }),
+)
+```
+
+---
+
+## Авторизация
+
+### `Login`
+
+```go
+func (c *Client) Login(ctx context.Context, login, password string, opts ...LoginOptions) (*LoginResponse, error)
+```
+
+Авторизуется на домене. При успехе (`resp.Error == 0`) сессионные cookies сохраняются в cookie jar клиента и используются в последующих запросах.
+
+```go
+resp, err := client.Login(ctx, "mylogin", "mypassword")
+if err != nil {
+    log.Fatal(err)
+}
+if resp.Error != 0 {
+    log.Fatalf("Login error %d: %s", resp.Error, encx.LoginErrorText(resp.Error))
+}
+fmt.Println("Авторизация успешна")
+```
+
+**Коды ошибок** (`resp.Error`):
+
+| Код | Описание |
+|---|---|
+| `0` | Успех |
+| `1` | Неверный логин или пароль |
+| `2` | Аккаунт заблокирован |
+| `3` | Требуется CAPTCHA |
+
+Для получения текста ошибки используйте `encx.LoginErrorText(code)`.
+
+---
+
+## Список игр
+
+### `GetGameList`
+
+```go
+func (c *Client) GetGameList(ctx context.Context, page ...int) (*GameList, error)
+```
+
+Возвращает список активных и предстоящих игр через JSON API. Поддерживает пагинацию.
+
+```go
+// Первая страница
+list, err := client.GetGameList(ctx)
+
+// Вторая страница
+list2, err := client.GetGameList(ctx, 2)
+
+for _, g := range list.ActiveGames {
+    fmt.Printf("%d: %s\n", g.GameID, g.Title)
+}
+for _, g := range list.ComingGames {
+    fmt.Printf("%d: %s (уровней: %d)\n", g.GameID, g.Title, g.LevelNumber)
+}
+```
+
+### `GetDomainGames`
+
+```go
+func (c *Client) GetDomainGames(ctx context.Context) ([]DomainGame, error)
+```
+
+Возвращает список игр через HTML-страницу домена (мобильная версия).
+
+```go
+games, err := client.GetDomainGames(ctx)
+for _, g := range games {
+    fmt.Printf("%d: %s\n", g.GameId, g.Title)
+}
+```
+
+---
+
+## Состояние игры
+
+### `GetGameModel`
+
+```go
+func (c *Client) GetGameModel(ctx context.Context, gameID int) (*GameModel, error)
+```
+
+Возвращает полное текущее состояние игры: уровень, секторы, бонусы, подсказки, сообщения, лог кодов.
+
+```go
+model, err := client.GetGameModel(ctx, 12345)
+if err != nil {
+    log.Fatal(err)
+}
+
+if model.Level != nil {
+    fmt.Printf("Уровень %d: %s\n", model.Level.Number, model.Level.Name)
+
+    // Текст задания
+    if len(model.Level.Tasks) > 0 {
+        fmt.Println(model.Level.Tasks[0].TaskText)
+    }
+
+    // Секторы
+    for _, s := range model.Level.Sectors {
+        status := "[ ]"
+        if s.IsAnswered {
+            status = "[x]"
+        }
+        fmt.Printf("  %s %s\n", status, s.Name)
+    }
+}
+```
+
+---
+
+## Отправка кодов
+
+### `SendCode`
+
+```go
+func (c *Client) SendCode(ctx context.Context, gameID, levelID, levelNumber int, code string) (*GameModel, error)
+```
+
+Отправляет код уровня. Возвращает обновлённое состояние игры с результатом.
+
+```go
+model, err := client.GetGameModel(ctx, 12345)
+if err != nil || model.Level == nil {
+    log.Fatal("нет активного уровня")
+}
+
+result, err := client.SendCode(ctx,
+    12345,
+    model.Level.LevelId,
+    model.Level.Number,
+    "КОД123",
+)
+if err != nil {
+    log.Fatal(err)
+}
+
+if result.EngineAction != nil &&
+    result.EngineAction.LevelAction != nil &&
+    result.EngineAction.LevelAction.IsCorrectAnswer != nil &&
+    *result.EngineAction.LevelAction.IsCorrectAnswer {
+    fmt.Println("Верный код!")
+} else {
+    fmt.Println("Неверный код")
+}
+```
+
+### `SendBonusCode`
+
+```go
+func (c *Client) SendBonusCode(ctx context.Context, gameID, levelID, levelNumber int, code string) (*GameModel, error)
+```
+
+Отправляет бонусный код. Аналогично `SendCode`.
+
+---
+
+## Подсказки
+
+### `GetPenaltyHint`
+
+```go
+func (c *Client) GetPenaltyHint(ctx context.Context, gameID, hintID int) (*GameModel, error)
+```
+
+Запрашивает штрафную подсказку по её ID. Добавляет штрафное время к результату.
+
+```go
+model, err := client.GetPenaltyHint(ctx, 12345, 42)
+```
+
+---
+
+## Статистика
+
+### `GetGameStatistics`
+
+```go
+func (c *Client) GetGameStatistics(ctx context.Context, gameID int) (*GameStatistics, error)
+```
+
+Возвращает полную статистику игры: уровни, команды, результаты.
+
+```go
+stats, err := client.GetGameStatistics(ctx, 12345)
+if err != nil {
+    log.Fatal(err)
+}
+
+if stats.Game != nil {
+    fmt.Printf("Игра: %s, уровней: %d\n", stats.Game.Title, len(stats.Levels))
+    for _, l := range stats.Levels {
+        fmt.Printf("  Уровень %d: %s\n", l.LevelNumber, l.LevelName)
+    }
+}
+```
+
+---
+
+## Вступление в игру
+
+### `EnterGame`
+
+```go
+func (c *Client) EnterGame(ctx context.Context, gameID int) (string, error)
+```
+
+Подаёт заявку на вступление в игру.
+
+---
+
+## Управление сессией
+
+Клиент хранит cookies в памяти. Для сохранения сессии между запусками используйте `ExportCookies` и `ImportCookies`.
+
+```go
+// Сохранить сессию
+data, err := client.ExportCookies()
+if err == nil {
+    os.WriteFile("session.json", data, 0600)
+}
+
+// Восстановить сессию
+data, _ := os.ReadFile("session.json")
+client.ImportCookies(data)
+```
+
+---
+
+## Полный пример
+
+```go
+package main
+
+import (
+    "context"
+    "fmt"
+    "log"
+    "time"
+
+    "github.com/skrashevich/encx-cli/encx"
+)
+
+func main() {
+    client := encx.New("tech.en.cx",
+        encx.WithInsecureTLS(),
+        encx.WithTimeout(30 * time.Second),
+    )
+    ctx := context.Background()
+
+    // Авторизация
+    resp, err := client.Login(ctx, "mylogin", "mypassword")
+    if err != nil {
+        log.Fatal(err)
+    }
+    if resp.Error != 0 {
+        log.Fatalf("Login error %d: %s", resp.Error, encx.LoginErrorText(resp.Error))
+    }
+
+    // Список игр
+    list, err := client.GetGameList(ctx)
+    if err != nil {
+        log.Fatal(err)
+    }
+    for _, g := range list.ActiveGames {
+        fmt.Printf("Активная игра: %d — %s\n", g.GameID, g.Title)
+    }
+
+    // Состояние игры
+    model, err := client.GetGameModel(ctx, 12345)
+    if err != nil {
+        log.Fatal(err)
+    }
+    if model.Level != nil {
+        fmt.Printf("Текущий уровень: %d — %s\n", model.Level.Number, model.Level.Name)
+
+        // Отправить код
+        result, err := client.SendCode(ctx,
+            12345,
+            model.Level.LevelId,
+            model.Level.Number,
+            "КОД123",
+        )
+        if err != nil {
+            log.Fatal(err)
+        }
+        if result.EngineAction != nil &&
+            result.EngineAction.LevelAction != nil &&
+            result.EngineAction.LevelAction.IsCorrectAnswer != nil &&
+            *result.EngineAction.LevelAction.IsCorrectAnswer {
+            fmt.Println("Верный код!")
+        }
+    }
+
+    // Статистика
+    stats, err := client.GetGameStatistics(ctx, 12345)
+    if err != nil {
+        log.Fatal(err)
+    }
+    if stats.Game != nil {
+        fmt.Printf("Статистика: %s, уровней: %d\n", stats.Game.Title, len(stats.Levels))
+    }
+}
+```
+
+---
+
+## Admin API
+
+Пакет `encx` также предоставляет методы для управления играми (требуют прав редактора). Полный список методов — в [исходном коде](https://github.com/skrashevich/encx-cli/blob/main/encx/admin.go).
+
+Основные методы:
+
+| Метод | Описание |
+|---|---|
+| `AdminGetLevels` | Список уровней с ID |
+| `AdminCreateLevels` | Создание уровней |
+| `AdminDeleteLevel` | Удаление уровня |
+| `AdminRenameLevels` | Переименование уровней |
+| `AdminCreateBonus` | Создание бонуса |
+| `AdminDeleteBonus` | Удаление бонуса |
+| `AdminCreateSector` | Создание сектора |
+| `AdminDeleteSector` | Удаление сектора |
+| `AdminCreateHint` | Создание подсказки |
+| `AdminDeleteHint` | Удаление подсказки |
+| `AdminCreateTask` | Создание задания |
+| `AdminGetGameInfo` | Чтение настроек игры |
+| `AdminUpdateGameInfo` | Обновление настроек игры |
+| `AdminWipeGame` | Полная очистка игры |
+| `AdminCopyGame` | Копирование игры |
+
+---
+
+## Тесты
+
+Интеграционные тесты работают с доменом `tech.en.cx`:
+
+```sh
+ENCX_INTEGRATION=1 go test ./encx/ -v -count=1
+```
+
+Без переменной `ENCX_INTEGRATION` запускаются только юнит-тесты.

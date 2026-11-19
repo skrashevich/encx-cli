@@ -1,0 +1,392 @@
+---
+title: Команды CLI
+description: Полный справочник команд encli — авторизация, игры, уровни, коды, статистика
+---
+
+## Глобальные флаги
+
+Все команды поддерживают следующие флаги. Большинство из них можно задать через переменные окружения.
+
+| Флаг | Переменная окружения | Описание |
+|---|---|---|
+| `-domain` | `ENCX_DOMAIN` | Домен Encounter (по умолчанию: `tech.en.cx`) |
+| `-login` | `ENCX_LOGIN` | Логин |
+| `-password` | `ENCX_PASSWORD` | Пароль |
+| `-game-id` | `ENCX_GAME_ID` | ID игры |
+| `-insecure` | `ENCX_INSECURE` | Пропустить проверку TLS-сертификата |
+| `-http` | — | Использовать HTTP вместо HTTPS |
+| `-json` | — | Выводить результат в формате JSON |
+| `-debug` | `ENCX_DEBUG` | Включить отладочный вывод в `stderr` |
+
+<Tip>
+  Задайте переменные окружения один раз, чтобы не повторять флаги в каждой команде:
+  ```sh
+  export ENCX_DOMAIN=tech.en.cx
+  export ENCX_LOGIN=mylogin
+  export ENCX_GAME_ID=12345
+  ```
+</Tip>
+
+---
+
+## Авторизация
+
+### `login`
+
+Авторизуется на домене и сохраняет сессию в `~/.config/encli/<domain>.json`.
+
+```sh
+encli login [-domain <domain>] [-login <user>] [-password <pass>] [-insecure] [-http]
+```
+
+Если логин или пароль не переданы, команда запросит их интерактивно (пароль вводится без эха).
+
+**Примеры:**
+
+```sh
+# Интерактивный ввод
+encli login -domain tech.en.cx -insecure
+
+# Через флаги
+encli login -domain en.cx -login mylogin -password mypassword
+
+# Через переменные окружения
+ENCX_LOGIN=mylogin ENCX_PASSWORD=mypassword encli login
+```
+
+---
+
+### `logout`
+
+Удаляет сохранённую сессию для указанного домена.
+
+```sh
+encli logout [-domain <domain>]
+```
+
+---
+
+## Список игр
+
+### `games`
+
+Показывает список игр, доступных на домене, через HTML-страницу.
+
+```sh
+encli games [-domain <domain>]
+```
+
+### `game-list`
+
+Показывает список игр с полными деталями через JSON API. Возвращает активные и предстоящие игры.
+
+```sh
+encli game-list [-domain <domain>]
+```
+
+**Пример вывода:**
+
+```
+=== Active Games ===
+ID    Title              Type    Zone
+--    -----              ----    ----
+12345 Ночной квест       team    quest
+
+=== Coming Games ===
+ID    Title              Type    Zone    Start
+--    -----              ----    ----    -----
+12346 Брейнштурм         team    brainstorm  15.06.2025 20:00
+```
+
+---
+
+## Состояние игры
+
+### `status`
+
+Показывает полное текущее состояние игры: уровень, секторы, бонусы, подсказки, сообщения и последние попытки ввода кодов.
+
+```sh
+encli status -game-id <id>
+```
+
+**Пример:**
+
+```sh
+encli status -game-id 12345
+```
+
+```
+Game:    Ночной квест (ID: 12345)
+Team:    Команда А (ID: 678)
+Player:  mylogin (ID: 999)
+Event:   Normal (0)
+
+Level 3/10: Загадочный перекрёсток
+
+Timer:   1h23m45s remaining (timeout award: 900s)
+Sectors: 2/5 closed (need: 3)
+
+Task:    Найдите место, где встречаются три дороги...
+
+Sectors:
+  [x] Сектор А (КОД1)
+  [x] Сектор Б (КОД2)
+  [ ] Сектор В
+  [ ] Сектор Г
+  [ ] Сектор Д
+
+Hints:
+  #1: Ищите у старого фонаря
+  #2: [opens in 15m30s]
+```
+
+---
+
+### `level`
+
+Выводит текст задания текущего уровня.
+
+```sh
+encli level -game-id <id>
+```
+
+---
+
+### `levels`
+
+Показывает все уровни игры с их статусом (пройден / пропущен / текущий).
+
+```sh
+encli levels -game-id <id>
+```
+
+**Пример вывода:**
+
+```
+Game: Ночной квест (10 levels)
+
+  [v] 1. Старый город
+  [v] 2. Набережная
+  [ ] 3. Загадочный перекрёсток  <-- current
+  [ ] 4. Парк культуры
+  ...
+```
+
+---
+
+### `bonuses`
+
+Показывает бонусы текущего уровня с их статусом и таймерами.
+
+```sh
+encli bonuses -game-id <id>
+```
+
+---
+
+### `hints`
+
+Показывает обычные и штрафные подсказки текущего уровня.
+
+```sh
+encli hints -game-id <id>
+```
+
+Обычные подсказки открываются автоматически по таймеру. Штрафные подсказки запрашиваются командой `hint` и добавляют штрафное время.
+
+---
+
+### `sectors`
+
+Показывает секторы текущего уровня с их статусом.
+
+```sh
+encli sectors -game-id <id>
+```
+
+---
+
+### `log`
+
+Показывает лог всех попыток ввода кодов на текущем уровне.
+
+```sh
+encli log -game-id <id>
+```
+
+**Пример вывода:**
+
+```
+Level 3: Загадочный перекрёсток — Code log (5 entries)
+
+Time              Player    Code     Type   Result
+----              ------    ----     ----   ------
+15:23:01          mylogin   КОД1     level  CORRECT
+15:24:15          mylogin   НЕВЕРНО  level  wrong
+15:25:00          partner   КОД2     level  CORRECT
+```
+
+---
+
+### `messages`
+
+Показывает сообщения от организаторов игры.
+
+```sh
+encli messages -game-id <id>
+```
+
+---
+
+## Действия в игре
+
+### `enter`
+
+Подаёт заявку на вступление в игру.
+
+```sh
+encli enter -game-id <id>
+```
+
+---
+
+### `send-code`
+
+Отправляет код уровня. Автоматически получает текущий уровень и отправляет код.
+
+```sh
+encli send-code -game-id <id> <код>
+```
+
+**Примеры:**
+
+```sh
+encli send-code -game-id 12345 "КОД123"
+# CORRECT!
+
+encli send-code -game-id 12345 "НЕВЕРНЫЙ"
+# Wrong code
+```
+
+---
+
+### `send-bonus`
+
+Отправляет бонусный код.
+
+```sh
+encli send-bonus -game-id <id> <код>
+```
+
+---
+
+### `hint`
+
+Запрашивает штрафную подсказку по её ID. ID подсказки можно узнать из вывода команды `hints`.
+
+```sh
+encli hint -game-id <id> <hint-id>
+```
+
+<Warning>
+  Запрос штрафной подсказки добавляет штрафное время к результату команды. Действие необратимо.
+</Warning>
+
+---
+
+## Статистика и профиль
+
+### `game-stats`
+
+Показывает полную статистику игры: уровни, команды, результаты.
+
+```sh
+encli game-stats -game-id <id>
+```
+
+**Пример вывода:**
+
+```
+Game:     Ночной квест (ID: 12345)
+Type:     team / quest
+Levels:   10
+Status:   started=true finished=false inProgress=true
+
+Levels:
+#   Name                  Dismissed  Players
+-   ----                  ---------  -------
+1   Старый город          false      42
+2   Набережная            false      38
+...
+
+Results:
+Level  Team        Player    Time
+-----  ----        ------    ----
+1      Команда А   mylogin   0h15m30s
+```
+
+---
+
+### `profile`
+
+Показывает профиль текущего авторизованного пользователя: логин, имя, ранг, команда, очки.
+
+```sh
+encli profile
+```
+
+---
+
+## JSON-вывод
+
+Любая команда поддерживает флаг `-json` для получения результата в формате JSON. Удобно для скриптов и интеграций.
+
+```sh
+encli status -game-id 12345 -json
+encli game-list -json
+encli levels -game-id 12345 -json
+```
+
+---
+
+## Режим отладки
+
+Флаг `-debug` включает подробный вывод в `stderr`: разбор аргументов, шаги агента, HTTP-запросы с таймингами.
+
+```sh
+encli -debug status -game-id 12345
+```
+
+```
+[debug 15:23:01.123] parsed command=status domain=tech.en.cx game_id=12345 ...
+[debug 15:23:01.124] encx http start: POST https://tech.en.cx/gameengines/encounter/play/12345
+[debug 15:23:01.456] encx http done: POST ... status=200 duration=332ms
+```
+
+---
+
+## Типичный рабочий поток
+
+```sh
+# 1. Авторизация
+encli login -domain tech.en.cx -insecure
+
+# 2. Найти нужную игру
+encli game-list
+
+# 3. Посмотреть статус
+encli status -game-id 12345
+
+# 4. Прочитать задание
+encli level -game-id 12345
+
+# 5. Отправить код
+encli send-code -game-id 12345 "НАЙДЕННЫЙ_КОД"
+
+# 6. Проверить прогресс
+encli sectors -game-id 12345
+
+# 7. Выйти
+encli logout
+```

@@ -1,0 +1,44 @@
+{
+  "name": "encx-cli",
+  "colors": {
+    "primary": "#2563EB",
+    "light": "#60A5FA",
+    "dark": "#1D4ED8"
+  },
+  "navigation": [
+    {
+      "group": "Начало работы",
+      "pages": [
+        "docs/introduction",
+        "docs/quickstart"
+      ]
+    },
+    {
+      "group": "Справочник CLI",
+      "pages": [
+        "docs/cli-installation",
+        "docs/cli-usage",
+        "docs/cli-admin"
+      ]
+    },
+    {
+      "group": "Библиотека",
+      "pages": [
+        "docs/library"
+      ]
+    },
+    {
+      "group": "AI-функции",
+      "pages": [
+        "docs/llm-agent",
+        "docs/web-ui"
+      ]
+    },
+    {
+      "group": "Справочник",
+      "pages": [
+        "docs/configuration"
+      ]
+    }
+  ]
+}

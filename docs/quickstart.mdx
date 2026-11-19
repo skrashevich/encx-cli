@@ -1,0 +1,193 @@
+---
+title: Быстрый старт
+description: Установка encli и первые шаги — логин, список игр, отправка кода
+---
+
+## Установка
+
+Выберите удобный способ установки:
+
+<Tabs>
+  <Tab title="go install">
+    ```sh
+    go install github.com/skrashevich/encx-cli/cmd/encli@latest
+    ```
+    Требуется Go 1.21+. Бинарник появится в `$GOPATH/bin/encli`.
+  </Tab>
+  <Tab title="Готовый бинарник">
+    Скачайте подписанный бинарник для вашей платформы со страницы [Releases](https://github.com/skrashevich/encx-cli/releases).
+
+    macOS-бинарники подписаны сертификатом Developer ID и нотаризованы Apple — Gatekeeper не покажет предупреждение.
+
+    ```sh
+    # macOS / Linux: сделайте файл исполняемым
+    chmod +x encli
+    mv encli /usr/local/bin/
+    ```
+  </Tab>
+  <Tab title="Docker">
+    ```sh
+    docker run --rm ghcr.io/skrashevich/encx-cli -v
+    ```
+    Образ доступен на GitHub Container Registry: `ghcr.io/skrashevich/encx-cli`.
+  </Tab>
+  <Tab title="Библиотека">
+    Если нужна только Go-библиотека без CLI:
+    ```sh
+    go get github.com/skrashevich/encx-cli/encx
+    ```
+  </Tab>
+</Tabs>
+
+## Первые шаги с CLI
+
+### 1. Авторизация
+
+```sh
+encli login -domain tech.en.cx -insecure
+```
+
+Команда запросит логин и пароль в интерактивном режиме. Сессия сохраняется в `~/.config/encli/<domain>.json` и используется автоматически при последующих вызовах.
+
+<Tip>
+  Флаг `-insecure` нужен для тестового домена `tech.en.cx`. На боевых доменах он не требуется.
+</Tip>
+
+### 2. Список игр
+
+```sh
+# Через JSON API (подробная информация)
+encli game-list
+
+# Через HTML-страницу домена
+encli games
+```
+
+### 3. Статус игры
+
+```sh
+encli status -game-id 12345
+```
+
+Выводит текущий уровень, секторы, бонусы, подсказки и последние попытки ввода кодов.
+
+### 4. Задание уровня
+
+```sh
+encli level -game-id 12345
+```
+
+### 5. Отправка кода
+
+```sh
+encli send-code -game-id 12345 "КОД123"
+```
+
+Ответ: `CORRECT!` или `Wrong code`.
+
+### 6. Выход
+
+```sh
+encli logout
+```
+
+## Минимальный пример на Go
+
+Ниже полный пример: создаём клиент, логинимся, смотрим список игр, читаем состояние и отправляем код.
+
+```go
+package main
+
+import (
+    "context"
+    "fmt"
+    "log"
+
+    "github.com/skrashevich/encx-cli/encx"
+)
+
+func main() {
+    client := encx.New("tech.en.cx", encx.WithInsecureTLS())
+    ctx := context.Background()
+
+    // Авторизация
+    resp, err := client.Login(ctx, "user", "password")
+    if err != nil {
+        log.Fatal(err)
+    }
+    if resp.Error != 0 {
+        log.Fatalf("Login error %d: %s", resp.Error, encx.LoginErrorText(resp.Error))
+    }
+
+    // Список игр
+    list, _ := client.GetGameList(ctx)
+    for _, g := range list.ActiveGames {
+        fmt.Printf("%d: %s\n", g.GameID, g.Title)
+    }
+
+    // Состояние игры
+    model, _ := client.GetGameModel(ctx, 12345)
+    if model.Level != nil {
+        fmt.Printf("Уровень %d: %s\n", model.Level.Number, model.Level.Name)
+    }
+
+    // Отправка кода
+    result, _ := client.SendCode(ctx, 12345, model.Level.LevelId, model.Level.Number, "КОД123")
+    if result.EngineAction != nil &&
+        result.EngineAction.LevelAction != nil &&
+        result.EngineAction.LevelAction.IsCorrectAnswer != nil &&
+        *result.EngineAction.LevelAction.IsCorrectAnswer {
+        fmt.Println("Верный код!")
+    }
+}
+```
+
+## Быстрый старт с LLM-агентом
+
+Если у вас есть ключ [OpenRouter](https://openrouter.ai/keys), агент может управлять игрой на естественном языке:
+
+```sh
+export LLM_API_KEY=sk-or-v1-...
+export LLM_MODEL=anthropic/claude-sonnet-4
+
+# Создать 3 уровня с бонусами
+encli -game-id 12345 --llm "создай 3 уровня с бонусами и подсказками"
+
+# Только чтение — без изменений в игре
+encli -readonly -game-id 12345 --llm "покажи содержимое всех уровней"
+```
+
+Подробнее — в разделе [LLM-агент](/docs/llm-agent).
+
+## Быстрый старт с Docker
+
+```sh
+# Список игр без авторизации
+docker run --rm ghcr.io/skrashevich/encx-cli games -domain tech.en.cx
+
+# LLM-режим через переменные окружения
+docker run --rm \
+  -e ENCX_LOGIN=user \
+  -e ENCX_PASSWORD=secret \
+  -e ENCX_GAME_ID=12345 \
+  -e LLM_API_KEY=sk-or-v1-... \
+  -e LLM_MODEL=anthropic/claude-sonnet-4 \
+  ghcr.io/skrashevich/encx-cli -game-id 12345 --llm "покажи уровни"
+```
+
+## Следующие шаги
+
+<CardGroup cols={2}>
+  <Card title="Установка CLI" icon="download" href="/docs/cli-installation">
+    Подробные инструкции по установке для всех платформ
+  </Card>
+  <Card title="Команды CLI" icon="terminal" href="/docs/cli-usage">
+    Полный справочник всех команд encli
+  </Card>
+  <Card title="Библиотека encx" icon="code" href="/docs/library">
+    API Go-библиотеки для встраивания в свой код
+  </Card>
+  <Card title="LLM-агент" icon="bot" href="/docs/llm-agent">
+    Управление игрой на естественном языке
+  </Card>
+</CardGroup>
